@@ -1,16 +1,16 @@
 # SeoulTransitPlatform
 
-## 1. Overview
-## 2. Architecture
-## 3. Data Pipeline
-## 4. Core Features
-## 5. Tech Stack
-## 6. System Design Decisions
-## 7. API Examples
-## 8. Prediction System
-## 9. Data Quality & Correction Strategy
-## 10. Deployment (GCP)
-## 11. Future Work
+**1. Overview**
+**2. Architecture**
+**3. Data Pipeline**
+**4. Core Features**
+**5. Tech Stack**
+**6. System Design Decisions**
+**7. API Examples**
+**8. Prediction System**
+**9. Data Quality & Correction Strategy**
+**10. Deployment (GCP)**
+**11. Future Work**
 
 ## 1. Overview
 SeoulTransitPlatform is a geospatial data platform designed to analyze urban mobility patterns in Seoul Metropolitan Area.
