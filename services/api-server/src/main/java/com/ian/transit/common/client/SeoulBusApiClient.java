@@ -15,7 +15,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * Client for Seoul bus stop master API
+ * Client for Seoul bus stop master API.
+ * 
+ * This client is used only for correction support because external API calls are slower
+ * and less reliable than local curated tables.
  */
 @Component
 @RequiredArgsConstructor
@@ -33,7 +36,10 @@ public class SeoulBusApiClient {
     private String apiUrl;
 
     /**
-     * Get standard stop code by ARS code
+     * Get standard stop code by ARS code.
+     * 
+     * External API failure returns null instead of throwing because one failed lookup
+     * should not stop the entire correction pipeline.
      */
     @Cacheable(value = "arsStandardCode", key = "#arsCode")
     public String getStandardCodeByArs(String arsCode) {
