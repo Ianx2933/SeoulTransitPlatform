@@ -1,0 +1,19 @@
+{
+  "dayOfWeek": 1.0,
+  "isWeekend": 0.0,
+  "dayGroup": 0.0,
+  "isHoliday": 0.0,
+  "month": 10.0,
+  "routeCode": 241.0,
+  "stopCode": 5830.0,
+  "prevWeek": 0.0,
+  "prevMonth": 0.0,
+  "rolling7": 228.0,
+  "rolling14": 228.0,
+  "routeDailyTotal": 28980.0,
+  "routeRolling7": 43392.0,
+  "stopMean": 512.3529411764706,
+  "unknownRouteCode": -1,
+  "unknownStopCode": -1,
+  "targetTransform": "log1p"
+}

@@ -1,0 +1,16 @@
+[
+  "dayOfWeek",
+  "isWeekend",
+  "dayGroup",
+  "isHoliday",
+  "month",
+  "routeCode",
+  "stopCode",
+  "prevWeek",
+  "prevMonth",
+  "rolling7",
+  "rolling14",
+  "routeDailyTotal",
+  "routeRolling7",
+  "stopMean"
+]

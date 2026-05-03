@@ -1,0 +1,8 @@
+flask
+joblib
+pandas
+xgboost
+scikit-learn
+python-dotenv
+psycopg2-binary
+sqlalchemy
