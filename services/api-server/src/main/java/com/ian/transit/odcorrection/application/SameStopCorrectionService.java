@@ -8,8 +8,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Handles same-stop OD correction logic
+ * Handles same stop OD correction logic.
+ * 
+ * Same stop OD is usually not a significant trip in route-level congestion analysis,
+ * so it is shifted to the next valid stop when sequence evidence is available. 
  */
+
 @Service
 @RequiredArgsConstructor
 public class SameStopCorrectionService {

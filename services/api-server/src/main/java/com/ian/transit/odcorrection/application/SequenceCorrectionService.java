@@ -8,8 +8,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Handles sequence-related correction logic
+ * Handles sequence-related correction logic.
+ * 
+ * Stop sequence is required to reconstruct in-vehicle occupancy and section congestion.
  */
+
 @Service
 @RequiredArgsConstructor
 public class SequenceCorrectionService {

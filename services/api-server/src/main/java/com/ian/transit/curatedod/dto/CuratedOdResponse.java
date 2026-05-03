@@ -1,7 +1,10 @@
 package com.ian.transit.curatedod.dto;
 
 /**
- * Response DTO for curated OD records
+ * Response DTO for curated OD records after correction and normalisation.
+ *
+ * This response intentionally exposes route, boarding stop, and alighting stop fields
+ * because OD analysis depends on explicit origin-destination structure.
  */
 public record CuratedOdResponse(
     String 기준일자,

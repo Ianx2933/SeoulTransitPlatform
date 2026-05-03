@@ -7,8 +7,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Handles duplicate aggregation after correction
+ * Handles duplicate aggregation after correction.
+ * 
+ * Multiple correction steps can merge previously separate rows into the same OD key,
+ * so passenger counts must be summed to preserve total demand.
  */
+
 @Service
 @RequiredArgsConstructor
 public class DeduplicationService {

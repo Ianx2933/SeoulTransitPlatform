@@ -9,8 +9,12 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 /**
- * Query-only repository for OD correction workflows
+ * Query-only repository for OD correction workflows.
+ * 
+ * These queries are used to detect missing codes, virtual-stop residues,
+ * and suspicious route structures before/after correction.
  */
+
 public interface OdCorrectionQueryRepository extends JpaRepository<CuratedOdRecord, CuratedOdRecordId> {
 
     List<CuratedOdRecord> findBy기준일자And승차정류장표준코드IsNull(String 기준일자);

@@ -11,7 +11,10 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * Controller for curated OD serving APIs.
+ * Controller for public curated OD serving APIs.
+ * 
+ * These endpoints expose corrected OD data for analysis and visualization,
+ * while correction operations are kept in the OD correction module.
  */
 @RestController
 @RequestMapping("/api/curated-od")

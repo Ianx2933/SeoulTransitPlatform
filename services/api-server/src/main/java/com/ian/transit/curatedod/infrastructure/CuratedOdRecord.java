@@ -9,7 +9,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * Curated OD read model entity.
+ * Curated OD read model mapped directly to analysis_table_final.
+ * 
+ * This entity is intentionally used as a read model because the table is already corrected,
+ * normalised, and optimised for API serving.
+ * 
+ * Field names follow the source schema to reduce mapping ambiguity during validation.
  */
 
 @Entity

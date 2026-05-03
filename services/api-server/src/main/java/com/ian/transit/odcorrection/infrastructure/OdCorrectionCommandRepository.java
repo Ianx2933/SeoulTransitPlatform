@@ -8,8 +8,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 /**
- * Command/update repository for JPQL and native update statements
+ * Command and update repository for JPQL and native update statements.
+ * 
+ * Correction commands are separated from query repositories to make data-changing
+ * operations explicit and easier to review.
  */
+
 public interface OdCorrectionCommandRepository extends JpaRepository<CuratedOdRecord, CuratedOdRecordId> {
 
     @Modifying

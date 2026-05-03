@@ -5,13 +5,23 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * JDBC-heavy repository for long SQL and temp-table operations
+ * JDBC-heavy repository for long SQL and temporarytable operations.
+ * 
+ * JdbcTemplate is used here because deduplication and bulk correction require
+ * PostgreSQL-specific SQL, temporary tables, and set-based operations.
  */
+
 @Repository
 @RequiredArgsConstructor
 public class OdCorrectionJdbcRepository {
 
     private final JdbcTemplate jdbcTemplate;
+
+/**
+ * Aggregates duplicated OD rows after correction while preserving total passengers.
+ *
+ * A temporary table is used to avoid row-by-row updates and keep the operation set based in PostgreSQL.
+ */
 
     public int deduplicateAndSum(String 기준일자) {
         Integer duplicateCount = jdbcTemplate.queryForObject(

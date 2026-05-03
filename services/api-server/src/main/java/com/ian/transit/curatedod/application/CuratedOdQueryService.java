@@ -12,7 +12,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Query service for curated OD serving APIs
+ * Query service for curated OD serving APIs.
+ * 
+ * This service keeps serving logic separate from correction logic so that public API
+ * reads do not accidentally mutate curated data.
  */
 @Service
 @RequiredArgsConstructor
@@ -22,6 +25,10 @@ public class CuratedOdQueryService {
     private static final int MAX_LIMIT = 1000;
 
     private final CuratedOdQueryRepository queryRepository;
+
+/**
+ * Caps query size to prevent oversized API responses and accidental heavy queries.
+ */
 
     public List<CuratedOdResponse> findByDate(String 기준일자, Integer limit) {
         int safeLimit = normalizeLimit(limit);

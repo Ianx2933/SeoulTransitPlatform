@@ -11,7 +11,11 @@ import java.util.List;
 
 /**
  * Administrative controller for OD correction workflows.
+ * 
+ * These endpoints are separated from public serving APIs because correction changes
+ * curated data and should be used only in controlled operational workflows.
  */
+
 @RestController
 @RequestMapping("/api/od-correction")
 @RequiredArgsConstructor

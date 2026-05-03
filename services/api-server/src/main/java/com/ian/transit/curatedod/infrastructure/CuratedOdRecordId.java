@@ -5,7 +5,10 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 /**
- * Composite identifier for CuratedOdRecord.
+ * Composite identifier for one OD relation within a route and date.
+ * 
+ * Date + route + boarding ARS + alighting ARS is used because OD data is naturally identified
+ * by origin-destination pairs, not by a generated surrogate key.
  */
 
 @NoArgsConstructor

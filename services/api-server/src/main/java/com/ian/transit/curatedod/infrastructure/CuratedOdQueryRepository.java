@@ -11,6 +11,11 @@ import java.util.List;
 
 /**
  * Query repository for curated OD serving APIs
+ * 
+ * JPQL constructor projections are used to return lightweight DTOs directly,
+ * avoiding unnecessary entity loading for summary and matrix queries.
+ * 
+ * Curated OD queries are read-only because correction is handled by a separate operational module.
  */
 public interface CuratedOdQueryRepository extends JpaRepository<CuratedOdRecord, CuratedOdRecordId> {
 

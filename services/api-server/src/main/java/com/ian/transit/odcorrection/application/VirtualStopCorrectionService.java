@@ -10,8 +10,15 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Handles virtual-stop related corrections
+ * Handles virtual stop related corrections.
+ * 
+ * Virtual stops are normalised to ARS 00000 because they are operational placeholders,
+ * not physical passenger boarding and alighting locations.
+ * 
+ * Remaining anomaly counts are logged instead of hidden so operators can decide whether
+ * manual review is needed.
  */
+
 @Service
 @RequiredArgsConstructor
 public class VirtualStopCorrectionService {

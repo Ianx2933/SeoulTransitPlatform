@@ -6,7 +6,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Orchestrates grouped OD correction workflows.
+ * 
+ * Correction steps are ordered because later fixes depend on earlier normalisation such as
+ * virtual stop handling and sequence correction.
+ * 
+ * Transactional boundaries protect each correction workflow from partial updates.
  */
+
 @Service
 @RequiredArgsConstructor
 public class OdCorrectionOrchestrator {

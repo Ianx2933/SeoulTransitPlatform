@@ -11,8 +11,11 @@ import java.util.List;
 
 /**
  * Query service for OD correction administration.
- * / OD 보정 운영을 위한 조회 서비스.
+ *
+ * This service is used to inspect correction targets and remaining anomalies before or
+ * after running update workflows. 
  */
+
 @Service
 @RequiredArgsConstructor
 public class CorrectionQueryService {

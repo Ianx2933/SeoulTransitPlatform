@@ -12,8 +12,14 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Handles standard-code correction logic
+ * Handles standard code correction logic.
+ * 
+ * Standard stop codes are resolved through the Seoul bus API because ARS alone is not always
+ * sufficient for stable among the dataset joins.
+ * 
+ * External API failure is tolerated so that one failed lookup does not stop the entire correction workflow.
  */
+
 @Service
 @RequiredArgsConstructor
 public class StandardCodeCorrectionService {
