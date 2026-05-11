@@ -8,12 +8,14 @@ import DemandControlPanel from "./components/DemandControlPanel.jsx";
  * This component separates draft filters from applied filters.
  * Draft filters are edited by the user.
  * Applied filters are sent to the map only after the user clicks Load.
+
  */
 export default function App() {
   const [mode, setMode] = useState("subway");
-  const [line, setLine] = useState("");
+  const [selectedLines, setSelectedLines] = useState([]);
   const [dayType, setDayType] = useState("mon");
-  const [hour, setHour] = useState(8);
+  const [startHour, setStartHour] = useState(8);
+  const [endHour, setEndHour] = useState(8);
   const [metric, setMetric] = useState("total");
 
   const [lines, setLines] = useState([]);
@@ -32,7 +34,8 @@ export default function App() {
       setLineLoading(true);
       setLineError("");
       setLines([]);
-      setLine("");
+      setSelectedLines([]);
+      setAppliedFilters(null);
 
       try {
         const response = await fetch(`/api/map/lines?mode=${mode}`);
@@ -65,20 +68,33 @@ export default function App() {
   }, [mode]);
 
   /**
+   * Builds a continuous hour list from the selected range.
+   */
+  const buildSelectedHours = () => {
+    const start = Math.min(startHour, endHour);
+    const end = Math.max(startHour, endHour);
+
+    return Array.from(
+      { length: end - start + 1 },
+      (_, index) => start + index
+    );
+  };
+
+  /**
    * Applies the current filter selection to the map.
    */
   const handleLoadDemand = () => {
-    if (!line) {
-      setLineError("Please select a line before loading demand.");
+    if (selectedLines.length === 0) {
+      setLineError("Please select at least one line before loading demand.");
       return;
     }
 
     setLineError("");
     setAppliedFilters({
       mode,
-      line,
+      lines: selectedLines,
       dayType,
-      hour,
+      hours: buildSelectedHours(),
       metric
     });
   };
@@ -90,10 +106,12 @@ export default function App() {
         setMode={setMode}
         dayType={dayType}
         setDayType={setDayType}
-        hour={hour}
-        setHour={setHour}
-        line={line}
-        setLine={setLine}
+        startHour={startHour}
+        setStartHour={setStartHour}
+        endHour={endHour}
+        setEndHour={setEndHour}
+        selectedLines={selectedLines}
+        setSelectedLines={setSelectedLines}
         metric={metric}
         setMetric={setMetric}
         lines={lines}

@@ -5,18 +5,25 @@
  */
 export async function fetchMapDemand({
   mode,
-  line,
+  lines,
   dayType,
-  hour
+  hours
 }) {
   const params = new URLSearchParams({
     mode,
-    dayType,
-    hour: String(hour)
+    dayType
   });
 
-  if (line && line.trim() !== "") {
-    params.append("line", line.trim());
+  /**
+   * Multiple lines and hours are sent as comma-separated strings.
+   * This keeps the URL compact and matches the backend parser.
+   */
+  if (Array.isArray(lines) && lines.length > 0) {
+    params.append("lines", lines.join(","));
+  }
+
+  if (Array.isArray(hours) && hours.length > 0) {
+    params.append("hours", hours.join(","));
   }
 
   const response = await fetch(

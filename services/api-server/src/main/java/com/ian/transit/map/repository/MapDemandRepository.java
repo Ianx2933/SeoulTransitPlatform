@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
  * Repository for map demand queries.
  *
  * JdbcTemplate is used because these queries include PostgreSQL-specific SQL,
- * regular expressions, and Korean column names.
+ * dynamic IN clauses, regular expressions, and Korean column names.
  */
 @Repository
 public class MapDemandRepository {
@@ -25,32 +25,34 @@ public class MapDemandRepository {
 
     /**
      * Loads map demand points by mode.
+     *
+     * Multiple selected hours are aggregated in SQL so the map renders one
+     * circle per stop/station instead of overlapping circles for each hour.
      */
     public List<MapDemandResponse> findMapDemand(
             String mode,
             String dayType,
-            Integer hour,
-            String line
+            List<Integer> hours,
+            List<String> lines
     ) {
         if ("subway".equals(mode)) {
-            return findSubwayMapDemand(mode, dayType, hour, normalizeLine(line));
+            return findSubwayMapDemand(mode, dayType, hours, lines);
         }
 
-        return findBusMapDemand(mode, dayType, hour, normalizeLine(line));
+        return findBusMapDemand(mode, dayType, hours, lines);
     }
 
     /**
      * Loads subway demand points.
      *
-     * The optional line filter is appended dynamically instead of using
-     * "? IS NULL" because PostgreSQL cannot infer the type of an untyped
-     * null parameter in that expression.
+     * Station names are normalized by removing parenthesized sub-names because
+     * demand data and station master data sometimes store sub-names differently.
      */
     private List<MapDemandResponse> findSubwayMapDemand(
             String mode,
             String dayType,
-            Integer hour,
-            String line
+            List<Integer> hours,
+            List<String> lines
     ) {
         StringBuilder sql = new StringBuilder("""
                 SELECT
@@ -60,8 +62,8 @@ public class MapDemandRepository {
                     d.node_name,
                     s.lat,
                     s.lng,
-                    CAST(d.boarding AS BIGINT) AS boarding,
-                    CAST(d.alighting AS BIGINT) AS alighting
+                    SUM(CAST(d.boarding AS BIGINT)) AS boarding,
+                    SUM(CAST(d.alighting AS BIGINT)) AS alighting
                 FROM integrated_hourly_transit_demand_light d
                 JOIN subway_station_location s
                   ON d.service_id = s.line_name
@@ -78,20 +80,25 @@ public class MapDemandRepository {
                      )
                 WHERE d.mode = ?
                   AND d.day_type = ?
-                  AND d.hour = ?
                 """);
 
         List<Object> params = new ArrayList<>();
         params.add(mode);
         params.add(dayType);
-        params.add(hour);
 
-        if (line != null) {
-            sql.append("  AND d.service_id = ?\n");
-            params.add(line);
-        }
+        appendInClause(sql, params, "d.hour", hours);
+        appendInClause(sql, params, "d.service_id", lines);
 
-        sql.append("ORDER BY d.node_name");
+        sql.append("""
+                GROUP BY
+                    d.mode,
+                    d.service_id,
+                    d.node_id,
+                    d.node_name,
+                    s.lat,
+                    s.lng
+                ORDER BY d.service_id, d.node_name
+                """);
 
         return jdbcTemplate.query(
                 sql.toString(),
@@ -103,13 +110,14 @@ public class MapDemandRepository {
     /**
      * Loads bus demand points using ARS stop numbers.
      *
-     * The integrated demand table's node_id matches bus_stop_location."정류장번호".
+     * The integrated demand table's node_id matches bus_stop_location."정류장번호",
+     * not bus_stop_location."노드id".
      */
     private List<MapDemandResponse> findBusMapDemand(
             String mode,
             String dayType,
-            Integer hour,
-            String line
+            List<Integer> hours,
+            List<String> lines
     ) {
         StringBuilder sql = new StringBuilder("""
                 SELECT
@@ -119,28 +127,33 @@ public class MapDemandRepository {
                     b."정류장명" AS node_name,
                     b."위도" AS lat,
                     b."경도" AS lng,
-                    CAST(d.boarding AS BIGINT) AS boarding,
-                    CAST(d.alighting AS BIGINT) AS alighting
+                    SUM(CAST(d.boarding AS BIGINT)) AS boarding,
+                    SUM(CAST(d.alighting AS BIGINT)) AS alighting
                 FROM integrated_hourly_transit_demand_light d
                 JOIN bus_stop_location b
                   ON LPAD(d.node_id::text, 5, '0')
                    = LPAD(b."정류장번호"::text, 5, '0')
                 WHERE d.mode = ?
                   AND d.day_type = ?
-                  AND d.hour = ?
                 """);
 
         List<Object> params = new ArrayList<>();
         params.add(mode);
         params.add(dayType);
-        params.add(hour);
 
-        if (line != null) {
-            sql.append("  AND d.service_id = ?\n");
-            params.add(line);
-        }
+        appendInClause(sql, params, "d.hour", hours);
+        appendInClause(sql, params, "d.service_id", lines);
 
-        sql.append("ORDER BY d.node_name");
+        sql.append("""
+                GROUP BY
+                    d.mode,
+                    d.service_id,
+                    d.node_id,
+                    b."정류장명",
+                    b."위도",
+                    b."경도"
+                ORDER BY d.service_id, b."정류장명"
+                """);
 
         return jdbcTemplate.query(
                 sql.toString(),
@@ -168,14 +181,33 @@ public class MapDemandRepository {
     }
 
     /**
-     * Converts blank line input into null so the repository can skip the line filter.
+     * Appends a parameterized IN clause.
+     *
+     * Values are never interpolated into SQL text directly.
+     * This keeps the dynamic query safe while still supporting multi-select filters.
      */
-    private String normalizeLine(String line) {
-        if (line == null || line.isBlank()) {
-            return null;
+    private void appendInClause(
+            StringBuilder sql,
+            List<Object> params,
+            String columnName,
+            List<?> values
+    ) {
+        if (values == null || values.isEmpty()) {
+            return;
         }
 
-        return line.trim();
+        String placeholders = String.join(
+                ", ",
+                values.stream().map(value -> "?").toList()
+        );
+
+        sql.append("  AND ")
+                .append(columnName)
+                .append(" IN (")
+                .append(placeholders)
+                .append(")\n");
+
+        params.addAll(values);
     }
 
     /**
