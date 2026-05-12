@@ -32,6 +32,13 @@ export default function App() {
   const [showAdminBoundary, setShowAdminBoundary] = useState(true);
 
   /**
+   * Stores the selected Leaflet tile layer.
+   *
+   * CartoDB Positron is the default because it works well as a quiet analytical basemap.
+   */
+  const [selectedTileLayer, setSelectedTileLayer] = useState("cartoLight");
+
+  /**
    * Loads available lines whenever the transport mode changes.
    */
   useEffect(() => {
@@ -128,6 +135,8 @@ export default function App() {
         hasAppliedFilters={Boolean(appliedFilters)}
         showAdminBoundary={showAdminBoundary}
         setShowAdminBoundary={setShowAdminBoundary}
+        selectedTileLayer={selectedTileLayer}
+        setSelectedTileLayer={setSelectedTileLayer}
       />
 
       <DataCoverageNotice />
@@ -135,6 +144,7 @@ export default function App() {
       <TransitDemandMap
         filters={appliedFilters}
         showAdminBoundary={showAdminBoundary}
+        selectedTileLayer={selectedTileLayer}
       />
     </main>
   );

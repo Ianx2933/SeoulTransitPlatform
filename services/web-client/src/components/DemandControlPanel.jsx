@@ -15,6 +15,7 @@ const DAY_TYPE_OPTIONS = [
 
 /**
  * Supported metric options.
+
  */
 const METRIC_OPTIONS = [
   { value: "total", label: "Total" },
@@ -23,9 +24,19 @@ const METRIC_OPTIONS = [
 ];
 
 /**
+ * Supported Leaflet tile layer options.
+ */
+const TILE_LAYER_OPTIONS = [
+  { value: "osm", label: "OpenStreetMap" },
+  { value: "cartoLight", label: "CartoDB Positron" },
+  { value: "cartoDark", label: "CartoDB Dark Matter" }
+];
+
+/**
  * Control panel for demand exploration.
  *
  * This component does not fetch demand data by itself.
+ *
  * It only lets the user select filters and explicitly request loading.
  */
 export default function DemandControlPanel({
@@ -47,7 +58,9 @@ export default function DemandControlPanel({
   onLoadDemand,
   hasAppliedFilters,
   showAdminBoundary,
-  setShowAdminBoundary
+  setShowAdminBoundary,
+  selectedTileLayer,
+  setSelectedTileLayer
 }) {
   /**
    * Local search keyword for the route selector.
@@ -176,6 +189,20 @@ export default function DemandControlPanel({
             onChange={(event) => setMetric(event.target.value)}
           >
             {METRIC_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Map tile
+          <select
+            value={selectedTileLayer}
+            onChange={(event) => setSelectedTileLayer(event.target.value)}
+          >
+            {TILE_LAYER_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

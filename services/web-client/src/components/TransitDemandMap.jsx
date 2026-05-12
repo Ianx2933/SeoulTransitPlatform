@@ -28,6 +28,30 @@ const ROUTE_COLOR_PALETTE = [
 ];
 
 /**
+ * Leaflet-compatible basemap tile layers.
+ *
+ * Kakao Map is not included because it uses a separate JavaScript SDK rather
+ * than a simple Leaflet TileLayer URL.
+ */
+const TILE_LAYERS = {
+  osm: {
+    label: "OpenStreetMap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenStreetMap contributors"
+  },
+  cartoLight: {
+    label: "CartoDB Positron",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+  },
+  cartoDark: {
+    label: "CartoDB Dark Matter",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+  }
+};
+
+/**
  * Returns a stable color for each route.
  *
  * The hash-based color assignment keeps the same route visually consistent
@@ -159,7 +183,8 @@ function summarizeDemand(points, metric) {
 
 export default function TransitDemandMap({
   filters,
-  showAdminBoundary = true
+  showAdminBoundary = true,
+  selectedTileLayer = "cartoLight"
 }) {
   const [points, setPoints] = useState([]);
   const [adminDongGeoJson, setAdminDongGeoJson] = useState(null);
@@ -171,6 +196,7 @@ export default function TransitDemandMap({
   const [errorMessage, setErrorMessage] = useState("");
 
   const metric = filters?.metric || "total";
+  const tileLayer = TILE_LAYERS[selectedTileLayer] || TILE_LAYERS.cartoLight;
 
   const sortedPoints = useMemo(() => {
     return [...points].sort(
@@ -182,6 +208,7 @@ export default function TransitDemandMap({
    * Filters points by selected administrative districts.
    *
    * If no district is selected, the full loaded demand layer remains visible.
+   *
    * If one or more districts are selected, a point is visible when it is inside at least one selected polygon.
    */
   const visiblePoints = useMemo(() => {
@@ -303,6 +330,7 @@ export default function TransitDemandMap({
    * Handles district selection.
    *
    * Click selects one district.
+   *
    * Ctrl/Shift/Meta click toggles districts to support multi-district analysis.
    */
   const toggleDistrictSelection = (feature, event) => {
@@ -458,8 +486,9 @@ export default function TransitDemandMap({
           className="leaflet-map"
         >
           <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            key={selectedTileLayer}
+            attribution={tileLayer.attribution}
+            url={tileLayer.url}
           />
 
           {showAdminBoundary && adminDongGeoJson && (
