@@ -108,10 +108,11 @@ public class MapDemandRepository {
     }
 
     /**
-     * Loads bus demand points using ARS stop numbers.
+     * Loads bus demand points from both coordinate sources.
      *
-     * The integrated demand table's node_id matches bus_stop_location."정류장번호",
-     * not bus_stop_location."노드id".
+     * Existing Seoul bus stops continue to use bus_stop_location.
+     * Metropolitan / outer-area stops that are missing from bus_stop_location
+     * are added through the curated mapping tables.
      */
     private List<MapDemandResponse> findBusMapDemand(
             String mode,
@@ -121,38 +122,92 @@ public class MapDemandRepository {
     ) {
         StringBuilder sql = new StringBuilder("""
                 SELECT
-                    d.mode,
-                    d.service_id,
-                    d.node_id,
-                    b."정류장명" AS node_name,
-                    b."위도" AS lat,
-                    b."경도" AS lng,
-                    SUM(CAST(d.boarding AS BIGINT)) AS boarding,
-                    SUM(CAST(d.alighting AS BIGINT)) AS alighting
-                FROM integrated_hourly_transit_demand_light d
-                JOIN bus_stop_location b
-                  ON LPAD(d.node_id::text, 5, '0')
-                   = LPAD(b."정류장번호"::text, 5, '0')
-                WHERE d.mode = ?
-                  AND d.day_type = ?
+                    x.mode,
+                    x.service_id,
+                    x.node_id,
+                    x.node_name,
+                    x.lat,
+                    x.lng,
+                    SUM(x.boarding) AS boarding,
+                    SUM(x.alighting) AS alighting
+                FROM (
+
+                    -- Existing Seoul bus stop coordinates.
+                    SELECT
+                        d.mode,
+                        d.service_id,
+                        d.node_id,
+                        b."정류장명" AS node_name,
+                        b."위도" AS lat,
+                        b."경도" AS lng,
+                        CAST(d.boarding AS BIGINT) AS boarding,
+                        CAST(d.alighting AS BIGINT) AS alighting
+                    FROM integrated_hourly_transit_demand_light d
+                    JOIN bus_stop_location b
+                      ON LPAD(d.node_id::text, 5, '0')
+                       = LPAD(b."정류장번호"::text, 5, '0')
+                    WHERE d.mode = ?
+                      AND d.day_type = ?
                 """);
 
         List<Object> params = new ArrayList<>();
+
+        // Parameters for the existing Seoul bus-stop branch.
         params.add(mode);
         params.add(dayType);
-
         appendInClause(sql, params, "d.hour", hours);
         appendInClause(sql, params, "d.service_id", lines);
 
         sql.append("""
+
+                    UNION ALL
+
+                    -- Curated metropolitan / outer-area coordinate patch.
+                    SELECT
+                        d.mode,
+                        d.service_id,
+                        d.node_id,
+                        b.stop_name AS node_name,
+                        b.lat,
+                        b.lng,
+                        CAST(d.boarding AS BIGINT) AS boarding,
+                        CAST(d.alighting AS BIGINT) AS alighting
+                    FROM integrated_hourly_transit_demand_light d
+                    JOIN bus_stop_demand_node_mapping m
+                      ON d.service_id = m.service_id
+                     AND LPAD(d.node_id::text, 5, '0')
+                       = LPAD(m.demand_node_id::text, 5, '0')
+                    JOIN integrated_bus_stop_location b
+                      ON m.canonical_node_id = b.canonical_node_id
+                    WHERE d.mode = ?
+                      AND d.day_type = ?
+                """);
+
+        // Parameters for the curated metropolitan / outer-area branch.
+        params.add(mode);
+        params.add(dayType);
+        appendInClause(sql, params, "d.hour", hours);
+        appendInClause(sql, params, "d.service_id", lines);
+
+        sql.append("""
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM bus_stop_location existing
+                          WHERE LPAD(d.node_id::text, 5, '0')
+                              = LPAD(existing."정류장번호"::text, 5, '0')
+                      )
+
+                ) x
                 GROUP BY
-                    d.mode,
-                    d.service_id,
-                    d.node_id,
-                    b."정류장명",
-                    b."위도",
-                    b."경도"
-                ORDER BY d.service_id, b."정류장명"
+                    x.mode,
+                    x.service_id,
+                    x.node_id,
+                    x.node_name,
+                    x.lat,
+                    x.lng
+                ORDER BY
+                    x.service_id,
+                    x.node_name
                 """);
 
         return jdbcTemplate.query(
