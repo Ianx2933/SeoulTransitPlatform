@@ -28,16 +28,17 @@ public class MapDemandController {
      * Returns transit demand points for map rendering.
      *
      * Supported request styles:
-     * - Single line/hour: /api/map/demand?mode=subway&dayType=mon&line=2호선&hour=8
-     * - Multiple lines/hours: /api/map/demand?mode=subway&dayType=mon&lines=2호선,7호선&hours=7,8,9
+     * - Single day/line/hour: /api/map/demand?mode=subway&dayType=mon&line=2호선&hour=8
+     * - Multiple days/lines/hours: /api/map/demand?mode=subway&dayTypes=mon,tue,wed&lines=2호선,7호선&hours=7,8,9
      *
-     * The multi-value parameters are comma-separated strings so the frontend
-     * can build simple URLs without relying on repeated query parameters.
+     * dayAggregation controls whether selected day types are summed or averaged.
      */
     @GetMapping("/demand")
     public List<MapDemandResponse> getMapDemand(
             @RequestParam String mode,
-            @RequestParam String dayType,
+            @RequestParam(required = false) String dayType,
+            @RequestParam(required = false) String dayTypes,
+            @RequestParam(required = false, defaultValue = "average") String dayAggregation,
             @RequestParam(required = false) Integer hour,
             @RequestParam(required = false) String line,
             @RequestParam(required = false) String hours,
@@ -46,6 +47,8 @@ public class MapDemandController {
         return mapDemandService.getMapDemand(
                 mode,
                 dayType,
+                dayTypes,
+                dayAggregation,
                 hour,
                 line,
                 hours,

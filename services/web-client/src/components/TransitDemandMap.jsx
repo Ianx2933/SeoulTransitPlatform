@@ -298,7 +298,8 @@ export default function TransitDemandMap({
         const data = await fetchMapDemand({
           mode: filters.mode,
           lines: filters.lines,
-          dayType: filters.dayType,
+          dayTypes: filters.dayTypes,
+          dayAggregation: filters.dayAggregation,
           hours: filters.hours
         });
 
@@ -434,7 +435,12 @@ export default function TransitDemandMap({
             backgroundColor: "#ffffff"
           }}
         >
-          <strong>Demand summary</strong>
+          <strong>
+            Demand summary
+            {filters?.dayAggregation === "sum"
+              ? " — sum of selected days"
+              : " — average per selected day"}
+          </strong>
           <div>
             Boarding: {demandSummary.totals.boarding.toLocaleString()}
             {" | "}

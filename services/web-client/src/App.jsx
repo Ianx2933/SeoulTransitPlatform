@@ -15,7 +15,9 @@ import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 export default function App() {
   const [mode, setMode] = useState("subway");
   const [selectedLines, setSelectedLines] = useState([]);
-  const [dayType, setDayType] = useState("mon");
+  const [dayTypePreset, setDayTypePreset] = useState("mon");
+  const [selectedDayTypes, setSelectedDayTypes] = useState(["mon"]);
+  const [dayAggregation, setDayAggregation] = useState("average");
   const [startHour, setStartHour] = useState(8);
   const [endHour, setEndHour] = useState(8);
   const [metric, setMetric] = useState("total");
@@ -103,11 +105,17 @@ export default function App() {
       return;
     }
 
+    if (selectedDayTypes.length === 0) {
+      setLineError("Please select at least one day type before loading demand.");
+      return;
+    }
+
     setLineError("");
     setAppliedFilters({
       mode,
       lines: selectedLines,
-      dayType,
+      dayTypes: selectedDayTypes,
+      dayAggregation,
       hours: buildSelectedHours(),
       metric
     });
@@ -118,8 +126,12 @@ export default function App() {
       <DemandControlPanel
         mode={mode}
         setMode={setMode}
-        dayType={dayType}
-        setDayType={setDayType}
+        dayTypePreset={dayTypePreset}
+        setDayTypePreset={setDayTypePreset}
+        selectedDayTypes={selectedDayTypes}
+        setSelectedDayTypes={setSelectedDayTypes}
+        dayAggregation={dayAggregation}
+        setDayAggregation={setDayAggregation}
         startHour={startHour}
         setStartHour={setStartHour}
         endHour={endHour}

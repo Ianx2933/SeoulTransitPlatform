@@ -30,20 +30,24 @@ public class MapDemandService {
     public List<MapDemandResponse> getMapDemand(
             String mode,
             String dayType,
+            String dayTypes,
+            String dayAggregation,
             Integer hour,
             String line,
             String hours,
             String lines
     ) {
         validateMode(mode);
-        validateDayType(dayType);
+        validateDayAggregation(dayAggregation);
 
+        List<String> requestedDayTypes = parseDayTypes(dayType, dayTypes);
         List<Integer> requestedHours = parseHours(hour, hours);
         List<String> requestedLines = parseLines(line, lines);
 
         return mapDemandRepository.findMapDemand(
                 mode,
-                dayType,
+                requestedDayTypes,
+                dayAggregation,
                 requestedHours,
                 requestedLines
         );
@@ -61,12 +65,55 @@ public class MapDemandService {
     }
 
     /**
+     * Parses selected day types.
+     *
+     * The dashboard sends comma-separated day types such as "mon,tue,wed".
+     * The legacy single dayType parameter is used when dayTypes is omitted.
+     */
+    private List<String> parseDayTypes(String dayType, String dayTypes) {
+        List<String> parsedDayTypes;
+
+        if (dayTypes != null && !dayTypes.isBlank()) {
+            parsedDayTypes = Arrays.stream(dayTypes.split(","))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .toList();
+        } else if (dayType != null && !dayType.isBlank()) {
+            parsedDayTypes = List.of(dayType.trim());
+        } else {
+            throw new IllegalArgumentException(
+                    "dayType or dayTypes must be provided"
+            );
+        }
+
+        if (parsedDayTypes.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "at least one day type must be provided"
+            );
+        }
+
+        parsedDayTypes.forEach(this::validateDayType);
+        return parsedDayTypes;
+    }
+
+    /**
      * Validates day type.
      */
     private void validateDayType(String dayType) {
         if (dayType == null || dayType.isBlank()) {
             throw new IllegalArgumentException(
                     "dayType must not be blank"
+            );
+        }
+    }
+
+    /**
+     * Validates day aggregation mode.
+     */
+    private void validateDayAggregation(String dayAggregation) {
+        if (!"sum".equals(dayAggregation) && !"average".equals(dayAggregation)) {
+            throw new IllegalArgumentException(
+                    "dayAggregation must be either 'sum' or 'average'"
             );
         }
     }

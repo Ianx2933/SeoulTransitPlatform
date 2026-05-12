@@ -7,12 +7,31 @@ export async function fetchMapDemand({
   mode,
   lines,
   dayType,
+  dayTypes,
+  dayAggregation,
   hours
 }) {
   const params = new URLSearchParams({
-    mode,
-    dayType
+    mode
   });
+
+  /**
+   * Multiple day types are sent as comma-separated strings.
+   *
+   * The legacy single dayType parameter is still supported by the backend.
+   */
+  if (Array.isArray(dayTypes) && dayTypes.length > 0) {
+    params.append("dayTypes", dayTypes.join(","));
+  } else if (dayType) {
+    params.append("dayType", dayType);
+  }
+
+  /**
+   * dayAggregation controls whether selected day types are summed or averaged.
+   */
+  if (dayAggregation) {
+    params.append("dayAggregation", dayAggregation);
+  }
 
   /**
    * Multiple lines and hours are sent as comma-separated strings.

@@ -26,20 +26,21 @@ public class MapDemandRepository {
     /**
      * Loads map demand points by mode.
      *
-     * Multiple selected hours are aggregated in SQL so the map renders one
-     * circle per stop/station instead of overlapping circles for each hour.
+     * Multiple selected hours and day types are aggregated in SQL so the map
+     * renders one circle per stop/station instead of overlapping circles.
      */
     public List<MapDemandResponse> findMapDemand(
             String mode,
-            String dayType,
+            List<String> dayTypes,
+            String dayAggregation,
             List<Integer> hours,
             List<String> lines
     ) {
         if ("subway".equals(mode)) {
-            return findSubwayMapDemand(mode, dayType, hours, lines);
+            return findSubwayMapDemand(mode, dayTypes, dayAggregation, hours, lines);
         }
 
-        return findBusMapDemand(mode, dayType, hours, lines);
+        return findBusMapDemand(mode, dayTypes, dayAggregation, hours, lines);
     }
 
     /**
@@ -50,10 +51,15 @@ public class MapDemandRepository {
      */
     private List<MapDemandResponse> findSubwayMapDemand(
             String mode,
-            String dayType,
+            List<String> dayTypes,
+            String dayAggregation,
             List<Integer> hours,
             List<String> lines
     ) {
+        int divisor = getDayAggregationDivisor(dayTypes, dayAggregation);
+        String boardingExpression = buildDemandAggregationExpression("d.boarding", divisor);
+        String alightingExpression = buildDemandAggregationExpression("d.alighting", divisor);
+
         StringBuilder sql = new StringBuilder("""
                 SELECT
                     d.mode,
@@ -62,8 +68,12 @@ public class MapDemandRepository {
                     d.node_name,
                     s.lat,
                     s.lng,
-                    SUM(CAST(d.boarding AS BIGINT)) AS boarding,
-                    SUM(CAST(d.alighting AS BIGINT)) AS alighting
+                """);
+
+        sql.append("    ").append(boardingExpression).append(" AS boarding,\n");
+        sql.append("    ").append(alightingExpression).append(" AS alighting\n");
+
+        sql.append("""
                 FROM integrated_hourly_transit_demand_light d
                 JOIN subway_station_location s
                   ON d.service_id = s.line_name
@@ -79,13 +89,12 @@ public class MapDemandRepository {
                             'g'
                      )
                 WHERE d.mode = ?
-                  AND d.day_type = ?
                 """);
 
         List<Object> params = new ArrayList<>();
         params.add(mode);
-        params.add(dayType);
 
+        appendInClause(sql, params, "d.day_type", dayTypes);
         appendInClause(sql, params, "d.hour", hours);
         appendInClause(sql, params, "d.service_id", lines);
 
@@ -116,10 +125,15 @@ public class MapDemandRepository {
      */
     private List<MapDemandResponse> findBusMapDemand(
             String mode,
-            String dayType,
+            List<String> dayTypes,
+            String dayAggregation,
             List<Integer> hours,
             List<String> lines
     ) {
+        int divisor = getDayAggregationDivisor(dayTypes, dayAggregation);
+        String boardingExpression = buildDemandAggregationExpression("x.boarding", divisor);
+        String alightingExpression = buildDemandAggregationExpression("x.alighting", divisor);
+
         StringBuilder sql = new StringBuilder("""
                 SELECT
                     x.mode,
@@ -128,8 +142,12 @@ public class MapDemandRepository {
                     x.node_name,
                     x.lat,
                     x.lng,
-                    SUM(x.boarding) AS boarding,
-                    SUM(x.alighting) AS alighting
+                """);
+
+        sql.append("    ").append(boardingExpression).append(" AS boarding,\n");
+        sql.append("    ").append(alightingExpression).append(" AS alighting\n");
+
+        sql.append("""
                 FROM (
 
                     -- Existing Seoul bus stop coordinates.
@@ -147,14 +165,12 @@ public class MapDemandRepository {
                       ON LPAD(d.node_id::text, 5, '0')
                        = LPAD(b."정류장번호"::text, 5, '0')
                     WHERE d.mode = ?
-                      AND d.day_type = ?
                 """);
 
         List<Object> params = new ArrayList<>();
 
-        // Parameters for the existing Seoul bus-stop branch.
         params.add(mode);
-        params.add(dayType);
+        appendInClause(sql, params, "d.day_type", dayTypes);
         appendInClause(sql, params, "d.hour", hours);
         appendInClause(sql, params, "d.service_id", lines);
 
@@ -180,12 +196,10 @@ public class MapDemandRepository {
                     JOIN integrated_bus_stop_location b
                       ON m.canonical_node_id = b.canonical_node_id
                     WHERE d.mode = ?
-                      AND d.day_type = ?
                 """);
 
-        // Parameters for the curated metropolitan / outer-area branch.
         params.add(mode);
-        params.add(dayType);
+        appendInClause(sql, params, "d.day_type", dayTypes);
         appendInClause(sql, params, "d.hour", hours);
         appendInClause(sql, params, "d.service_id", lines);
 
@@ -233,6 +247,38 @@ public class MapDemandRepository {
                 String.class,
                 mode
         );
+    }
+
+    /**
+     * Returns the divisor used when selected day types should be averaged.
+     */
+    private int getDayAggregationDivisor(
+            List<String> dayTypes,
+            String dayAggregation
+    ) {
+        if (!"average".equals(dayAggregation)) {
+            return 1;
+        }
+
+        if (dayTypes == null || dayTypes.isEmpty()) {
+            return 1;
+        }
+
+        return dayTypes.size();
+    }
+
+    /**
+     * Builds the SQL expression used for sum or average-per-selected-day display.
+     */
+    private String buildDemandAggregationExpression(
+            String columnName,
+            int divisor
+    ) {
+        if (divisor <= 1) {
+            return "SUM(CAST(" + columnName + " AS BIGINT))";
+        }
+
+        return "ROUND(SUM(CAST(" + columnName + " AS NUMERIC)) / " + divisor + ")";
     }
 
     /**

@@ -14,8 +14,48 @@ const DAY_TYPE_OPTIONS = [
 ];
 
 /**
- * Supported metric options.
+ * Day type presets for fast multi-day selection.
+ */
+const DAY_TYPE_PRESETS = [
+  { value: "mon", label: "Monday", dayTypes: ["mon"] },
+  { value: "tue", label: "Tuesday", dayTypes: ["tue"] },
+  { value: "wed", label: "Wednesday", dayTypes: ["wed"] },
+  { value: "thu", label: "Thursday", dayTypes: ["thu"] },
+  { value: "fri", label: "Friday", dayTypes: ["fri"] },
+  {
+    value: "weekdays",
+    label: "Weekdays",
+    dayTypes: ["mon", "tue", "wed", "thu", "fri"]
+  },
+  {
+    value: "weekend",
+    label: "Weekend / Holiday",
+    dayTypes: ["sat", "sun_holiday"]
+  },
+  {
+    value: "all",
+    label: "All days",
+    dayTypes: ["mon", "tue", "wed", "thu", "fri", "sat", "sun_holiday"]
+  },
+  { value: "custom", label: "Custom", dayTypes: [] }
+];
 
+/**
+ * Supported day aggregation options.
+ */
+const DAY_AGGREGATION_OPTIONS = [
+  {
+    value: "average",
+    label: "Average per selected day"
+  },
+  {
+    value: "sum",
+    label: "Sum of selected days"
+  }
+];
+
+/**
+ * Supported metric options.
  */
 const METRIC_OPTIONS = [
   { value: "total", label: "Total" },
@@ -42,8 +82,12 @@ const TILE_LAYER_OPTIONS = [
 export default function DemandControlPanel({
   mode,
   setMode,
-  dayType,
-  setDayType,
+  dayTypePreset,
+  setDayTypePreset,
+  selectedDayTypes,
+  setSelectedDayTypes,
+  dayAggregation,
+  setDayAggregation,
   startHour,
   setStartHour,
   endHour,
@@ -71,12 +115,40 @@ export default function DemandControlPanel({
 
   /**
    * Changes transport mode.
-
+   *
    * The parent component resets line state after loading the new mode's line list.
    */
   const handleModeChange = (event) => {
     setMode(event.target.value);
     setLineSearch("");
+  };
+
+  /**
+   * Applies a predefined day type preset.
+   */
+  const handleDayTypePresetChange = (event) => {
+    const nextPreset = event.target.value;
+    const preset = DAY_TYPE_PRESETS.find((item) => item.value === nextPreset);
+
+    setDayTypePreset(nextPreset);
+
+    if (preset && nextPreset !== "custom") {
+      setSelectedDayTypes(preset.dayTypes);
+    }
+  };
+
+  /**
+   * Toggles one day type in custom mode.
+   */
+  const toggleDayType = (dayType) => {
+    setDayTypePreset("custom");
+    setSelectedDayTypes((currentDayTypes) => {
+      if (currentDayTypes.includes(dayType)) {
+        return currentDayTypes.filter((value) => value !== dayType);
+      }
+
+      return [...currentDayTypes, dayType];
+    });
   };
 
   /**
@@ -147,18 +219,68 @@ export default function DemandControlPanel({
         </label>
 
         <label>
-          Day Type
+          Day Type Preset
           <select
-            value={dayType}
-            onChange={(event) => setDayType(event.target.value)}
+            value={dayTypePreset}
+            onChange={handleDayTypePresetChange}
           >
-            {DAY_TYPE_OPTIONS.map((option) => (
+            {DAY_TYPE_PRESETS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
         </label>
+
+        <label>
+          Day Aggregation
+          <select
+            value={dayAggregation}
+            onChange={(event) => setDayAggregation(event.target.value)}
+          >
+            {DAY_AGGREGATION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <fieldset
+          style={{
+            border: "1px solid #dddddd",
+            borderRadius: "8px",
+            padding: "8px",
+            margin: 0
+          }}
+        >
+          <legend>Custom day types</legend>
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              flexWrap: "wrap"
+            }}
+          >
+            {DAY_TYPE_OPTIONS.map((option) => (
+              <label
+                key={option.value}
+                style={{
+                  display: "flex",
+                  gap: "4px",
+                  alignItems: "center"
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedDayTypes.includes(option.value)}
+                  onChange={() => toggleDayType(option.value)}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <label>
           Start Hour: {String(startHour).padStart(2, "0")}:00
@@ -342,7 +464,11 @@ export default function DemandControlPanel({
         <button
           type="button"
           onClick={onLoadDemand}
-          disabled={selectedLines.length === 0 || lineLoading}
+          disabled={
+            selectedLines.length === 0 ||
+            selectedDayTypes.length === 0 ||
+            lineLoading
+          }
         >
           Load demand
         </button>
@@ -357,6 +483,7 @@ export default function DemandControlPanel({
         </span>
 
         <span>{selectedLines.length.toLocaleString()} selected route(s)</span>
+        <span>{selectedDayTypes.length.toLocaleString()} selected day type(s)</span>
       </div>
     </section>
   );

@@ -66,7 +66,7 @@ export default function DataCoverageNotice() {
             <h3 style={{ margin: "0 0 6px" }}>What this map shows</h3>
             <p style={{ margin: 0 }}>
               The map displays aggregated boarding, alighting, and total demand
-              for the selected route set, day type, and hour range.
+              for the selected route set, day type selection, day aggregation mode, and hour range.
             </p>
           </section>
 
@@ -123,6 +123,11 @@ export default function DataCoverageNotice() {
                 Some coordinates may still require later data-quality review,
                 especially where historical route data and current stop
                 references differ.
+              </li>
+              <li>
+                When multiple day types are selected, demand can be displayed
+                either as the sum of selected days or as the average per
+                selected day.
               </li>
               <li>
                 Demand values do not directly represent onboard crowding,
