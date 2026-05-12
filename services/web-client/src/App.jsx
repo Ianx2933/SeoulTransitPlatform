@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import TransitDemandMap from "./components/TransitDemandMap.jsx";
 import DemandControlPanel from "./components/DemandControlPanel.jsx";
+import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 
 /**
  * Root application component.
  *
  * This component separates draft filters from applied filters.
+ *
  * Draft filters are edited by the user.
+ *
  * Applied filters are sent to the map only after the user clicks Load.
-
  */
 export default function App() {
   const [mode, setMode] = useState("subway");
@@ -23,6 +25,11 @@ export default function App() {
   const [lineError, setLineError] = useState("");
 
   const [appliedFilters, setAppliedFilters] = useState(null);
+
+  /**
+   * Controls whether administrative district boundaries are shown on the map.
+   */
+  const [showAdminBoundary, setShowAdminBoundary] = useState(true);
 
   /**
    * Loads available lines whenever the transport mode changes.
@@ -119,9 +126,16 @@ export default function App() {
         lineError={lineError}
         onLoadDemand={handleLoadDemand}
         hasAppliedFilters={Boolean(appliedFilters)}
+        showAdminBoundary={showAdminBoundary}
+        setShowAdminBoundary={setShowAdminBoundary}
       />
 
-      <TransitDemandMap filters={appliedFilters} />
+      <DataCoverageNotice />
+
+      <TransitDemandMap
+        filters={appliedFilters}
+        showAdminBoundary={showAdminBoundary}
+      />
     </main>
   );
 }

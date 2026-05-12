@@ -55,10 +55,16 @@ function calculateRadius(point, metric) {
   const demand = getDemandValue(point, metric);
 
   if (demand <= 0) {
-    return 2.5;
+    return 3;
   }
 
-  return Math.min(18, Math.max(3, Math.sqrt(demand) / 8));
+  return Math.min(
+    24,
+    Math.max(
+      4,
+      Math.sqrt(demand) / 5
+    )
+  );
 }
 
 /**
@@ -143,8 +149,7 @@ function summarizeDemand(points, metric) {
   });
 
   const routes = Array.from(routeMap.values())
-    .sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))
-    .slice(0, 10);
+    .sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0));
 
   return {
     totals,
@@ -152,7 +157,10 @@ function summarizeDemand(points, metric) {
   };
 }
 
-export default function TransitDemandMap({ filters }) {
+export default function TransitDemandMap({
+  filters,
+  showAdminBoundary = true
+}) {
   const [points, setPoints] = useState([]);
   const [adminDongGeoJson, setAdminDongGeoJson] = useState(null);
   const [selectedDistricts, setSelectedDistricts] = useState([]);
@@ -174,8 +182,7 @@ export default function TransitDemandMap({ filters }) {
    * Filters points by selected administrative districts.
    *
    * If no district is selected, the full loaded demand layer remains visible.
-   * If one or more districts are selected, a point is visible when it is inside
-   * at least one selected polygon.
+   * If one or more districts are selected, a point is visible when it is inside at least one selected polygon.
    */
   const visiblePoints = useMemo(() => {
     if (selectedDistricts.length === 0) {
@@ -409,8 +416,18 @@ export default function TransitDemandMap({ filters }) {
           </div>
 
           <div style={{ marginTop: "8px" }}>
-            <strong>Top routes by {metric}</strong>
-            <ol>
+            <strong>Routes by {metric}</strong>
+            <span style={{ marginLeft: "8px", color: "#666666" }}>
+              ({demandSummary.routes.length.toLocaleString()} route
+              {demandSummary.routes.length === 1 ? "" : "s"})
+            </span>
+            <ol
+              style={{
+                maxHeight: "280px",
+                overflowY: "auto",
+                paddingRight: "12px"
+              }}
+            >
               {demandSummary.routes.map((route) => (
                 <li key={route.serviceId}>
                   <span
@@ -445,7 +462,7 @@ export default function TransitDemandMap({ filters }) {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {adminDongGeoJson && (
+          {showAdminBoundary && adminDongGeoJson && (
             <GeoJSON
               key={selectedDistricts.map(getDistrictCode).join("-") || "all"}
               data={adminDongGeoJson}

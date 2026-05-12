@@ -45,7 +45,9 @@ export default function DemandControlPanel({
   lineLoading,
   lineError,
   onLoadDemand,
-  hasAppliedFilters
+  hasAppliedFilters,
+  showAdminBoundary,
+  setShowAdminBoundary
 }) {
   /**
    * Local search keyword for the route selector.
@@ -56,6 +58,7 @@ export default function DemandControlPanel({
 
   /**
    * Changes transport mode.
+
    * The parent component resets line state after loading the new mode's line list.
    */
   const handleModeChange = (event) => {
@@ -178,6 +181,21 @@ export default function DemandControlPanel({
               </option>
             ))}
           </select>
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            gap: "8px",
+            alignItems: "center"
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showAdminBoundary}
+            onChange={(event) => setShowAdminBoundary(event.target.checked)}
+          />
+          Show administrative boundary
         </label>
       </div>
 
