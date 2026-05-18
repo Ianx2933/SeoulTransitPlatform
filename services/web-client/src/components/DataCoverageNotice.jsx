@@ -66,7 +66,8 @@ export default function DataCoverageNotice() {
             <h3 style={{ margin: "0 0 6px" }}>What this map shows</h3>
             <p style={{ margin: 0 }}>
               The map displays aggregated boarding, alighting, and total demand
-              for the selected route set, day type selection, day aggregation mode, and hour range.
+              for selected subway routes, selected bus routes, day type selection,
+              day aggregation mode, and hour range.
             </p>
           </section>
 
@@ -98,6 +99,14 @@ export default function DataCoverageNotice() {
             <h3 style={{ margin: "0 0 6px" }}>Coverage</h3>
             <ul style={{ margin: 0, paddingLeft: "20px" }}>
               <li>
+                Subway and bus routes can be displayed together for exploratory
+                multi-modal comparison.
+              </li>
+              <li>
+                Clicking a stop or station opens a detail panel using the
+                currently loaded map data.
+              </li>
+              <li>
                 Subway points are displayed when station coordinates can be
                 matched to demand records.
               </li>
@@ -128,6 +137,11 @@ export default function DataCoverageNotice() {
                 When multiple day types are selected, demand can be displayed
                 either as the sum of selected days or as the average per
                 selected day.
+              </li>
+              <li>
+                The node detail panel shows values for the currently loaded
+                filter result, not a full historical profile of the stop or
+                station.
               </li>
               <li>
                 Demand values do not directly represent onboard crowding,

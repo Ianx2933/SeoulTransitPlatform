@@ -10,7 +10,8 @@ import {
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point as turfPoint } from "@turf/helpers";
 
-import { fetchMapDemand } from "../api/mapDemandApi.js";
+import { fetchMultiModeMapDemand } from "../api/mapDemandApi.js";
+import NodeDetailPanel from "./NodeDetailPanel.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
 
@@ -28,10 +29,7 @@ const ROUTE_COLOR_PALETTE = [
 ];
 
 /**
- * Leaflet-compatible basemap tile layers.
- *
- * Kakao Map is not included because it uses a separate JavaScript SDK rather
- * than a simple Leaflet TileLayer URL.
+ * Basemap tile layers compatible with leaflet.
  */
 const TILE_LAYERS = {
   osm: {
@@ -57,8 +55,8 @@ const TILE_LAYERS = {
  * The hash-based color assignment keeps the same route visually consistent
  * across map refreshes without storing colors in the database.
  */
-function getRouteColor(serviceId) {
-  const text = String(serviceId || "");
+function getRouteColor(mode, serviceId) {
+  const text = `${mode || "unknown"}-${serviceId || ""}`;
   let hash = 0;
 
   for (let index = 0; index < text.length; index += 1) {
@@ -135,8 +133,7 @@ function isValidPoint(point) {
 /**
  * Creates a demand summary for the currently visible points.
  *
- * This summary is calculated on the client for fast MVP iteration.
- * It can later move to PostGIS/materialized views when the dataset grows.
+ * Route aggregation uses mode + serviceId so bus and subway results can be shown together safely.
  */
 function summarizeDemand(points, metric) {
   const totals = points.reduce(
@@ -156,9 +153,14 @@ function summarizeDemand(points, metric) {
   const routeMap = new Map();
 
   points.forEach((point) => {
-    const key = point.serviceId || "unknown";
+    const mode = point.mode || "unknown";
+    const serviceId = point.serviceId || "unknown";
+    const key = `${mode}-${serviceId}`;
+
     const existing = routeMap.get(key) || {
-      serviceId: key,
+      key,
+      mode,
+      serviceId,
       boarding: 0,
       alighting: 0,
       total: 0
@@ -189,6 +191,11 @@ export default function TransitDemandMap({
   const [points, setPoints] = useState([]);
   const [adminDongGeoJson, setAdminDongGeoJson] = useState(null);
   const [selectedDistricts, setSelectedDistricts] = useState([]);
+
+  /**
+   * Stores the stop or station selected from the map.
+   */
+  const [selectedNode, setSelectedNode] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [geoLoading, setGeoLoading] = useState(true);
@@ -284,6 +291,7 @@ export default function TransitDemandMap({
     if (!filters) {
       setPoints([]);
       setSelectedDistricts([]);
+      setSelectedNode(null);
       setErrorMessage("");
       return;
     }
@@ -295,9 +303,9 @@ export default function TransitDemandMap({
       setErrorMessage("");
 
       try {
-        const data = await fetchMapDemand({
-          mode: filters.mode,
-          lines: filters.lines,
+        const data = await fetchMultiModeMapDemand({
+          selectedSubwayLines: filters.selectedSubwayLines,
+          selectedBusLines: filters.selectedBusLines,
           dayTypes: filters.dayTypes,
           dayAggregation: filters.dayAggregation,
           hours: filters.hours
@@ -306,12 +314,14 @@ export default function TransitDemandMap({
         if (!ignore) {
           setPoints(data);
           setSelectedDistricts([]);
+          setSelectedNode(null);
         }
       } catch (error) {
         if (!ignore) {
           setErrorMessage(error.message);
           setPoints([]);
           setSelectedDistricts([]);
+          setSelectedNode(null);
         }
       } finally {
         if (!ignore) {
@@ -463,7 +473,7 @@ export default function TransitDemandMap({
               }}
             >
               {demandSummary.routes.map((route) => (
-                <li key={route.serviceId}>
+                <li key={route.key}>
                   <span
                     style={{
                       display: "inline-block",
@@ -471,10 +481,10 @@ export default function TransitDemandMap({
                       height: "10px",
                       borderRadius: "50%",
                       marginRight: "6px",
-                      backgroundColor: getRouteColor(route.serviceId)
+                      backgroundColor: getRouteColor(route.mode, route.serviceId)
                     }}
                   />
-                  {route.serviceId}
+                  [{route.mode}] {route.serviceId}
                   {" — "}
                   {Number(route[metric] || 0).toLocaleString()}
                 </li>
@@ -483,6 +493,12 @@ export default function TransitDemandMap({
           </div>
         </section>
       )}
+
+      <NodeDetailPanel
+        node={selectedNode}
+        metric={metric}
+        onClose={() => setSelectedNode(null)}
+      />
 
       <section className="map-card">
         <MapContainer
@@ -507,7 +523,7 @@ export default function TransitDemandMap({
           )}
 
           {visiblePoints.map((point) => {
-            const color = getRouteColor(point.serviceId);
+            const color = getRouteColor(point.mode, point.serviceId);
             const key =
               `${point.mode}-${point.serviceId}-${point.nodeId}-${point.nodeName}-${point.lat}-${point.lng}`;
 
@@ -525,9 +541,14 @@ export default function TransitDemandMap({
                   opacity: 0.85,
                   fillOpacity: 0.5
                 }}
+                eventHandlers={{
+                  click: () => setSelectedNode(point)
+                }}
               >
                 <Popup>
                   <strong>{point.nodeName}</strong>
+                  <br />
+                  Mode: {point.mode}
                   <br />
                   Line: {point.serviceId}
                   <br />
