@@ -4,7 +4,7 @@ import DemandControlPanel from "./components/DemandControlPanel.jsx";
 import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 
 /**
- * Root application component that separates draft filters from applied fileters.
+ * Root application component that separates draft filters from applied filters.
  *
  * Draft filters are edited by the user.
  *

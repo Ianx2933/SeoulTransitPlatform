@@ -10,27 +10,22 @@ import {
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point as turfPoint } from "@turf/helpers";
 
-import { fetchMultiModeMapDemand } from "../api/mapDemandApi.js";
+import {
+  fetchMultiModeMapDemand,
+  fetchNodeCatchment,
+  fetchNodeDetail
+} from "../api/mapDemandApi.js";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
-const EARTH_RADIUS_METERS = 6371000;
 
 const ROUTE_COLOR_PALETTE = [
-  "#1f77b4",
-  "#ff7f0e",
-  "#2ca02c",
-  "#d62728",
-  "#9467bd",
-  "#8c564b",
-  "#e377c2",
-  "#7f7f7f",
-  "#bcbd22",
-  "#17becf"
+  "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+  "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
 ];
 
 /**
- * Basemap tile layers compatible with leaflet.
+ * Basemap tile layers compatible with Leaflet.
  */
 const TILE_LAYERS = {
   osm: {
@@ -52,9 +47,6 @@ const TILE_LAYERS = {
 
 /**
  * Returns a stable color for each route.
- *
- * The hash-based color assignment keeps the same route visually consistent
- * across map refreshes without storing colors in the database.
  */
 function getRouteColor(mode, serviceId) {
   const text = `${mode || "unknown"}-${serviceId || ""}`;
@@ -64,30 +56,15 @@ function getRouteColor(mode, serviceId) {
     hash = text.charCodeAt(index) + ((hash << 5) - hash);
   }
 
-  const paletteIndex = Math.abs(hash) % ROUTE_COLOR_PALETTE.length;
-  return ROUTE_COLOR_PALETTE[paletteIndex];
+  return ROUTE_COLOR_PALETTE[Math.abs(hash) % ROUTE_COLOR_PALETTE.length];
 }
 
 /**
  * Converts demand volume into a readable circle radius.
- *
- * Circle size represents demand intensity. The scale is intentionally softened
- * because central stations and major bus corridors can otherwise dominate the map.
  */
 function calculateRadius(point, metric) {
   const demand = getDemandValue(point, metric);
-
-  if (demand <= 0) {
-    return 3;
-  }
-
-  return Math.min(
-    24,
-    Math.max(
-      4,
-      Math.sqrt(demand) / 5
-    )
-  );
+  return demand <= 0 ? 3 : Math.min(24, Math.max(4, Math.sqrt(demand) / 5));
 }
 
 /**
@@ -97,103 +74,49 @@ function getDemandValue(point, metric) {
   const boarding = Number(point.boarding || 0);
   const alighting = Number(point.alighting || 0);
 
-  if (metric === "boarding") {
-    return boarding;
-  }
-
-  if (metric === "alighting") {
-    return alighting;
-  }
-
+  if (metric === "boarding") return boarding;
+  if (metric === "alighting") return alighting;
   return boarding + alighting;
 }
 
 function getDistrictName(feature) {
-  return (
-    feature?.properties?.ADM_NM ||
-    feature?.properties?.adm_nm ||
-    "Selected district"
-  );
+  return feature?.properties?.ADM_NM || feature?.properties?.adm_nm || "Selected district";
 }
 
 function getDistrictCode(feature) {
-  return (
-    feature?.properties?.ADM_CD ||
-    feature?.properties?.adm_cd ||
-    ""
-  );
+  return feature?.properties?.ADM_CD || feature?.properties?.adm_cd || "";
 }
 
 function isValidPoint(point) {
-  return (
-    Number.isFinite(Number(point.lat)) &&
-    Number.isFinite(Number(point.lng))
-  );
+  return Number.isFinite(Number(point.lat)) && Number.isFinite(Number(point.lng));
 }
 
-
 /**
- * Creates a stable key for a loaded demand point.
+ * Creates a stable React key for a loaded demand point.
+ *
+ * The key intentionally uses only (mode, serviceId, nodeId) so that the same
+ * physical node is never split into multiple markers because of upstream
+ * naming differences or sub-decimal coordinate drift between data sources.
  */
 function createPointKey(point) {
   return [
     point.mode || "unknown",
     point.serviceId || "unknown",
-    point.nodeId || "unknown",
-    point.nodeName || "unknown",
-    point.lat || "unknown",
-    point.lng || "unknown"
+    point.nodeId || "unknown"
   ].join("-");
 }
 
 /**
- * Calculates distance between two coordinates with the haversine formula.
- */
-function calculateDistanceMeters(firstPoint, secondPoint) {
-  if (!isValidPoint(firstPoint) || !isValidPoint(secondPoint)) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  const firstLat = toRadians(Number(firstPoint.lat));
-  const secondLat = toRadians(Number(secondPoint.lat));
-  const deltaLat = toRadians(Number(secondPoint.lat) - Number(firstPoint.lat));
-  const deltaLng = toRadians(Number(secondPoint.lng) - Number(firstPoint.lng));
-
-  const haversine =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(firstLat) *
-      Math.cos(secondLat) *
-      Math.sin(deltaLng / 2) ** 2;
-
-  return EARTH_RADIUS_METERS * 2 * Math.atan2(
-    Math.sqrt(haversine),
-    Math.sqrt(1 - haversine)
-  );
-}
-
-/**
- * Converts degrees to radians.
- * (각도를 라디안으로 변환합니다.)
- */
-function toRadians(value) {
-  return (value * Math.PI) / 180;
-}
-
-/**
  * Creates a demand summary for the currently visible points.
- *
- * Route aggregation uses mode + serviceId so bus and subway results can be shown together safely.
  */
 function summarizeDemand(points, metric) {
   const totals = points.reduce(
     (accumulator, point) => {
       const boarding = Number(point.boarding || 0);
       const alighting = Number(point.alighting || 0);
-
       accumulator.boarding += boarding;
       accumulator.alighting += alighting;
       accumulator.total += boarding + alighting;
-
       return accumulator;
     },
     { boarding: 0, alighting: 0, total: 0 }
@@ -205,30 +128,16 @@ function summarizeDemand(points, metric) {
     const mode = point.mode || "unknown";
     const serviceId = point.serviceId || "unknown";
     const key = `${mode}-${serviceId}`;
-
-    const existing = routeMap.get(key) || {
-      key,
-      mode,
-      serviceId,
-      boarding: 0,
-      alighting: 0,
-      total: 0
-    };
-
+    const existing = routeMap.get(key) || { key, mode, serviceId, boarding: 0, alighting: 0, total: 0 };
     existing.boarding += Number(point.boarding || 0);
     existing.alighting += Number(point.alighting || 0);
-    existing.total +=
-      Number(point.boarding || 0) + Number(point.alighting || 0);
-
+    existing.total += Number(point.boarding || 0) + Number(point.alighting || 0);
     routeMap.set(key, existing);
   });
 
-  const routes = Array.from(routeMap.values())
-    .sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0));
-
   return {
     totals,
-    routes
+    routes: Array.from(routeMap.values()).sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))
   };
 }
 
@@ -240,139 +149,84 @@ export default function TransitDemandMap({
   const [points, setPoints] = useState([]);
   const [adminDongGeoJson, setAdminDongGeoJson] = useState(null);
   const [selectedDistricts, setSelectedDistricts] = useState([]);
-
-  /**
-   * Stores the stop or station selected from the map.
-   */
-  const [selectedNode, setSelectedNode] = useState(null);
-
-  /**
-   * Stores the radius used for nearby node grouping.
-   */
-  const [nodeGroupingRadiusMeters, setNodeGroupingRadiusMeters] =
-    useState(500);
-
+  const [selectedPoint, setSelectedPoint] = useState(null);
+  const [nodeDetail, setNodeDetail] = useState(null);
+  const [nodeCatchment, setNodeCatchment] = useState(null);
+  const [nodeCatchmentRadiusMeters, setNodeCatchmentRadiusMeters] = useState(800);
   const [loading, setLoading] = useState(false);
   const [geoLoading, setGeoLoading] = useState(true);
-
+  const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
+  const [nodeCatchmentLoading, setNodeCatchmentLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [nodeDetailErrorMessage, setNodeDetailErrorMessage] = useState("");
+  const [nodeCatchmentErrorMessage, setNodeCatchmentErrorMessage] = useState("");
+
+  /**
+   * Increments to force a manual retry of node-detail and catchment effects.
+   *
+   * Using a nonce is more explicit than the older trick of setting selectedPoint
+   * to null and back inside a setTimeout. The intent — "rerun the effects" — is
+   * directly encoded in the dependency array.
+   */
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const metric = filters?.metric || "total";
   const tileLayer = TILE_LAYERS[selectedTileLayer] || TILE_LAYERS.cartoLight;
 
   const sortedPoints = useMemo(() => {
-    return [...points].sort(
-      (a, b) => getDemandValue(b, metric) - getDemandValue(a, metric)
-    );
+    return [...points].sort((a, b) => getDemandValue(b, metric) - getDemandValue(a, metric));
   }, [points, metric]);
 
-  /**
-   * Filters points by selected administrative districts.
-   *
-   * If no district is selected, the full loaded demand layer remains visible.
-   *
-   * If one or more districts are selected, a point is visible when it is inside at least one selected polygon.
-   */
   const visiblePoints = useMemo(() => {
-    if (selectedDistricts.length === 0) {
-      return sortedPoints;
-    }
+    if (selectedDistricts.length === 0) return sortedPoints;
 
     return sortedPoints.filter((transitPoint) => {
-      if (!isValidPoint(transitPoint)) {
-        return false;
-      }
-
-      const candidatePoint = turfPoint([
-        Number(transitPoint.lng),
-        Number(transitPoint.lat)
-      ]);
-
-      return selectedDistricts.some((district) =>
-        booleanPointInPolygon(candidatePoint, district)
-      );
+      if (!isValidPoint(transitPoint)) return false;
+      const candidatePoint = turfPoint([Number(transitPoint.lng), Number(transitPoint.lat)]);
+      return selectedDistricts.some((district) => booleanPointInPolygon(candidatePoint, district));
     });
   }, [sortedPoints, selectedDistricts]);
 
+  const selectedPointKey = selectedPoint ? createPointKey(selectedPoint) : "";
+  const demandSummary = useMemo(() => summarizeDemand(visiblePoints, metric), [visiblePoints, metric]);
+  const selectedDistrictCodes = useMemo(() => new Set(selectedDistricts.map(getDistrictCode)), [selectedDistricts]);
 
   /**
-   * Finds visible points within the selected radius from the selected node.
+   * Combined error shown in the panel header.
+   *
+   * Both API errors are reported, separated by a line break, so a failure
+   * in one API does not hide a failure in the other.
    */
-  const nearbyNodes = useMemo(() => {
-    if (!selectedNode || !isValidPoint(selectedNode)) {
-      return [];
-    }
-
-    return visiblePoints
-      .filter(isValidPoint)
-      .map((point) => ({
-        ...point,
-        groupingKey: createPointKey(point),
-        distanceMeters: calculateDistanceMeters(selectedNode, point)
-      }))
-      .filter((point) => point.distanceMeters <= nodeGroupingRadiusMeters)
-      .sort((a, b) => a.distanceMeters - b.distanceMeters);
-  }, [selectedNode, visiblePoints, nodeGroupingRadiusMeters]);
-
-  const nearbyNodeKeys = useMemo(() => {
-    return new Set(nearbyNodes.map((point) => point.groupingKey));
-  }, [nearbyNodes]);
-
-  const selectedNodeKey = selectedNode ? createPointKey(selectedNode) : "";
-
-  const demandSummary = useMemo(() => {
-    return summarizeDemand(visiblePoints, metric);
-  }, [visiblePoints, metric]);
-
-  const selectedDistrictCodes = useMemo(() => {
-    return new Set(selectedDistricts.map(getDistrictCode));
-  }, [selectedDistricts]);
+  const combinedNodeErrorMessage = [nodeDetailErrorMessage, nodeCatchmentErrorMessage]
+    .filter(Boolean)
+    .join("\n");
 
   useEffect(() => {
     let ignore = false;
 
     async function loadAdminDongGeoJson() {
       setGeoLoading(true);
-
       try {
-        const response = await fetch(
-          "/data/capital_area_admin_dong_4326.geojson"
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            `Failed to load GeoJSON: ${response.status}`
-          );
-        }
-
+        const response = await fetch("/data/capital_area_admin_dong_4326.geojson");
+        if (!response.ok) throw new Error(`Failed to load GeoJSON: ${response.status}`);
         const data = await response.json();
-
-        if (!ignore) {
-          setAdminDongGeoJson(data);
-        }
+        if (!ignore) setAdminDongGeoJson(data);
       } catch (error) {
-        if (!ignore) {
-          setErrorMessage(error.message);
-        }
+        if (!ignore) setErrorMessage(error.message);
       } finally {
-        if (!ignore) {
-          setGeoLoading(false);
-        }
+        if (!ignore) setGeoLoading(false);
       }
     }
 
     loadAdminDongGeoJson();
-
-    return () => {
-      ignore = true;
-    };
+    return () => { ignore = true; };
   }, []);
 
   useEffect(() => {
     if (!filters) {
       setPoints([]);
       setSelectedDistricts([]);
-      setSelectedNode(null);
+      clearNodeSelection();
       setErrorMessage("");
       return;
     }
@@ -382,7 +236,6 @@ export default function TransitDemandMap({
     async function loadDemand() {
       setLoading(true);
       setErrorMessage("");
-
       try {
         const data = await fetchMultiModeMapDemand({
           selectedSubwayLines: filters.selectedSubwayLines,
@@ -391,189 +244,202 @@ export default function TransitDemandMap({
           dayAggregation: filters.dayAggregation,
           hours: filters.hours
         });
-
         if (!ignore) {
           setPoints(data);
           setSelectedDistricts([]);
-          setSelectedNode(null);
+          clearNodeSelection();
         }
       } catch (error) {
         if (!ignore) {
           setErrorMessage(error.message);
           setPoints([]);
           setSelectedDistricts([]);
-          setSelectedNode(null);
+          clearNodeSelection();
         }
       } finally {
-        if (!ignore) {
-          setLoading(false);
-        }
+        if (!ignore) setLoading(false);
       }
     }
 
     loadDemand();
-
-    return () => {
-      ignore = true;
-    };
+    return () => { ignore = true; };
   }, [filters]);
 
   /**
-   * Handles district selection.
+   * Loads node-detail when the selected point or filters change.
    *
-   * Click selects one district.
-   *
-   * Ctrl/Shift/Meta click toggles districts to support multi-district analysis.
+   * Catchment radius changes do not trigger this effect, because node-detail
+   * is independent of radius. This avoids redundant API calls when the user
+   * toggles between 400 / 800 / 1000m.
    */
+  useEffect(() => {
+    if (!selectedPoint || !filters) {
+      setNodeDetail(null);
+      setNodeDetailErrorMessage("");
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadNodeDetail() {
+      setNodeDetailLoading(true);
+      setNodeDetailErrorMessage("");
+      try {
+        const nextNodeDetail = await fetchNodeDetail({
+          mode: selectedPoint.mode,
+          nodeId: selectedPoint.nodeId,
+          dayTypes: filters.dayTypes,
+          dayAggregation: filters.dayAggregation,
+          hours: filters.hours
+        });
+        if (!ignore) {
+          setNodeDetail(nextNodeDetail);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setNodeDetail(null);
+          setNodeDetailErrorMessage(error.message);
+        }
+      } finally {
+        if (!ignore) setNodeDetailLoading(false);
+      }
+    }
+
+    loadNodeDetail();
+    return () => { ignore = true; };
+  }, [selectedPoint, filters, retryNonce]);
+
+  /**
+   * Loads catchment whenever the selected point, filters, or radius change.
+   *
+   * Independent from the node-detail effect so a catchment failure does not
+   * wipe out node-detail data already on screen.
+   */
+  useEffect(() => {
+    if (!selectedPoint || !filters) {
+      setNodeCatchment(null);
+      setNodeCatchmentErrorMessage("");
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadCatchment() {
+      setNodeCatchmentLoading(true);
+      setNodeCatchmentErrorMessage("");
+      try {
+        const nextCatchment = await fetchNodeCatchment({
+          lat: selectedPoint.lat,
+          lng: selectedPoint.lng,
+          radiusMeters: nodeCatchmentRadiusMeters,
+          modes: ["subway", "bus"],
+          dayTypes: filters.dayTypes,
+          dayAggregation: filters.dayAggregation,
+          hours: filters.hours
+        });
+        if (!ignore) {
+          setNodeCatchment(nextCatchment);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setNodeCatchment(null);
+          setNodeCatchmentErrorMessage(error.message);
+        }
+      } finally {
+        if (!ignore) setNodeCatchmentLoading(false);
+      }
+    }
+
+    loadCatchment();
+    return () => { ignore = true; };
+  }, [selectedPoint, filters, nodeCatchmentRadiusMeters, retryNonce]);
+
+  function clearNodeSelection() {
+    setSelectedPoint(null);
+    setNodeDetail(null);
+    setNodeCatchment(null);
+    setNodeDetailErrorMessage("");
+    setNodeCatchmentErrorMessage("");
+  }
+
+  function handlePointClick(point) {
+    setSelectedPoint(point);
+    setNodeDetail(null);
+    setNodeCatchment(null);
+    setNodeDetailErrorMessage("");
+    setNodeCatchmentErrorMessage("");
+  }
+
+  function handleRetryNodeAnalysis() {
+    if (!selectedPoint) return;
+    setRetryNonce((current) => current + 1);
+  }
+
   const toggleDistrictSelection = (feature, event) => {
     const code = getDistrictCode(feature);
-    const multiSelect =
-      event.originalEvent.ctrlKey ||
-      event.originalEvent.shiftKey ||
-      event.originalEvent.metaKey;
+    const multiSelect = event.originalEvent.ctrlKey || event.originalEvent.shiftKey || event.originalEvent.metaKey;
 
     if (!multiSelect) {
       setSelectedDistricts([feature]);
-      setSelectedNode(null);
+      clearNodeSelection();
       return;
     }
 
     setSelectedDistricts((currentDistricts) => {
-      const alreadySelected = currentDistricts.some(
-        (district) => getDistrictCode(district) === code
-      );
-
+      const alreadySelected = currentDistricts.some((district) => getDistrictCode(district) === code);
       if (alreadySelected) {
-        return currentDistricts.filter(
-          (district) => getDistrictCode(district) !== code
-        );
+        return currentDistricts.filter((district) => getDistrictCode(district) !== code);
       }
-
       return [...currentDistricts, feature];
     });
-
-    setSelectedNode(null);
+    clearNodeSelection();
   };
 
   const handleEachDistrict = (feature, layer) => {
-    layer.on({
-      click: (event) => {
-        toggleDistrictSelection(feature, event);
-      }
-    });
-
-    layer.bindTooltip(getDistrictName(feature), {
-      sticky: true
-    });
+    layer.on({ click: (event) => toggleDistrictSelection(feature, event) });
+    layer.bindTooltip(getDistrictName(feature), { sticky: true });
   };
 
   const getDistrictStyle = (feature) => {
     const isSelected = selectedDistrictCodes.has(getDistrictCode(feature));
-
-    return {
-      color: isSelected ? "#111111" : "#444444",
-      weight: isSelected ? 3 : 1,
-      fillOpacity: isSelected ? 0.14 : 0.04
-    };
+    return { color: isSelected ? "#111111" : "#444444", weight: isSelected ? 3 : 1, fillOpacity: isSelected ? 0.14 : 0.04 };
   };
 
   return (
     <div className="map-page">
-      {errorMessage && (
-        <div className="error-box">
-          API error: {errorMessage}
-        </div>
-      )}
+      {errorMessage && <div className="error-box">API error: {errorMessage}</div>}
 
-      <div
-        className="map-status-bar"
-        style={{
-          display: "flex",
-          gap: "12px",
-          alignItems: "center",
-          flexWrap: "wrap",
-          padding: "8px 16px",
-          fontSize: "14px"
-        }}
-      >
+      <div className="map-status-bar" style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", padding: "8px 16px", fontSize: "14px" }}>
         <span>
           {geoLoading && "Loading administrative boundaries..."}
           {!geoLoading && !filters && "Select filters and click Load demand."}
           {filters && loading && "Loading demand data..."}
-          {filters && !loading &&
-            `${visiblePoints.length.toLocaleString()} / ${points.length.toLocaleString()} points shown`}
+          {filters && !loading && `${visiblePoints.length.toLocaleString()} / ${points.length.toLocaleString()} points shown`}
         </span>
 
         {selectedDistricts.length > 0 && (
           <>
-            <strong>
-              Districts: {selectedDistricts.map(getDistrictName).join(", ")}
-            </strong>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedDistricts([]);
-                setSelectedNode(null);
-              }}
-            >
-              Clear districts
-            </button>
+            <strong>Districts: {selectedDistricts.map(getDistrictName).join(", ")}</strong>
+            <button type="button" onClick={() => { setSelectedDistricts([]); clearNodeSelection(); }}>Clear districts</button>
           </>
         )}
       </div>
 
       {filters && !loading && (
-        <section
-          className="demand-summary"
-          style={{
-            padding: "12px 16px",
-            borderBottom: "1px solid #dddddd",
-            backgroundColor: "#ffffff"
-          }}
-        >
-          <strong>
-            Demand summary
-            {filters?.dayAggregation === "sum"
-              ? " — sum of selected days"
-              : " — average per selected day"}
-          </strong>
+        <section className="demand-summary" style={{ padding: "12px 16px", borderBottom: "1px solid #dddddd", backgroundColor: "#ffffff" }}>
+          <strong>Demand summary{filters?.dayAggregation === "sum" ? " — sum of selected days" : " — average per selected day"}</strong>
           <div>
-            Boarding: {demandSummary.totals.boarding.toLocaleString()}
-            {" | "}
-            Alighting: {demandSummary.totals.alighting.toLocaleString()}
-            {" | "}
-            Total: {demandSummary.totals.total.toLocaleString()}
+            Boarding: {demandSummary.totals.boarding.toLocaleString()} | Alighting: {demandSummary.totals.alighting.toLocaleString()} | Total: {demandSummary.totals.total.toLocaleString()}
           </div>
 
           <div style={{ marginTop: "8px" }}>
             <strong>Routes by {metric}</strong>
-            <span style={{ marginLeft: "8px", color: "#666666" }}>
-              ({demandSummary.routes.length.toLocaleString()} route
-              {demandSummary.routes.length === 1 ? "" : "s"})
-            </span>
-            <ol
-              style={{
-                maxHeight: "280px",
-                overflowY: "auto",
-                paddingRight: "12px"
-              }}
-            >
+            <span style={{ marginLeft: "8px", color: "#666666" }}>({demandSummary.routes.length.toLocaleString()} route{demandSummary.routes.length === 1 ? "" : "s"})</span>
+            <ol style={{ maxHeight: "280px", overflowY: "auto", paddingRight: "12px" }}>
               {demandSummary.routes.map((route) => (
                 <li key={route.key}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      marginRight: "6px",
-                      backgroundColor: getRouteColor(route.mode, route.serviceId)
-                    }}
-                  />
-                  [{route.mode}] {route.serviceId}
-                  {" — "}
-                  {Number(route[metric] || 0).toLocaleString()}
+                  <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", marginRight: "6px", backgroundColor: getRouteColor(route.mode, route.serviceId) }} />
+                  [{route.mode}] {route.serviceId} — {Number(route[metric] || 0).toLocaleString()}
                 </li>
               ))}
             </ol>
@@ -582,85 +448,48 @@ export default function TransitDemandMap({
       )}
 
       <NodeDetailPanel
-        node={selectedNode}
-        metric={metric}
-        radiusMeters={nodeGroupingRadiusMeters}
-        onRadiusMetersChange={setNodeGroupingRadiusMeters}
-        nearbyNodes={nearbyNodes}
-        onClose={() => setSelectedNode(null)}
+        selectedPoint={selectedPoint}
+        nodeDetail={nodeDetail}
+        catchment={nodeCatchment}
+        radiusMeters={nodeCatchmentRadiusMeters}
+        onRadiusMetersChange={setNodeCatchmentRadiusMeters}
+        loading={nodeDetailLoading}
+        catchmentLoading={nodeCatchmentLoading}
+        errorMessage={combinedNodeErrorMessage}
+        onRetry={handleRetryNodeAnalysis}
+        onClose={clearNodeSelection}
       />
 
       <section className="map-card">
-        <MapContainer
-          center={SEOUL_CENTER}
-          zoom={10}
-          scrollWheelZoom
-          className="leaflet-map"
-        >
-          <TileLayer
-            key={selectedTileLayer}
-            attribution={tileLayer.attribution}
-            url={tileLayer.url}
-          />
+        <MapContainer center={SEOUL_CENTER} zoom={10} scrollWheelZoom className="leaflet-map">
+          <TileLayer key={selectedTileLayer} attribution={tileLayer.attribution} url={tileLayer.url} />
 
           {showAdminBoundary && adminDongGeoJson && (
-            <GeoJSON
-              key={selectedDistricts.map(getDistrictCode).join("-") || "all"}
-              data={adminDongGeoJson}
-              style={getDistrictStyle}
-              onEachFeature={handleEachDistrict}
-            />
+            <GeoJSON key={selectedDistricts.map(getDistrictCode).join("-") || "all"} data={adminDongGeoJson} style={getDistrictStyle} onEachFeature={handleEachDistrict} />
           )}
 
           {visiblePoints.map((point) => {
             const color = getRouteColor(point.mode, point.serviceId);
             const key = createPointKey(point);
-            const isSelectedNode = key === selectedNodeKey;
-            const isNearbyNode = nearbyNodeKeys.has(key);
-
+            const isSelectedPoint = key === selectedPointKey;
             const radius = calculateRadius(point, metric);
 
             return (
               <CircleMarker
                 key={key}
                 center={[point.lat, point.lng]}
-                radius={
-                  isSelectedNode
-                    ? radius + 4
-                    : isNearbyNode
-                      ? radius + 2
-                      : radius
-                }
-                pathOptions={{
-                  color,
-                  fillColor: color,
-                  weight: isSelectedNode ? 4 : isNearbyNode ? 2 : 1,
-                  opacity: isSelectedNode || isNearbyNode ? 1 : 0.85,
-                  fillOpacity: isSelectedNode ? 0.9 : isNearbyNode ? 0.7 : 0.5
-                }}
-                eventHandlers={{
-                  click: () => setSelectedNode(point)
-                }}
+                radius={isSelectedPoint ? radius + 4 : radius}
+                pathOptions={{ color, fillColor: color, weight: isSelectedPoint ? 4 : 1, opacity: isSelectedPoint ? 1 : 0.85, fillOpacity: isSelectedPoint ? 0.9 : 0.5 }}
+                eventHandlers={{ click: () => handlePointClick(point) }}
               >
                 <Popup>
-                  <strong>{point.nodeName}</strong>
-                  <br />
-                  Mode: {point.mode}
-                  <br />
-                  Line: {point.serviceId}
-                  <br />
-                  Node ID: {point.nodeId}
-                  <br />
-                  Boarding: {Number(point.boarding || 0).toLocaleString()}
-                  <br />
-                  Alighting: {Number(point.alighting || 0).toLocaleString()}
-                  <br />
-                  Total: {
-                    (
-                      Number(point.boarding || 0) +
-                      Number(point.alighting || 0)
-                    ).toLocaleString()
-                  }
+                  <strong>{point.nodeName}</strong><br />
+                  Mode: {point.mode}<br />
+                  Line: {point.serviceId}<br />
+                  Node ID: {point.nodeId}<br />
+                  Boarding: {Number(point.boarding || 0).toLocaleString()}<br />
+                  Alighting: {Number(point.alighting || 0).toLocaleString()}<br />
+                  Total: {(Number(point.boarding || 0) + Number(point.alighting || 0)).toLocaleString()}
                 </Popup>
               </CircleMarker>
             );
