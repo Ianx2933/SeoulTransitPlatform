@@ -14,6 +14,7 @@ import { fetchMultiModeMapDemand } from "../api/mapDemandApi.js";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
+const EARTH_RADIUS_METERS = 6371000;
 
 const ROUTE_COLOR_PALETTE = [
   "#1f77b4",
@@ -130,6 +131,54 @@ function isValidPoint(point) {
   );
 }
 
+
+/**
+ * Creates a stable key for a loaded demand point.
+ */
+function createPointKey(point) {
+  return [
+    point.mode || "unknown",
+    point.serviceId || "unknown",
+    point.nodeId || "unknown",
+    point.nodeName || "unknown",
+    point.lat || "unknown",
+    point.lng || "unknown"
+  ].join("-");
+}
+
+/**
+ * Calculates distance between two coordinates with the haversine formula.
+ */
+function calculateDistanceMeters(firstPoint, secondPoint) {
+  if (!isValidPoint(firstPoint) || !isValidPoint(secondPoint)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const firstLat = toRadians(Number(firstPoint.lat));
+  const secondLat = toRadians(Number(secondPoint.lat));
+  const deltaLat = toRadians(Number(secondPoint.lat) - Number(firstPoint.lat));
+  const deltaLng = toRadians(Number(secondPoint.lng) - Number(firstPoint.lng));
+
+  const haversine =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(firstLat) *
+      Math.cos(secondLat) *
+      Math.sin(deltaLng / 2) ** 2;
+
+  return EARTH_RADIUS_METERS * 2 * Math.atan2(
+    Math.sqrt(haversine),
+    Math.sqrt(1 - haversine)
+  );
+}
+
+/**
+ * Converts degrees to radians.
+ * (각도를 라디안으로 변환합니다.)
+ */
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
 /**
  * Creates a demand summary for the currently visible points.
  *
@@ -197,6 +246,12 @@ export default function TransitDemandMap({
    */
   const [selectedNode, setSelectedNode] = useState(null);
 
+  /**
+   * Stores the radius used for nearby node grouping.
+   */
+  const [nodeGroupingRadiusMeters, setNodeGroupingRadiusMeters] =
+    useState(500);
+
   const [loading, setLoading] = useState(false);
   const [geoLoading, setGeoLoading] = useState(true);
 
@@ -238,6 +293,32 @@ export default function TransitDemandMap({
       );
     });
   }, [sortedPoints, selectedDistricts]);
+
+
+  /**
+   * Finds visible points within the selected radius from the selected node.
+   */
+  const nearbyNodes = useMemo(() => {
+    if (!selectedNode || !isValidPoint(selectedNode)) {
+      return [];
+    }
+
+    return visiblePoints
+      .filter(isValidPoint)
+      .map((point) => ({
+        ...point,
+        groupingKey: createPointKey(point),
+        distanceMeters: calculateDistanceMeters(selectedNode, point)
+      }))
+      .filter((point) => point.distanceMeters <= nodeGroupingRadiusMeters)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  }, [selectedNode, visiblePoints, nodeGroupingRadiusMeters]);
+
+  const nearbyNodeKeys = useMemo(() => {
+    return new Set(nearbyNodes.map((point) => point.groupingKey));
+  }, [nearbyNodes]);
+
+  const selectedNodeKey = selectedNode ? createPointKey(selectedNode) : "";
 
   const demandSummary = useMemo(() => {
     return summarizeDemand(visiblePoints, metric);
@@ -353,6 +434,7 @@ export default function TransitDemandMap({
 
     if (!multiSelect) {
       setSelectedDistricts([feature]);
+      setSelectedNode(null);
       return;
     }
 
@@ -369,6 +451,8 @@ export default function TransitDemandMap({
 
       return [...currentDistricts, feature];
     });
+
+    setSelectedNode(null);
   };
 
   const handleEachDistrict = (feature, layer) => {
@@ -428,7 +512,10 @@ export default function TransitDemandMap({
 
             <button
               type="button"
-              onClick={() => setSelectedDistricts([])}
+              onClick={() => {
+                setSelectedDistricts([]);
+                setSelectedNode(null);
+              }}
             >
               Clear districts
             </button>
@@ -497,6 +584,9 @@ export default function TransitDemandMap({
       <NodeDetailPanel
         node={selectedNode}
         metric={metric}
+        radiusMeters={nodeGroupingRadiusMeters}
+        onRadiusMetersChange={setNodeGroupingRadiusMeters}
+        nearbyNodes={nearbyNodes}
         onClose={() => setSelectedNode(null)}
       />
 
@@ -524,8 +614,9 @@ export default function TransitDemandMap({
 
           {visiblePoints.map((point) => {
             const color = getRouteColor(point.mode, point.serviceId);
-            const key =
-              `${point.mode}-${point.serviceId}-${point.nodeId}-${point.nodeName}-${point.lat}-${point.lng}`;
+            const key = createPointKey(point);
+            const isSelectedNode = key === selectedNodeKey;
+            const isNearbyNode = nearbyNodeKeys.has(key);
 
             const radius = calculateRadius(point, metric);
 
@@ -533,13 +624,19 @@ export default function TransitDemandMap({
               <CircleMarker
                 key={key}
                 center={[point.lat, point.lng]}
-                radius={radius}
+                radius={
+                  isSelectedNode
+                    ? radius + 4
+                    : isNearbyNode
+                      ? radius + 2
+                      : radius
+                }
                 pathOptions={{
                   color,
                   fillColor: color,
-                  weight: 1,
-                  opacity: 0.85,
-                  fillOpacity: 0.5
+                  weight: isSelectedNode ? 4 : isNearbyNode ? 2 : 1,
+                  opacity: isSelectedNode || isNearbyNode ? 1 : 0.85,
+                  fillOpacity: isSelectedNode ? 0.9 : isNearbyNode ? 0.7 : 0.5
                 }}
                 eventHandlers={{
                   click: () => setSelectedNode(point)

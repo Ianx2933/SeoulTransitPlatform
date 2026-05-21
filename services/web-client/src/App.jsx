@@ -4,17 +4,16 @@ import DemandControlPanel from "./components/DemandControlPanel.jsx";
 import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 
 /**
- * Root application component.
- *
- * This component separates draft filters from applied filters.
+ * Root application component that separates draft filters from applied fileters.
  *
  * Draft filters are edited by the user.
  *
  * Applied filters are sent to the map only after the user clicks Load.
  */
 export default function App() {
-  const [mode, setMode] = useState("subway");
-  const [selectedLines, setSelectedLines] = useState([]);
+  const [selectedSubwayLines, setSelectedSubwayLines] = useState([]);
+  const [selectedBusLines, setSelectedBusLines] = useState([]);
+
   const [dayTypePreset, setDayTypePreset] = useState("mon");
   const [selectedDayTypes, setSelectedDayTypes] = useState(["mon"]);
   const [dayAggregation, setDayAggregation] = useState("average");
@@ -22,9 +21,15 @@ export default function App() {
   const [endHour, setEndHour] = useState(8);
   const [metric, setMetric] = useState("total");
 
-  const [lines, setLines] = useState([]);
-  const [lineLoading, setLineLoading] = useState(false);
-  const [lineError, setLineError] = useState("");
+  const [subwayLines, setSubwayLines] = useState([]);
+  const [busLines, setBusLines] = useState([]);
+
+  const [subwayLineLoading, setSubwayLineLoading] = useState(false);
+  const [busLineLoading, setBusLineLoading] = useState(false);
+
+  const [subwayLineError, setSubwayLineError] = useState("");
+  const [busLineError, setBusLineError] = useState("");
+  const [filterError, setFilterError] = useState("");
 
   const [appliedFilters, setAppliedFilters] = useState(null);
 
@@ -41,47 +46,52 @@ export default function App() {
   const [selectedTileLayer, setSelectedTileLayer] = useState("cartoLight");
 
   /**
-   * Loads available lines whenever the transport mode changes.
+   * Loads route candidates for one transport mode.
+   */
+  const loadLinesByMode = async ({
+    mode,
+    setLines,
+    setLoading,
+    setError
+  }) => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/map/lines?mode=${mode}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${mode} lines: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setLines(data);
+    } catch (error) {
+      setError(error.message);
+      setLines([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Loads subway and bus line lists once when the dashboard starts.
    */
   useEffect(() => {
-    let ignore = false;
+    loadLinesByMode({
+      mode: "subway",
+      setLines: setSubwayLines,
+      setLoading: setSubwayLineLoading,
+      setError: setSubwayLineError
+    });
 
-    async function loadLines() {
-      setLineLoading(true);
-      setLineError("");
-      setLines([]);
-      setSelectedLines([]);
-      setAppliedFilters(null);
-
-      try {
-        const response = await fetch(`/api/map/lines?mode=${mode}`);
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch lines: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (!ignore) {
-          setLines(data);
-        }
-      } catch (error) {
-        if (!ignore) {
-          setLineError(error.message);
-        }
-      } finally {
-        if (!ignore) {
-          setLineLoading(false);
-        }
-      }
-    }
-
-    loadLines();
-
-    return () => {
-      ignore = true;
-    };
-  }, [mode]);
+    loadLinesByMode({
+      mode: "bus",
+      setLines: setBusLines,
+      setLoading: setBusLineLoading,
+      setError: setBusLineError
+    });
+  }, []);
 
   /**
    * Builds a continuous hour list from the selected range.
@@ -100,20 +110,23 @@ export default function App() {
    * Applies the current filter selection to the map.
    */
   const handleLoadDemand = () => {
-    if (selectedLines.length === 0) {
-      setLineError("Please select at least one line before loading demand.");
+    if (
+      selectedSubwayLines.length === 0 &&
+      selectedBusLines.length === 0
+    ) {
+      setFilterError("Please select at least one subway or bus route before loading demand.");
       return;
     }
 
     if (selectedDayTypes.length === 0) {
-      setLineError("Please select at least one day type before loading demand.");
+      setFilterError("Please select at least one day type before loading demand.");
       return;
     }
 
-    setLineError("");
+    setFilterError("");
     setAppliedFilters({
-      mode,
-      lines: selectedLines,
+      selectedSubwayLines,
+      selectedBusLines,
       dayTypes: selectedDayTypes,
       dayAggregation,
       hours: buildSelectedHours(),
@@ -124,8 +137,6 @@ export default function App() {
   return (
     <main className="app-shell">
       <DemandControlPanel
-        mode={mode}
-        setMode={setMode}
         dayTypePreset={dayTypePreset}
         setDayTypePreset={setDayTypePreset}
         selectedDayTypes={selectedDayTypes}
@@ -136,13 +147,19 @@ export default function App() {
         setStartHour={setStartHour}
         endHour={endHour}
         setEndHour={setEndHour}
-        selectedLines={selectedLines}
-        setSelectedLines={setSelectedLines}
+        selectedSubwayLines={selectedSubwayLines}
+        setSelectedSubwayLines={setSelectedSubwayLines}
+        selectedBusLines={selectedBusLines}
+        setSelectedBusLines={setSelectedBusLines}
         metric={metric}
         setMetric={setMetric}
-        lines={lines}
-        lineLoading={lineLoading}
-        lineError={lineError}
+        subwayLines={subwayLines}
+        busLines={busLines}
+        subwayLineLoading={subwayLineLoading}
+        busLineLoading={busLineLoading}
+        subwayLineError={subwayLineError}
+        busLineError={busLineError}
+        filterError={filterError}
         onLoadDemand={handleLoadDemand}
         hasAppliedFilters={Boolean(appliedFilters)}
         showAdminBoundary={showAdminBoundary}

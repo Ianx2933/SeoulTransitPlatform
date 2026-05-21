@@ -73,15 +73,13 @@ const TILE_LAYER_OPTIONS = [
 ];
 
 /**
- * Control panel for demand exploration.
- *
- * This component does not fetch demand data by itself.
- *
+ * Control panel for multi-mode demand exploration.
+
+ * This component is responsible for letting the user select filters and Load demand data
+
  * It only lets the user select filters and explicitly request loading.
  */
 export default function DemandControlPanel({
-  mode,
-  setMode,
   dayTypePreset,
   setDayTypePreset,
   selectedDayTypes,
@@ -92,13 +90,19 @@ export default function DemandControlPanel({
   setStartHour,
   endHour,
   setEndHour,
-  selectedLines,
-  setSelectedLines,
+  selectedSubwayLines,
+  setSelectedSubwayLines,
+  selectedBusLines,
+  setSelectedBusLines,
   metric,
   setMetric,
-  lines = [],
-  lineLoading,
-  lineError,
+  subwayLines = [],
+  busLines = [],
+  subwayLineLoading,
+  busLineLoading,
+  subwayLineError,
+  busLineError,
+  filterError,
   onLoadDemand,
   hasAppliedFilters,
   showAdminBoundary,
@@ -107,21 +111,10 @@ export default function DemandControlPanel({
   setSelectedTileLayer
 }) {
   /**
-   * Local search keyword for the route selector.
-   *
-   * This keeps route selection usable even when bus routes are numerous.
+   * Local search keywords for each route selector.
    */
-  const [lineSearch, setLineSearch] = useState("");
-
-  /**
-   * Changes transport mode.
-   *
-   * The parent component resets line state after loading the new mode's line list.
-   */
-  const handleModeChange = (event) => {
-    setMode(event.target.value);
-    setLineSearch("");
-  };
+  const [subwayLineSearch, setSubwayLineSearch] = useState("");
+  const [busLineSearch, setBusLineSearch] = useState("");
 
   /**
    * Applies a predefined day type preset.
@@ -153,28 +146,34 @@ export default function DemandControlPanel({
 
   /**
    * Filters route candidates by the user's keyword.
-   *
-   * The result is capped to keep the UI compact and to avoid rendering a very
-   * long list of bus routes at once.
+   * (사용자 검색어로 노선 후보를 필터링합니다.)
    */
-  const filteredLines = useMemo(() => {
-    const keyword = lineSearch.trim().toLowerCase();
+  const filterLines = (lines, keyword) => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
 
-    if (!keyword) {
+    if (!normalizedKeyword) {
       return lines.slice(0, 30);
     }
 
     return lines
       .filter((lineName) =>
-        String(lineName).toLowerCase().includes(keyword)
+        String(lineName).toLowerCase().includes(normalizedKeyword)
       )
       .slice(0, 30);
-  }, [lines, lineSearch]);
+  };
+
+  const filteredSubwayLines = useMemo(() => {
+    return filterLines(subwayLines, subwayLineSearch);
+  }, [subwayLines, subwayLineSearch]);
+
+  const filteredBusLines = useMemo(() => {
+    return filterLines(busLines, busLineSearch);
+  }, [busLines, busLineSearch]);
 
   /**
    * Adds a route to the selected route chips.
    */
-  const addLine = (lineName) => {
+  const addLine = (lineName, selectedLines, setSelectedLines) => {
     setSelectedLines((currentLines) => {
       if (currentLines.includes(lineName)) {
         return currentLines;
@@ -187,37 +186,153 @@ export default function DemandControlPanel({
   /**
    * Removes a route from the selected route chips.
    */
-  const removeLine = (lineName) => {
+  const removeLine = (lineName, setSelectedLines) => {
     setSelectedLines((currentLines) =>
       currentLines.filter((value) => value !== lineName)
     );
   };
 
   /**
-   * Clears all selected routes.
+   * Renders one route selector section.
    */
-  const clearSelectedLines = () => {
-    setSelectedLines([]);
+  const renderRouteSelector = ({
+    title,
+    searchValue,
+    setSearchValue,
+    searchPlaceholder,
+    loading,
+    error,
+    lines,
+    selectedLines,
+    setSelectedLines
+  }) => {
+    return (
+      <section
+        className="route-tag-selector"
+        style={{
+          marginTop: "12px",
+          padding: "12px",
+          border: "1px solid #dddddd",
+          borderRadius: "8px",
+          backgroundColor: "#fafafa"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            alignItems: "center",
+            flexWrap: "wrap"
+          }}
+        >
+          <strong>{title}</strong>
+
+          <label>
+            Route Search
+            <input
+              type="text"
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              placeholder={searchPlaceholder}
+              disabled={loading}
+              style={{
+                marginLeft: "8px",
+                padding: "6px 8px"
+              }}
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => setSelectedLines([])}
+            disabled={selectedLines.length === 0}
+          >
+            Clear routes
+          </button>
+
+          {loading && <span>Loading routes...</span>}
+          {!loading && error && <span>{error}</span>}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "6px",
+            flexWrap: "wrap",
+            marginTop: "10px"
+          }}
+        >
+          {selectedLines.map((lineName) => (
+            <button
+              key={lineName}
+              type="button"
+              onClick={() => removeLine(lineName, setSelectedLines)}
+              title="Remove selected route"
+              style={{
+                border: "1px solid #999999",
+                borderRadius: "999px",
+                padding: "4px 10px",
+                backgroundColor: "#ffffff",
+                cursor: "pointer"
+              }}
+            >
+              {lineName} ×
+            </button>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "6px",
+            flexWrap: "wrap",
+            marginTop: "10px",
+            maxHeight: "120px",
+            overflowY: "auto"
+          }}
+        >
+          {lines.map((lineName) => {
+            const selected = selectedLines.includes(lineName);
+
+            return (
+              <button
+                key={lineName}
+                type="button"
+                onClick={() =>
+                  addLine(lineName, selectedLines, setSelectedLines)
+                }
+                disabled={selected}
+                style={{
+                  border: "1px solid #cccccc",
+                  borderRadius: "999px",
+                  padding: "4px 10px",
+                  backgroundColor: selected ? "#eeeeee" : "#ffffff",
+                  cursor: selected ? "default" : "pointer"
+                }}
+              >
+                {lineName}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    );
   };
+
+  const routeLoading = subwayLineLoading || busLineLoading;
+  const selectedRouteCount =
+    selectedSubwayLines.length + selectedBusLines.length;
 
   return (
     <section className="control-panel">
       <div>
         <h1>Seoul Transit Demand Map</h1>
         <p>
-          Select modes, route tags, hours, and metrics, then load aggregated demand.
+          Select subway routes, bus routes, hours, and metrics, then load aggregated demand.
         </p>
       </div>
 
       <div className="control-grid">
-        <label>
-          Mode
-          <select value={mode} onChange={handleModeChange}>
-            <option value="subway">Subway</option>
-            <option value="bus">Bus</option>
-          </select>
-        </label>
-
         <label>
           Day Type Preset
           <select
@@ -348,108 +463,29 @@ export default function DemandControlPanel({
         </label>
       </div>
 
-      <section
-        className="route-tag-selector"
-        style={{
-          marginTop: "12px",
-          padding: "12px",
-          border: "1px solid #dddddd",
-          borderRadius: "8px",
-          backgroundColor: "#fafafa"
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            alignItems: "center",
-            flexWrap: "wrap"
-          }}
-        >
-          <label>
-            Route Search
-            <input
-              type="text"
-              value={lineSearch}
-              onChange={(event) => setLineSearch(event.target.value)}
-              placeholder={mode === "subway" ? "e.g. 2호선" : "e.g. 741"}
-              disabled={lineLoading}
-              style={{
-                marginLeft: "8px",
-                padding: "6px 8px"
-              }}
-            />
-          </label>
+      {renderRouteSelector({
+        title: "Subway routes",
+        searchValue: subwayLineSearch,
+        setSearchValue: setSubwayLineSearch,
+        searchPlaceholder: "e.g. 2호선",
+        loading: subwayLineLoading,
+        error: subwayLineError,
+        lines: filteredSubwayLines,
+        selectedLines: selectedSubwayLines,
+        setSelectedLines: setSelectedSubwayLines
+      })}
 
-          <button
-            type="button"
-            onClick={clearSelectedLines}
-            disabled={selectedLines.length === 0}
-          >
-            Clear routes
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "6px",
-            flexWrap: "wrap",
-            marginTop: "10px"
-          }}
-        >
-          {selectedLines.map((lineName) => (
-            <button
-              key={lineName}
-              type="button"
-              onClick={() => removeLine(lineName)}
-              title="Remove selected route"
-              style={{
-                border: "1px solid #999999",
-                borderRadius: "999px",
-                padding: "4px 10px",
-                backgroundColor: "#ffffff",
-                cursor: "pointer"
-              }}
-            >
-              {lineName} ×
-            </button>
-          ))}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "6px",
-            flexWrap: "wrap",
-            marginTop: "10px",
-            maxHeight: "120px",
-            overflowY: "auto"
-          }}
-        >
-          {filteredLines.map((lineName) => {
-            const selected = selectedLines.includes(lineName);
-
-            return (
-              <button
-                key={lineName}
-                type="button"
-                onClick={() => addLine(lineName)}
-                disabled={selected}
-                style={{
-                  border: "1px solid #cccccc",
-                  borderRadius: "999px",
-                  padding: "4px 10px",
-                  backgroundColor: selected ? "#eeeeee" : "#ffffff",
-                  cursor: selected ? "default" : "pointer"
-                }}
-              >
-                {lineName}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      {renderRouteSelector({
+        title: "Bus routes",
+        searchValue: busLineSearch,
+        setSearchValue: setBusLineSearch,
+        searchPlaceholder: "e.g. 741 or 9401",
+        loading: busLineLoading,
+        error: busLineError,
+        lines: filteredBusLines,
+        selectedLines: selectedBusLines,
+        setSelectedLines: setSelectedBusLines
+      })}
 
       <div
         className="status-row"
@@ -465,24 +501,24 @@ export default function DemandControlPanel({
           type="button"
           onClick={onLoadDemand}
           disabled={
-            selectedLines.length === 0 ||
+            selectedRouteCount === 0 ||
             selectedDayTypes.length === 0 ||
-            lineLoading
+            routeLoading
           }
         >
           Load demand
         </button>
 
         <span>
-          {lineLoading && "Loading lines..."}
-          {!lineLoading && lineError && lineError}
-          {!lineLoading && !lineError && hasAppliedFilters &&
+          {filterError && filterError}
+          {!filterError && hasAppliedFilters &&
             "Demand layer loaded. Change filters and click Load again."}
-          {!lineLoading && !lineError && !hasAppliedFilters &&
+          {!filterError && !hasAppliedFilters &&
             "No demand layer loaded yet."}
         </span>
 
-        <span>{selectedLines.length.toLocaleString()} selected route(s)</span>
+        <span>{selectedSubwayLines.length.toLocaleString()} selected subway route(s)</span>
+        <span>{selectedBusLines.length.toLocaleString()} selected bus route(s)</span>
         <span>{selectedDayTypes.length.toLocaleString()} selected day type(s)</span>
       </div>
     </section>

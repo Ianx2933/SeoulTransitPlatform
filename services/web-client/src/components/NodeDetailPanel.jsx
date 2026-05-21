@@ -3,7 +3,14 @@
  *
  * This panel uses the point data that is already loaded on the map.
  */
-export default function NodeDetailPanel({ node, metric, onClose }) {
+export default function NodeDetailPanel({
+  node,
+  metric,
+  radiusMeters,
+  onRadiusMetersChange,
+  nearbyNodes,
+  onClose
+}) {
   if (!node) {
     return null;
   }
@@ -17,6 +24,8 @@ export default function NodeDetailPanel({ node, metric, onClose }) {
     total,
     metric
   });
+
+  const nearbySummary = summarizeNearbyNodes(nearbyNodes);
 
   return (
     <section
@@ -95,6 +104,99 @@ export default function NodeDetailPanel({ node, metric, onClose }) {
         <dt>Longitude</dt>
         <dd style={{ margin: 0 }}>{formatCoordinate(node.lng)}</dd>
       </dl>
+
+      <section
+        style={{
+          marginTop: "14px",
+          paddingTop: "12px",
+          borderTop: "1px solid #eeeeee"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: "12px",
+            alignItems: "center",
+            flexWrap: "wrap"
+          }}
+        >
+          <strong>Nearby node grouping</strong>
+
+          <label>
+            Radius
+            <select
+              value={radiusMeters}
+              onChange={(event) =>
+                onRadiusMetersChange(Number(event.target.value))
+              }
+              style={{
+                marginLeft: "8px"
+              }}
+            >
+              <option value={300}>300m</option>
+              <option value={500}>500m</option>
+              <option value={800}>800m</option>
+            </select>
+          </label>
+        </div>
+
+        <p
+          style={{
+            margin: "8px 0 0",
+            color: "#555555"
+          }}
+        >
+          {nearbySummary.count.toLocaleString()} loaded node(s) within{" "}
+          {radiusMeters.toLocaleString()}m.
+        </p>
+
+        <dl
+          style={{
+            display: "grid",
+            gridTemplateColumns: "max-content 1fr",
+            gap: "6px 12px",
+            margin: "10px 0 0"
+          }}
+        >
+          <dt>Nearby boarding</dt>
+          <dd style={{ margin: 0 }}>
+            {nearbySummary.boarding.toLocaleString()}
+          </dd>
+
+          <dt>Nearby alighting</dt>
+          <dd style={{ margin: 0 }}>
+            {nearbySummary.alighting.toLocaleString()}
+          </dd>
+
+          <dt>Nearby total</dt>
+          <dd style={{ margin: 0 }}>
+            {nearbySummary.total.toLocaleString()}
+          </dd>
+        </dl>
+
+        {nearbyNodes.length > 0 && (
+          <ol
+            style={{
+              maxHeight: "180px",
+              overflowY: "auto",
+              margin: "10px 0 0",
+              paddingRight: "12px"
+            }}
+          >
+            {nearbyNodes.slice(0, 30).map((nearbyNode) => (
+              <li key={nearbyNode.groupingKey}>
+                [{nearbyNode.mode}] {nearbyNode.serviceId} /{" "}
+                {nearbyNode.nodeName} —{" "}
+                {Math.round(nearbyNode.distanceMeters).toLocaleString()}m,{" "}
+                {(
+                  Number(nearbyNode.boarding || 0) +
+                  Number(nearbyNode.alighting || 0)
+                ).toLocaleString()}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
     </section>
   );
 }
@@ -112,6 +214,31 @@ function getMetricValue({ boarding, alighting, total, metric }) {
   }
 
   return total;
+}
+
+/**
+ * Summarizes nearby nodes within the selected radius.
+ */
+function summarizeNearbyNodes(nearbyNodes) {
+  return nearbyNodes.reduce(
+    (accumulator, node) => {
+      const boarding = Number(node.boarding || 0);
+      const alighting = Number(node.alighting || 0);
+
+      accumulator.count += 1;
+      accumulator.boarding += boarding;
+      accumulator.alighting += alighting;
+      accumulator.total += boarding + alighting;
+
+      return accumulator;
+    },
+    {
+      count: 0,
+      boarding: 0,
+      alighting: 0,
+      total: 0
+    }
+  );
 }
 
 /**

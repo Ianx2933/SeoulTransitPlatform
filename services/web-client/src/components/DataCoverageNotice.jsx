@@ -107,6 +107,10 @@ export default function DataCoverageNotice() {
                 currently loaded map data.
               </li>
               <li>
+                The detail panel can group loaded nearby nodes within 300m,
+                500m, or 800m for exploratory catchment analysis.
+              </li>
+              <li>
                 Subway points are displayed when station coordinates can be
                 matched to demand records.
               </li>
@@ -142,6 +146,11 @@ export default function DataCoverageNotice() {
                 The node detail panel shows values for the currently loaded
                 filter result, not a full historical profile of the stop or
                 station.
+              </li>
+              <li>
+                Radius-based grouping is calculated from currently loaded and
+                visible points, so it is not a formal transfer-area or station
+                catchment definition.
               </li>
               <li>
                 Demand values do not directly represent onboard crowding,
