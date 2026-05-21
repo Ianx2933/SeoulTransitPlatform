@@ -3,6 +3,7 @@ package com.ian.transit.map.controller;
 import com.ian.transit.map.dto.MapDemandResponse;
 import com.ian.transit.map.dto.NodeCatchmentDemandResponse;
 import com.ian.transit.map.dto.NodeDemandDetailResponse;
+import com.ian.transit.map.dto.NodeSearchResponse;
 import com.ian.transit.map.service.MapDemandService;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,9 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * REST controller for map-based transit demand.
- *
- * This controller stays thin and delegates parsing, validation, and query logic
- * to the service and repository layers.
  */
 @RestController
 @RequestMapping("/api/map")
@@ -53,6 +51,17 @@ public class MapDemandController {
     }
 
     /**
+     * Returns selectable stop or station nodes by keyword.
+     */
+    @GetMapping("/nodes/search")
+    public List<NodeSearchResponse> searchNodes(
+            @RequestParam String keyword,
+            @RequestParam(required = false, defaultValue = "30") Integer limit
+    ) {
+        return mapDemandService.searchNodes(keyword, limit);
+    }
+
+    /**
      * Returns all-route demand for one selected stop or station.
      *
      * This endpoint is node-centered rather than selected-route-centered.
@@ -80,6 +89,7 @@ public class MapDemandController {
 
     /**
      * Returns all-route demand around a selected coordinate.
+     *
      * Supported radius values are 400m, 800m, and 1000m.
      */
     @GetMapping("/node-catchment")
