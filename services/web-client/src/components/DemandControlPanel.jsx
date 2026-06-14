@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import NodeSearchPanel from "./NodeSearchPanel.jsx";
 
 /**
  * Supported day type options.
@@ -108,7 +109,8 @@ export default function DemandControlPanel({
   showAdminBoundary,
   setShowAdminBoundary,
   selectedTileLayer,
-  setSelectedTileLayer
+  setSelectedTileLayer,
+  onSelectSearchNode
 }) {
   /**
    * Local search keywords for each route selector.
@@ -146,7 +148,6 @@ export default function DemandControlPanel({
 
   /**
    * Filters route candidates by the user's keyword.
-   * (사용자 검색어로 노선 후보를 필터링합니다.)
    */
   const filterLines = (lines, keyword) => {
     const normalizedKeyword = keyword.trim().toLowerCase();
@@ -462,6 +463,13 @@ export default function DemandControlPanel({
           Show administrative boundary
         </label>
       </div>
+
+      <NodeSearchPanel onSelectNode={onSelectSearchNode} />
+
+      <section style={{ marginTop: "12px", padding: "10px 12px", border: "1px solid #dddddd", borderRadius: "8px", backgroundColor: "#ffffff" }}>
+        <strong>Administrative district analysis</strong>
+        <p style={{ margin: "6px 0 0", color: "#555555" }}>Administrative boundaries are clickable only when the boundary layer is enabled. Selected districts filter the currently loaded map points, while catchment demand remains radius-based.</p>
+      </section>
 
       {renderRouteSelector({
         title: "Subway routes",

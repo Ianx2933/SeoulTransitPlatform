@@ -1,19 +1,25 @@
-import { useEffect, useState } from "react";
-import TransitDemandMap from "./components/TransitDemandMap.jsx";
-import DemandControlPanel from "./components/DemandControlPanel.jsx";
+import { useCallback, useEffect, useState } from "react";
+
 import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
+import DemandControlPanel from "./components/DemandControlPanel.jsx";
+import TransitDemandMap from "./components/TransitDemandMap.jsx";
 
 /**
- * Root application component that separates draft filters from applied filters.
+ * Root application component.
  *
- * Draft filters are edited by the user.
- *
- * Applied filters are sent to the map only after the user clicks Load.
+ * Reactivity model:
+ *   - Draft state lives in the control panel (route checkboxes, hour sliders,
+ *     day type presets, metric, etc.).
+ *   - The map and the node analysis panel both read from `appliedFilters`,
+ *     which is set only when the user clicks "Load demand".
+ *   - This keeps the map markers, the demand summary, and the node detail
+ *     panel synchronized — the user always sees one consistent cross-section
+ *     of the data, instead of the map and panel disagreeing about which
+ *     hour / day type they belong to.
  */
 export default function App() {
   const [selectedSubwayLines, setSelectedSubwayLines] = useState([]);
   const [selectedBusLines, setSelectedBusLines] = useState([]);
-
   const [dayTypePreset, setDayTypePreset] = useState("mon");
   const [selectedDayTypes, setSelectedDayTypes] = useState(["mon"]);
   const [dayAggregation, setDayAggregation] = useState("average");
@@ -23,60 +29,47 @@ export default function App() {
 
   const [subwayLines, setSubwayLines] = useState([]);
   const [busLines, setBusLines] = useState([]);
-
   const [subwayLineLoading, setSubwayLineLoading] = useState(false);
   const [busLineLoading, setBusLineLoading] = useState(false);
-
   const [subwayLineError, setSubwayLineError] = useState("");
   const [busLineError, setBusLineError] = useState("");
   const [filterError, setFilterError] = useState("");
 
   const [appliedFilters, setAppliedFilters] = useState(null);
+  const [selectedSearchNode, setSelectedSearchNode] = useState(null);
 
-  /**
-   * Controls whether administrative district boundaries are shown on the map.
-   */
   const [showAdminBoundary, setShowAdminBoundary] = useState(true);
+  const [selectedTileLayer, setSelectedTileLayer] = useState("cartoLight");
 
   /**
-   * Stores the selected Leaflet tile layer.
-   *
-   * CartoDB Positron is the default because it works well as a quiet analytical basemap.
+   * Controls whether catchment nearby nodes are drawn on the map as
+   * lightweight outline markers (B-2 mode).
    */
-  const [selectedTileLayer, setSelectedTileLayer] = useState("cartoLight");
+  const [showCatchmentMarkers, setShowCatchmentMarkers] = useState(true);
 
   /**
    * Loads route candidates for one transport mode.
    */
-  const loadLinesByMode = async ({
-    mode,
-    setLines,
-    setLoading,
-    setError
-  }) => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetch(`/api/map/lines?mode=${mode}`);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${mode} lines: ${response.status}`);
+  const loadLinesByMode = useCallback(
+    async ({ mode, setLines, setLoading, setError }) => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/map/lines?mode=${mode}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${mode} lines: ${response.status}`);
+        }
+        setLines(await response.json());
+      } catch (error) {
+        setError(error.message);
+        setLines([]);
+      } finally {
+        setLoading(false);
       }
+    },
+    []
+  );
 
-      const data = await response.json();
-      setLines(data);
-    } catch (error) {
-      setError(error.message);
-      setLines([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Loads subway and bus line lists once when the dashboard starts.
-   */
   useEffect(() => {
     loadLinesByMode({
       mode: "subway",
@@ -84,14 +77,13 @@ export default function App() {
       setLoading: setSubwayLineLoading,
       setError: setSubwayLineError
     });
-
     loadLinesByMode({
       mode: "bus",
       setLines: setBusLines,
       setLoading: setBusLineLoading,
       setError: setBusLineError
     });
-  }, []);
+  }, [loadLinesByMode]);
 
   /**
    * Builds a continuous hour list from the selected range.
@@ -99,39 +91,97 @@ export default function App() {
   const buildSelectedHours = () => {
     const start = Math.min(startHour, endHour);
     const end = Math.max(startHour, endHour);
-
-    return Array.from(
-      { length: end - start + 1 },
-      (_, index) => start + index
-    );
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
   };
 
   /**
-   * Applies the current filter selection to the map.
+   * Applies the current draft filters to the map and node analysis.
    */
   const handleLoadDemand = () => {
-    if (
-      selectedSubwayLines.length === 0 &&
-      selectedBusLines.length === 0
-    ) {
-      setFilterError("Please select at least one subway or bus route before loading demand.");
+    if (selectedSubwayLines.length === 0 && selectedBusLines.length === 0) {
+      setFilterError(
+        "Please select at least one subway or bus route before loading demand."
+      );
       return;
     }
-
     if (selectedDayTypes.length === 0) {
       setFilterError("Please select at least one day type before loading demand.");
       return;
     }
-
     setFilterError("");
     setAppliedFilters({
-      selectedSubwayLines,
-      selectedBusLines,
-      dayTypes: selectedDayTypes,
+      selectedSubwayLines: [...selectedSubwayLines],
+      selectedBusLines: [...selectedBusLines],
+      dayTypes: [...selectedDayTypes],
       dayAggregation,
       hours: buildSelectedHours(),
-      metric
+      metric,
+      autoApplied: false
     });
+  };
+
+  /**
+   * Stores a searched node as the current node-analysis target.
+   *
+   * If no applied filters exist yet (the user has not clicked "Load demand"),
+   * the current draft filters are auto-applied so node analysis can run
+   * immediately. The map demand layer stays empty in that case because no
+   * routes were selected; the node detail panel still receives data because
+   * node-detail and catchment APIs don't require a route selection.
+   */
+  const handleSelectSearchNode = (node) => {
+    if (!appliedFilters) {
+      if (selectedDayTypes.length === 0) {
+        setFilterError(
+          "Please select at least one day type before opening node analysis."
+        );
+        return;
+      }
+      setFilterError("");
+      setAppliedFilters({
+        selectedSubwayLines: [...selectedSubwayLines],
+        selectedBusLines: [...selectedBusLines],
+        dayTypes: [...selectedDayTypes],
+        dayAggregation,
+        hours: buildSelectedHours(),
+        metric,
+        autoApplied: true
+      });
+    }
+    setSelectedSearchNode({ ...node, source: "node-search" });
+  };
+
+  /**
+   * Clears the search-driven node selection.
+   *
+   * Called by the map's clearNodeSelection so the search node does not
+   * silently reappear when filters or radius change.
+   */
+  const handleClearSearchNode = () => {
+    setSelectedSearchNode(null);
+  };
+
+  /**
+   * Adds a route discovered in node analysis to route controls.
+   */
+  const handleAddRouteFromNode = (route) => {
+    if (!route?.mode || !route?.serviceId) {
+      return;
+    }
+    if (route.mode === "subway") {
+      setSelectedSubwayLines((current) =>
+        current.includes(route.serviceId)
+          ? current
+          : [...current, route.serviceId]
+      );
+    }
+    if (route.mode === "bus") {
+      setSelectedBusLines((current) =>
+        current.includes(route.serviceId)
+          ? current
+          : [...current, route.serviceId]
+      );
+    }
   };
 
   return (
@@ -166,14 +216,20 @@ export default function App() {
         setShowAdminBoundary={setShowAdminBoundary}
         selectedTileLayer={selectedTileLayer}
         setSelectedTileLayer={setSelectedTileLayer}
+        onSelectSearchNode={handleSelectSearchNode}
       />
-
       <DataCoverageNotice />
-
       <TransitDemandMap
         filters={appliedFilters}
         showAdminBoundary={showAdminBoundary}
         selectedTileLayer={selectedTileLayer}
+        selectedSearchNode={selectedSearchNode}
+        onClearSearchNode={handleClearSearchNode}
+        selectedSubwayLines={selectedSubwayLines}
+        selectedBusLines={selectedBusLines}
+        onAddRouteFromNode={handleAddRouteFromNode}
+        showCatchmentMarkers={showCatchmentMarkers}
+        onShowCatchmentMarkersChange={setShowCatchmentMarkers}
       />
     </main>
   );

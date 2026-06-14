@@ -1,7 +1,5 @@
 /**
  * Calls the Spring Boot map demand API.
- *
- * Vite proxy sends `/api/...` requests to `http://localhost:8080`.
  */
 export async function fetchMapDemand({
   mode,
@@ -12,25 +10,20 @@ export async function fetchMapDemand({
   hours
 }) {
   const params = new URLSearchParams({ mode });
-
   appendOptionalListParam(params, "dayTypes", dayTypes);
-
   if ((!Array.isArray(dayTypes) || dayTypes.length === 0) && dayType) {
     params.append("dayType", dayType);
   }
-
   appendOptionalValueParam(params, "dayAggregation", dayAggregation);
   appendOptionalListParam(params, "lines", lines);
   appendOptionalListParam(params, "hours", hours);
-
   return fetchJson(`/api/map/demand?${params.toString()}`, {
     defaultMessage: "Failed to fetch map demand"
   });
 }
 
 /**
- * Calls the existing map demand endpoint for selected subway and bus routes,
- * then merges the results on the frontend.
+ * Calls map demand for subway and bus, then merges results.
  */
 export async function fetchMultiModeMapDemand({
   selectedSubwayLines,
@@ -40,7 +33,6 @@ export async function fetchMultiModeMapDemand({
   hours
 }) {
   const requests = [];
-
   if (Array.isArray(selectedSubwayLines) && selectedSubwayLines.length > 0) {
     requests.push(
       fetchMapDemand({
@@ -52,7 +44,6 @@ export async function fetchMultiModeMapDemand({
       })
     );
   }
-
   if (Array.isArray(selectedBusLines) && selectedBusLines.length > 0) {
     requests.push(
       fetchMapDemand({
@@ -64,9 +55,18 @@ export async function fetchMultiModeMapDemand({
       })
     );
   }
-
   const results = await Promise.all(requests);
   return results.flat();
+}
+
+/**
+ * Searches selectable stop or station nodes.
+ */
+export async function fetchNodeSearch({ keyword, limit = 30 }) {
+  const params = new URLSearchParams({ keyword, limit: String(limit) });
+  return fetchJson(`/api/map/nodes/search?${params.toString()}`, {
+    defaultMessage: "Failed to search nodes"
+  });
 }
 
 /**
@@ -80,11 +80,9 @@ export async function fetchNodeDetail({
   hours
 }) {
   const params = new URLSearchParams({ mode, nodeId });
-
   appendOptionalListParam(params, "dayTypes", dayTypes);
   appendOptionalValueParam(params, "dayAggregation", dayAggregation);
   appendOptionalListParam(params, "hours", hours);
-
   return fetchJson(`/api/map/node-detail?${params.toString()}`, {
     defaultMessage: "Failed to fetch node detail",
     notFoundMessage: "This node is not available in the current dataset."
@@ -108,29 +106,21 @@ export async function fetchNodeCatchment({
     lng: String(lng),
     radiusMeters: String(radiusMeters)
   });
-
   appendOptionalListParam(params, "modes", modes);
   appendOptionalListParam(params, "dayTypes", dayTypes);
   appendOptionalValueParam(params, "dayAggregation", dayAggregation);
   appendOptionalListParam(params, "hours", hours);
-
   return fetchJson(`/api/map/node-catchment?${params.toString()}`, {
     defaultMessage: "Failed to fetch node catchment"
   });
 }
 
-/**
- * Appends a list parameter only when it contains at least one value.
- */
 function appendOptionalListParam(params, key, values) {
   if (Array.isArray(values) && values.length > 0) {
     params.append(key, values.join(","));
   }
 }
 
-/**
- * Appends a scalar parameter only when it exists.
- */
 function appendOptionalValueParam(params, key, value) {
   if (value !== undefined && value !== null && value !== "") {
     params.append(key, value);
@@ -140,41 +130,36 @@ function appendOptionalValueParam(params, key, value) {
 /**
  * Fetches JSON and normalizes API errors for UI display.
  *
- * The response body is logged to the console for debugging but is not surfaced
- * in the thrown Error message, because raw server responses (including stack
- * traces from 500 errors) should never reach end users in production.
+ * The response body is logged to the console for debugging but is not
+ * surfaced in the thrown Error message, because raw server responses
+ * (including stack traces from 500 errors) should never reach end users.
  */
 async function fetchJson(url, {
   defaultMessage,
   notFoundMessage = "Requested resource was not found."
 }) {
   let response;
-
   try {
     response = await fetch(url);
   } catch (error) {
     throw new Error(`Network error: ${error.message}`);
   }
-
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error(notFoundMessage);
     }
-
     const responseText = await safeReadText(response);
     if (responseText) {
-      console.error(`API error at ${url} (status ${response.status}):`, responseText);
+      console.error(
+        `API error at ${url} (status ${response.status}):`,
+        responseText
+      );
     }
-
     throw new Error(`${defaultMessage}: ${response.status}`);
   }
-
   return response.json();
 }
 
-/**
- * Safely reads response text for error messages.
- */
 async function safeReadText(response) {
   try {
     return await response.text();
