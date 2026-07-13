@@ -1,9 +1,11 @@
 package com.ian.transit.map.service;
 
+import com.ian.transit.map.dto.DistrictDemandResponse;
 import com.ian.transit.map.dto.MapDemandResponse;
 import com.ian.transit.map.dto.NodeCatchmentDemandResponse;
 import com.ian.transit.map.dto.NodeDemandDetailResponse;
 import com.ian.transit.map.dto.NodeSearchResponse;
+import com.ian.transit.map.repository.DistrictDemandRepository;
 import com.ian.transit.map.repository.MapDemandRepository;
 import com.ian.transit.map.repository.NodeCatchmentRepository;
 import com.ian.transit.map.repository.NodeDemandRepository;
@@ -25,17 +27,20 @@ public class MapDemandService {
     private static final int MAX_NODE_SEARCH_LIMIT = 100;
 
     private final MapDemandRepository mapDemandRepository;
+    private final DistrictDemandRepository districtDemandRepository;
     private final NodeDemandRepository nodeDemandRepository;
     private final NodeCatchmentRepository nodeCatchmentRepository;
     private final NodeSearchRepository nodeSearchRepository;
 
     public MapDemandService(
             MapDemandRepository mapDemandRepository,
+            DistrictDemandRepository districtDemandRepository,
             NodeDemandRepository nodeDemandRepository,
             NodeCatchmentRepository nodeCatchmentRepository,
             NodeSearchRepository nodeSearchRepository
     ) {
         this.mapDemandRepository = mapDemandRepository;
+        this.districtDemandRepository = districtDemandRepository;
         this.nodeDemandRepository = nodeDemandRepository;
         this.nodeCatchmentRepository = nodeCatchmentRepository;
         this.nodeSearchRepository = nodeSearchRepository;
@@ -144,6 +149,88 @@ public class MapDemandService {
                 dayAggregation,
                 requestedHours
         );
+    }
+
+    /**
+     * Loads district-centered all-route demand. (행정동 중심 전체 노선 수요를 불러옵니다.)
+     */
+    public DistrictDemandResponse getDistrictDemand(
+            String districtCode,
+            String districtCodes,
+            String modes,
+            String dayType,
+            String dayTypes,
+            String dayAggregation,
+            Integer hour,
+            String hours,
+            Integer nodeLimit
+    ) {
+        validateDayAggregation(dayAggregation);
+        validateNodeLimit(nodeLimit);
+
+        List<String> requestedDistrictCodes = parseDistrictCodes(districtCode, districtCodes);
+        List<String> requestedModes = parseModes(modes);
+        requestedModes.forEach(this::validateMode);
+
+        List<String> requestedDayTypes = parseDayTypes(dayType, dayTypes);
+        List<Integer> requestedHours = parseHours(hour, hours);
+
+        return districtDemandRepository.findDistrictDemand(
+                requestedDistrictCodes,
+                requestedModes,
+                requestedDayTypes,
+                dayAggregation,
+                requestedHours,
+                nodeLimit
+        );
+    }
+
+    /**
+     * Validates the optional district node-row limit. A null limit keeps the
+     * full row set for backward compatibility; totals are unaffected either
+     * way because truncation happens after aggregation.
+     * (nodeLimit이 null이면 기존과 동일하게 전체 행을 반환하며, 절단은 집계
+     * 이후에만 적용되므로 합계에는 영향이 없습니다.)
+     */
+    private void validateNodeLimit(Integer nodeLimit) {
+        if (nodeLimit != null && (nodeLimit < 1 || nodeLimit > 10000)) {
+            throw new IllegalArgumentException("nodeLimit must be between 1 and 10000");
+        }
+    }
+
+    /**
+     * Parses selected administrative district codes. (선택 행정동 코드를 파싱합니다.)
+     */
+    private List<String> parseDistrictCodes(String districtCode, String districtCodes) {
+        List<String> parsedDistrictCodes;
+
+        if (districtCodes != null && !districtCodes.isBlank()) {
+            parsedDistrictCodes = Arrays.stream(districtCodes.split(","))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .distinct()
+                    .toList();
+        } else if (districtCode != null && !districtCode.isBlank()) {
+            parsedDistrictCodes = List.of(districtCode.trim());
+        } else {
+            throw new IllegalArgumentException("districtCode or districtCodes must be provided");
+        }
+
+        if (parsedDistrictCodes.isEmpty()) {
+            throw new IllegalArgumentException("at least one district code must be provided");
+        }
+
+        parsedDistrictCodes.forEach(this::validateDistrictCode);
+        return parsedDistrictCodes;
+    }
+
+    /**
+     * Validates administrative district code shape. (행정동 코드 형식을 검증합니다.)
+     */
+    private void validateDistrictCode(String districtCode) {
+        if (districtCode == null || !districtCode.matches("\\d{8,10}")) {
+            throw new IllegalArgumentException("districtCode must contain 8 to 10 digits");
+        }
     }
 
     /**

@@ -11,10 +11,12 @@ import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point as turfPoint } from "@turf/helpers";
 
 import {
+  fetchDistrictDemand,
   fetchMultiModeMapDemand,
   fetchNodeCatchment,
   fetchNodeDetail
 } from "../api/mapDemandApi.js";
+import DistrictDemandPanel from "./DistrictDemandPanel.jsx";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
@@ -180,6 +182,7 @@ export default function TransitDemandMap({
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [nodeDetail, setNodeDetail] = useState(null);
   const [nodeCatchment, setNodeCatchment] = useState(null);
+  const [districtDemand, setDistrictDemand] = useState(null);
   const [nodeCatchmentRadiusMeters, setNodeCatchmentRadiusMeters] = useState(800);
 
   const [analysisSections, setAnalysisSections] = useState({
@@ -194,12 +197,15 @@ export default function TransitDemandMap({
   const [geoLoading, setGeoLoading] = useState(true);
   const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
   const [nodeCatchmentLoading, setNodeCatchmentLoading] = useState(false);
+  const [districtDemandLoading, setDistrictDemandLoading] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [nodeDetailErrorMessage, setNodeDetailErrorMessage] = useState("");
   const [nodeCatchmentErrorMessage, setNodeCatchmentErrorMessage] = useState("");
+  const [districtDemandErrorMessage, setDistrictDemandErrorMessage] = useState("");
 
   const [retryNonce, setRetryNonce] = useState(0);
+  const [districtRetryNonce, setDistrictRetryNonce] = useState(0);
 
   const metric = filters?.metric || "total";
   const tileLayer = TILE_LAYERS[selectedTileLayer] || TILE_LAYERS.cartoLight;
@@ -218,6 +224,7 @@ export default function TransitDemandMap({
   const filtersDayTypesKey = filters?.dayTypes?.join(",") || "";
   const filtersHoursKey = filters?.hours?.join(",") || "";
   const filtersDayAggregation = filters?.dayAggregation || "";
+  const filtersApplied = Boolean(filters);
 
   const sortedPoints = useMemo(
     () =>
@@ -248,9 +255,28 @@ export default function TransitDemandMap({
     [visiblePoints, metric]
   );
 
-  const selectedDistrictCodes = useMemo(
-    () => new Set(selectedDistricts.map(getDistrictCode)),
+  const selectedDistrictSummaries = useMemo(
+    () =>
+      selectedDistricts.map((feature) => ({
+        districtCode: getDistrictCode(feature),
+        districtName: getDistrictName(feature)
+      })),
     [selectedDistricts]
+  );
+
+  const selectedDistrictCodeList = useMemo(
+    () =>
+      selectedDistrictSummaries
+        .map((district) => district.districtCode)
+        .filter(Boolean),
+    [selectedDistrictSummaries]
+  );
+
+  const selectedDistrictCodesKey = selectedDistrictCodeList.join(",");
+
+  const selectedDistrictCodes = useMemo(
+    () => new Set(selectedDistrictCodeList),
+    [selectedDistrictCodeList]
   );
 
   const combinedNodeErrorMessage = [
@@ -320,15 +346,17 @@ export default function TransitDemandMap({
           dayAggregation: filters.dayAggregation,
           hours: filters.hours
         });
+        // Selected districts are intentionally preserved across Load demand:
+        // the district-demand effect below refetches with the new filter keys,
+        // and visiblePoints keeps filtering the fresh map layer by the same
+        // polygons.
         if (!ignore) {
           setPoints(data);
-          setSelectedDistricts([]);
         }
       } catch (error) {
         if (!ignore) {
           setErrorMessage(error.message);
           setPoints([]);
-          setSelectedDistricts([]);
         }
       } finally {
         if (!ignore) setLoading(false);
@@ -429,6 +457,53 @@ export default function TransitDemandMap({
     retryNonce
   ]);
 
+
+  // Loads district-centered demand when district selection and applied filters exist.
+  useEffect(() => {
+    if (!showAdminBoundary || selectedDistrictCodeList.length === 0 || !filters) {
+      setDistrictDemand(null);
+      setDistrictDemandErrorMessage("");
+      setDistrictDemandLoading(false);
+      return;
+    }
+
+    let ignore = false;
+    async function loadDistrictDemand() {
+      setDistrictDemandLoading(true);
+      setDistrictDemandErrorMessage("");
+      try {
+        const nextDistrictDemand = await fetchDistrictDemand({
+          districtCodes: selectedDistrictCodeList,
+          modes: ["subway", "bus"],
+          dayTypes: filters.dayTypes,
+          dayAggregation: filters.dayAggregation,
+          hours: filters.hours
+        });
+        if (!ignore) setDistrictDemand(nextDistrictDemand);
+      } catch (error) {
+        if (!ignore) {
+          setDistrictDemand(null);
+          setDistrictDemandErrorMessage(error.message);
+        }
+      } finally {
+        if (!ignore) setDistrictDemandLoading(false);
+      }
+    }
+
+    loadDistrictDemand();
+    return () => {
+      ignore = true;
+    };
+  }, [
+    showAdminBoundary,
+    selectedDistrictCodesKey,
+    filtersDayTypesKey,
+    filtersHoursKey,
+    filtersDayAggregation,
+    filtersApplied,
+    districtRetryNonce
+  ]);
+
   function clearNodeSelection() {
     setSelectedPoint(null);
     setNodeDetail(null);
@@ -438,6 +513,14 @@ export default function TransitDemandMap({
     // Also clear the parent's search-node state so subsequent search clicks
     // on the same node reliably re-fire the adopt effect.
     onClearSearchNode?.();
+  }
+
+  // Clears selected districts and district-demand state together.
+  function clearDistrictSelection() {
+    setSelectedDistricts([]);
+    setDistrictDemand(null);
+    setDistrictDemandErrorMessage("");
+    clearNodeSelection();
   }
 
   function handlePointClick(point) {
@@ -453,6 +536,12 @@ export default function TransitDemandMap({
 
   function handleRetryNodeAnalysis() {
     if (selectedPoint) setRetryNonce((current) => current + 1);
+  }
+
+  function handleRetryDistrictDemand() {
+    if (selectedDistrictCodeList.length > 0) {
+      setDistrictRetryNonce((current) => current + 1);
+    }
   }
 
   function handleToggleAnalysisSection(sectionKey) {
@@ -572,15 +661,12 @@ export default function TransitDemandMap({
         {showAdminBoundary && selectedDistricts.length > 0 && (
           <>
             <strong>
-              Demand summary is filtered by districts:{" "}
+              Map demand summary is filtered by districts:{" "}
               {selectedDistricts.map(getDistrictName).join(", ")}
             </strong>
             <button
               type="button"
-              onClick={() => {
-                setSelectedDistricts([]);
-                clearNodeSelection();
-              }}
+              onClick={clearDistrictSelection}
             >
               Clear districts
             </button>
@@ -645,6 +731,19 @@ export default function TransitDemandMap({
           </div>
         </section>
       )}
+
+      <DistrictDemandPanel
+        selectedDistricts={selectedDistrictSummaries}
+        districtDemand={districtDemand}
+        filtersApplied={filtersApplied}
+        loading={districtDemandLoading}
+        errorMessage={districtDemandErrorMessage}
+        onRetry={handleRetryDistrictDemand}
+        onClear={clearDistrictSelection}
+        selectedSubwayLines={selectedSubwayLines}
+        selectedBusLines={selectedBusLines}
+        onAddRouteFromNode={onAddRouteFromNode}
+      />
 
       <NodeDetailPanel
         selectedPoint={selectedPoint}

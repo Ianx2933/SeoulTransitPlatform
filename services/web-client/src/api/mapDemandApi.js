@@ -115,6 +115,35 @@ export async function fetchNodeCatchment({
   });
 }
 
+
+/**
+ * Calls the district-centered all-route demand API.
+ */
+export async function fetchDistrictDemand({
+  districtCode,
+  districtCodes,
+  modes = ["subway", "bus"],
+  dayTypes,
+  dayAggregation,
+  hours,
+  nodeLimit
+}) {
+  const params = new URLSearchParams();
+  appendOptionalListParam(params, "districtCodes", districtCodes);
+  if ((!Array.isArray(districtCodes) || districtCodes.length === 0) && districtCode) {
+    params.append("districtCode", districtCode);
+  }
+  appendOptionalListParam(params, "modes", modes);
+  appendOptionalListParam(params, "dayTypes", dayTypes);
+  appendOptionalValueParam(params, "dayAggregation", dayAggregation);
+  appendOptionalListParam(params, "hours", hours);
+  appendOptionalValueParam(params, "nodeLimit", nodeLimit);
+  return fetchJson(`/api/map/district-demand?${params.toString()}`, {
+    defaultMessage: "Failed to fetch district demand",
+    notFoundMessage: "This district is not available in the current dataset."
+  });
+}
+
 function appendOptionalListParam(params, key, values) {
   if (Array.isArray(values) && values.length > 0) {
     params.append(key, values.join(","));
@@ -155,9 +184,31 @@ async function fetchJson(url, {
         responseText
       );
     }
+    // Validation errors (4xx) carry a safe, user-actionable message field
+    // (e.g. "districtCode must contain 8 to 10 digits"), so surface it.
+    // 5xx bodies may contain stack traces and stay console-only.
+    if (response.status >= 400 && response.status < 500) {
+      const validationMessage = extractErrorMessage(responseText);
+      if (validationMessage) {
+        throw new Error(`${defaultMessage}: ${validationMessage}`);
+      }
+    }
     throw new Error(`${defaultMessage}: ${response.status}`);
   }
   return response.json();
+}
+
+function extractErrorMessage(responseText) {
+  if (!responseText) return "";
+  try {
+    const parsed = JSON.parse(responseText);
+    if (parsed && typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+  } catch {
+    // Non-JSON body: fall through to the generic status message.
+  }
+  return "";
 }
 
 async function safeReadText(response) {

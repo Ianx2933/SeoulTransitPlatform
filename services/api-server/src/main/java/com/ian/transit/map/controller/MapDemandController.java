@@ -1,5 +1,6 @@
 package com.ian.transit.map.controller;
 
+import com.ian.transit.map.dto.DistrictDemandResponse;
 import com.ian.transit.map.dto.MapDemandResponse;
 import com.ian.transit.map.dto.NodeCatchmentDemandResponse;
 import com.ian.transit.map.dto.NodeDemandDetailResponse;
@@ -116,4 +117,31 @@ public class MapDemandController {
                 hours
         );
     }
+
+    /** Returns all-route demand inside selected administrative districts. */
+    @GetMapping("/district-demand")
+    public DistrictDemandResponse getDistrictDemand(
+            @RequestParam(required = false) String districtCode,
+            @RequestParam(required = false) String districtCodes,
+            @RequestParam(required = false, defaultValue = "subway,bus") String modes,
+            @RequestParam(required = false) String dayType,
+            @RequestParam(required = false) String dayTypes,
+            @RequestParam(required = false, defaultValue = "average") String dayAggregation,
+            @RequestParam(required = false) Integer hour,
+            @RequestParam(required = false) String hours,
+            @RequestParam(required = false) Integer nodeLimit
+    ) {
+        return mapDemandService.getDistrictDemand(
+                districtCode,
+                districtCodes,
+                modes,
+                dayType,
+                dayTypes,
+                dayAggregation,
+                hour,
+                hours,
+                nodeLimit
+        );
+    }
+
 }
