@@ -1,6 +1,8 @@
 package com.ian.transit.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,9 +12,18 @@ import java.time.LocalDateTime;
 
 /**
  * Global REST exception handler.
+ *
+ * Policy: 4xx responses carry the validation message because it is safe and
+ * user-actionable. 5xx responses carry a FIXED message only — raw exception
+ * messages can leak table names, connection details, or stack fragments, so
+ * they go to the server log instead of the HTTP body.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    private static final String INTERNAL_ERROR_MESSAGE = "Internal server error";
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(
@@ -39,20 +50,43 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Features that are exposed in the API surface but intentionally not yet
+     * implemented (e.g. prediction weight persistence) map to 501 so callers
+     * are not misled by a fake success.
+     */
+    @ExceptionHandler(UnsupportedOperationException.class)
+    public ResponseEntity<ErrorResponse> handleNotImplemented(
+            UnsupportedOperationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.NOT_IMPLEMENTED,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    /**
      * Catch-all handler for unexpected errors.
      *
-     * IMPORTANT: Print stack trace for debugging (temporary).
+     * The full stack trace is logged server-side; the HTTP body deliberately
+     * exposes nothing about the failure internals.
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpectedException(
             Exception exception,
             HttpServletRequest request
     ) {
-        exception.printStackTrace();
+        log.error(
+                "Unhandled exception at {} {}",
+                request.getMethod(),
+                request.getRequestURI(),
+                exception
+        );
 
         return buildResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
-                exception.getMessage(), // ← message도 노출 (디버깅용)
+                INTERNAL_ERROR_MESSAGE,
                 request
         );
     }

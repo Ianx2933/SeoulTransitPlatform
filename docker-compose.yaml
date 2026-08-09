@@ -1,0 +1,10 @@
+# Local infrastructure for development.
+# The API server uses Redis by default for cache parity with deployment.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: seoul-transit-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "no"]

@@ -1,0 +1,12 @@
+# Lightweight local profile that does not require Redis.
+#
+# Use this when you want to run the API server without Docker/Redis.
+# CMD example: set SPRING_PROFILES_ACTIVE=local-simple
+# PowerShell example: $env:SPRING_PROFILES_ACTIVE="local-simple"
+
+spring:
+  cache:
+    # Caffeine is only selected by this local profile.
+    type: caffeine
+    caffeine:
+      spec: ${CAFFEINE_SPEC:maximumSize=1000,expireAfterWrite=10m}

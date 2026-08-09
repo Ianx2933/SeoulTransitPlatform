@@ -9,9 +9,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 
 /**
@@ -53,21 +55,36 @@ public class PredictionClient {
 
     /**
      * Calls Flask /weight/update endpoint for hourly ratio tuning.
+     *
+     * Weight persistence is not implemented in the prediction service yet, so
+     * Flask answers 501 after validating the payload. That 501 is translated
+     * into {@link UnsupportedOperationException}, which the global exception
+     * handler maps back to HTTP 501 — the caller is never shown a fake
+     * success.
      */
     public void updateWeight(WeightUpdateRequest request) {
 
         HttpEntity<WeightUpdateRequest> entity = new HttpEntity<>(request, jsonHeaders());
 
-        ResponseEntity<Void> response = restTemplate.exchange(
-                predictionServiceBaseUrl + "/weight/update",
-                HttpMethod.PUT,
-                entity,
-                Void.class
-        );
+        try {
+            ResponseEntity<Void> response = restTemplate.exchange(
+                    predictionServiceBaseUrl + "/weight/update",
+                    HttpMethod.PUT,
+                    entity,
+                    Void.class
+            );
 
-        // Ensures weight update is successfully applied.
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new IllegalStateException("Prediction weight update failed");
+            // Ensures weight update is successfully applied.
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new IllegalStateException("Prediction weight update failed");
+            }
+        } catch (HttpServerErrorException exception) {
+            if (exception.getStatusCode().value() == HttpStatus.NOT_IMPLEMENTED.value()) {
+                throw new UnsupportedOperationException(
+                        "Prediction weight persistence is not implemented yet"
+                );
+            }
+            throw exception;
         }
     }
 

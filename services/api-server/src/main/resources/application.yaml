@@ -1,13 +1,65 @@
+# Credentials and environment-specific values are injected from environment variables.
+#
+# Required environment variables.
+#   DB_PASSWORD        PostgreSQL password.
+#
+# Optional overrides. 
+#   DB_URL             default: jdbc:postgresql://localhost:5432/Seoul_Transit
+#   DB_USERNAME        default: postgres
+#   JPA_DDL_AUTO       default: validate; use 'none' to skip schema validation.
+#   ADMIN_API_TOKEN    token required by /api/od-correction/**; blank locks endpoints.
+#   CACHE_TYPE         default: redis; use caffeine only through local-simple profile.
+#   CACHE_TTL          Redis cache TTL, default: 10m.
+#   REDIS_HOST         default: localhost.
+#   REDIS_PORT         default: 6379.
+#   REDIS_PASSWORD     optional Redis password.
+#   REDIS_TIMEOUT      default: 3s.
+#   PREDICTION_SERVICE_BASE_URL default: http://localhost:5000
+#   SEOUL_BUS_API_KEY  Seoul bus master API key.
+
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/Seoul_Transit
-    username: postgres
-    password: 330218
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/Seoul_Transit}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: update
+      # Hibernate must validate, not mutate, pipeline-managed tables.
+      ddl-auto: ${JPA_DDL_AUTO:validate}
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  cache:
+    # Redis is the default cache provider for GCP/deployment parity.
+    type: ${CACHE_TYPE:redis}
+    cache-names: congestion, congestionStops, arsStandardCode
+    redis:
+      time-to-live: ${CACHE_TTL:10m}
+      cache-null-values: false
+    caffeine:
+      spec: ${CAFFEINE_SPEC:maximumSize=1000,expireAfterWrite=10m}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:3s}
+
+admin:
+  api:
+    # Requests to /api/od-correction/** must carry header "X-Admin-Token".
+    # When blank, those endpoints reject all requests.
+    token: ${ADMIN_API_TOKEN:}
+
+prediction:
+  service:
+    base-url: ${PREDICTION_SERVICE_BASE_URL:http://localhost:5000}
+
+seoul:
+  bus:
+    api:
+      key: ${SEOUL_BUS_API_KEY:}

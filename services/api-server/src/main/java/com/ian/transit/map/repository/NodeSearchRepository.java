@@ -64,8 +64,8 @@ public class NodeSearchRepository {
                     FROM integrated_hourly_transit_demand_light d
                     JOIN subway_station_location s
                       ON d.service_id = s.line_name
-                     AND regexp_replace(d.node_name, '\\(.*\\)', '', 'g')
-                       = regexp_replace(s.station_name, '\\(.*\\)', '', 'g')
+                     AND regexp_replace(d.node_name, '\\([^)]*\\)', '', 'g')
+                       = regexp_replace(s.station_name, '\\([^)]*\\)', '', 'g')
                     WHERE d.mode = 'subway'
                       AND (
                           d.node_id::text ILIKE ? ESCAPE '\\'

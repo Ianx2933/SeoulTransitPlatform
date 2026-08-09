@@ -2,10 +2,18 @@
 target/
 *.class
 
+# Node — this rule was missing, which is how 4,500+ node_modules files
+# ended up committed. After applying this patch, untrack them once with:
+#   git rm -r --cached services/web-client/node_modules
+node_modules/
+dist/
+
 # Python
 __pycache__/
 *.pyc
 *.pkl
+.venv/
+venv/
 
 # Environment
 .env
