@@ -1,0 +1,18 @@
+\set ON_ERROR_STOP on
+
+-- Run from project root with psql, after create_integrated_bus_stop_location.sql.
+-- Example:
+-- psql -U postgres -d your_db -f services/api-server/src/main/resources/sql/create_integrated_bus_stop_location.sql
+-- psql -U postgres -d your_db -f scripts/db/load_curated_bus_stop_mapping.psql
+
+TRUNCATE TABLE bus_stop_demand_node_mapping;
+TRUNCATE TABLE integrated_bus_stop_location CASCADE;
+
+\copy integrated_bus_stop_location (canonical_node_id, ars_id, stop_name, node_info_stop_name, lat, lng, region_id, source_region, source_file, match_method, match_confidence) FROM 'data/processed/bus_stop_location/integrated_bus_stop_location_patch.csv' WITH CSV HEADER ENCODING 'UTF8';
+
+UPDATE integrated_bus_stop_location
+SET geom = ST_SetSRID(ST_MakePoint(lng, lat), 4326)
+WHERE lng IS NOT NULL
+  AND lat IS NOT NULL;
+
+\copy bus_stop_demand_node_mapping (service_id, service_id_type, route_name, converted_route_id, demand_node_id, canonical_node_id, ars_id, stop_name, node_info_stop_name, lat, lng, region_id, seq, side, match_method, match_confidence, reference_rows, passenger_sum, canonical_candidate_count) FROM 'data/processed/bus_stop_location/bus_stop_demand_node_mapping.csv' WITH CSV HEADER ENCODING 'UTF8';
