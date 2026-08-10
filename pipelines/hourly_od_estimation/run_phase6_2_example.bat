@@ -2,11 +2,23 @@
 REM EN: Example runner. Edit paths and values before use.
 REM KR: 실행 예시 파일입니다. 사용 전 경로와 값을 수정하세요.
 
-set DB_URL=postgresql://postgres:330218@localhost:5432/Seoul_Transit
-set HOLIDAY_CSV=서울특별시 양천구_공휴일 목록_20251127.csv
+REM EN: Set credentials in your shell/session BEFORE running this script.
+REM     Never write real passwords or API keys into this file — it is
+REM     committed to version control.
+REM KR: 이 스크립트를 실행하기 전에 셸/세션에서 자격 증명을 설정하세요.
+REM     이 파일은 버전 관리에 커밋되므로 실제 비밀번호나 API 키를 절대
+REM     이 파일에 적지 마세요.
+REM
+REM   set DB_PASSWORD=...
+REM   set SEOUL_API_KEY=...
 
-REM Optional if not passing --api-key
-REM set SEOUL_API_KEY=YOUR_KEY_HERE
+if "%DB_PASSWORD%"=="" (
+    echo ERROR: DB_PASSWORD is not set. Run: set DB_PASSWORD=your_password
+    exit /b 1
+)
+
+set DB_URL=postgresql://postgres:%DB_PASSWORD%@localhost:5432/Seoul_Transit
+set HOLIDAY_CSV=서울특별시 양천구_공휴일 목록_20251127.csv
 
 REM 1. Load one month from Seoul API
 REM python load_hourly_boarding.py --db-url "%DB_URL%" --api-key "%SEOUL_API_KEY%" --use-ym 202501
