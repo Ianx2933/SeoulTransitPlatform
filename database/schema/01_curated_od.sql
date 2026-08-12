@@ -1,7 +1,7 @@
 -- 01_curated_od.sql
 -- Curated OD table and holiday reference.
 --
--- IMPORTANT / 중요:
+-- IMPORTANT:
 -- analysis_table_final is the ONLY table mapped by a JPA @Entity
 -- (com.ian.transit.curatedod.infrastructure.CuratedOdRecord).
 -- Because application.yaml uses `ddl-auto: validate`, the API server will
@@ -11,6 +11,18 @@
 --
 -- Column names and types are derived from CuratedOdRecord.java.
 -- Do not rename columns without changing the entity.
+--
+-- The numeric columns are numeric on purpose. The original SQL Server table
+-- declared every column as VARCHAR; they were later converted because the
+-- implicit CASTs were disabling indexes:
+--
+--   ALTER TABLE Analysis_Table_Final ALTER COLUMN 승차_정류장순번 INT;
+--   ALTER TABLE Analysis_Table_Final ALTER COLUMN 하차_정류장순번 INT;
+--   ALTER TABLE Analysis_Table_Final ALTER COLUMN 승객수 INT;
+--   ALTER TABLE Analysis_Table_Final ALTER COLUMN 전환_노선ID BIGINT;
+--
+-- Reverting these to text would reintroduce that regression and would also
+-- fail Hibernate validation, since the entity maps Integer and Long.
 --
 -- anomaly_data mirrors this column list exactly; it is the quarantine target
 -- for rows removed by the correction pipeline.
@@ -30,6 +42,7 @@
 --
 -- Hibernate `validate` checks tables and columns only, not keys or
 -- constraints, so omitting the key costs nothing at startup.
+--
 
 CREATE TABLE IF NOT EXISTS public.analysis_table_final (
     기준일자                VARCHAR(8),
@@ -73,7 +86,15 @@ CREATE TABLE IF NOT EXISTS public.anomaly_data (
 );
 
 -- Holiday reference used by PredictionFeatureService and model training.
+--
+-- Column names and types come from the original loader
+-- (pipelines/reference_loader/load_holiday_data.py), not from guesswork.
+-- 날짜 must be DATE, not text: PredictionFeatureService binds a java.time
+-- LocalDate directly, and train_xgboost_dayofweek.py reads it through
+-- pd.to_datetime(). A VARCHAR column would silently break holiday detection,
+-- making every day look like a non-holiday.
+
 CREATE TABLE IF NOT EXISTS public.holiday_config (
-    날짜   VARCHAR(8) PRIMARY KEY,
-    설명   VARCHAR(100)
+    날짜    DATE PRIMARY KEY,
+    휴일명  VARCHAR(50)
 );
