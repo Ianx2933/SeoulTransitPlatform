@@ -1,250 +1,231 @@
 # SeoulTransitPlatform
 
-**1. Overview**
-**2. Architecture**
-**3. Data Pipeline**
-**4. Core Features**
-**5. Tech Stack**
-**6. System Design Decisions**
-**7. API Examples**
-**8. Prediction System**
-**9. Data Quality & Correction Strategy**
-**10. Deployment (GCP)**
-**11. Future Work**
+SeoulTransitPlatform is a geospatial transit demand platform for analyzing
+Seoul public transport activity by stop, station, route, hour, and administrative district.
 
-## 1. Overview
-SeoulTransitPlatform is a geospatial data platform designed to analyze urban mobility patterns in Seoul Metropolitan Area.
+The project combines a Spring Boot API server, PostgreSQL/PostGIS demand
+tables, Redis/Caffeine cache profiles, a Flask prediction service, and a
+React/Leaflet web client.
 
-This project aims to address the limitations of raw transit data by reconstructing reliable OD flows and enabling scalable mobility analytics.
+Background, system design, correction strategy, and the target GCP
+architecture are in
+[`docs/architecture/overview.md`](docs/architecture/overview.md).
 
-The system processes large-scale transit smart card data, reconstructs origin-destination (OD) flows, and provides:
+## Current phase status
 
-- Bus congestion analytics
-- OD flow exploration APIs
-- Time-series passenger prediction
-- Geospatial visualization outputs
+| Phase | Status | Summary |
+|---|---:|---|
+| Phase 6.8 | Done | Node-centered map demand analysis and catchment API |
+| Phase 6.9 | Done | District-centered all-route demand analysis |
+| Phase 6.9-2 | Done | District-demand performance indexing and statistics refresh |
+| Phase 6.10 | In progress | Deployment readiness, runbooks, profiles, smoke tests |
+| Phase 7 | Planned | GCP deployment architecture and implementation |
 
-The platform is designed with a clear separation between data pipelines and serving APIs.
+## Key capabilities
 
-**Problem Statement**
+- Node-centered demand lookup around a coordinate radius.
+- District-centered demand aggregation by administrative dong.
+- Bus and subway mode filtering.
+- Weekday/day-type and hour filtering.
+- Route, node, and district-level demand summaries.
+- Redis cache by default for deployment parity.
+- Caffeine cache through `local-simple` profile for lightweight local execution.
+- PostgreSQL/PostGIS spatial lookup and performance indexes.
 
-Raw transit data contains inconsistencies such as:
-- Missing route identifiers
-- Inconsistent stop codes
-- Incomplete OD records
+## Tech stack
 
-This platform focuses on reconstructing reliable OD flows from imperfect data.
+| Layer | Technology |
+|---|---|
+| Backend API | Spring Boot, Java, Maven |
+| Database | PostgreSQL, PostGIS |
+| Cache | Redis, Caffeine |
+| Prediction service | Python, Flask |
+| Frontend | React, Vite, Leaflet |
+| Pipelines | Python, Airflow |
+| Local infra | Docker Compose |
+| Testing | Maven tests, Testcontainers, Vitest |
 
-**Data Scale**
+## Local quick start
 
-- Daily transactions: ~10M records
-- Raw data size: ~2TB/day
-- OD dataset processed for query optimization
+All commands run from the repository root unless stated otherwise. Examples use
+PowerShell; CMD and bash equivalents are in the
+[local runbook](docs/deployment/local_runbook.md).
 
-## 2. Architecture
-1. Data Pipeline (Airflow + Python)
-   - Raw data ingestion
-   - OD reconstruction
-   - Multi-stage data correction
-   - Data validation
-   - Curated dataset generation
+### 0. Create the database schema
 
-2. API Layer (Spring Boot)
-   - Congestion API
-   - OD query API
-   - Prediction API
-   - Redis-based caching layer
+Required on first run. The API server uses `ddl-auto: validate` and will not
+start against an empty database.
 
-   The API layer serves only validated and curated data.
-
-3. Prediction Service (Flask)
-   - XGBoost-based daily prediction
-   - Hourly distribution modeling
-   - Dynamic weighting system
-
-**Architecture Diagram**
-```text
-                ┌────────────────────────────┐
-                │        Frontend (Leaflet)  │
-                │  - Interactive Map         │
-                │  - API Calls               │
-                └───────────────┬────────────┘
-                                │
-                                ▼
-                ┌────────────────────────────┐
-                │     Spring Boot API        │
-                │  - Congestion API          │
-                │  - OD API                  │
-                │  - Prediction API          │
-                │  - Redis Cache             │
-                └───────────────┬────────────┘
-                                │
-         ┌──────────────────────┴──────────────────────┐
-         ▼                                             ▼
-┌──────────────────────┐                  ┌──────────────────────┐
-│   PostgreSQL/PostGIS │                  │  Prediction Service  │
-│  - Curated OD Data   │                  │     (Flask)          │
-│  - Spatial Queries   │                  │  - XGBoost Model     │
-└───────────┬──────────┘                  │  - Hourly Ratio      │
-            │                             └───────────┬──────────┘
-            │                                         │
-            ▼                                         ▼
-    ┌──────────────────────┐                 ┌──────────────────────┐
-    │     Airflow Pipeline │                 │   Model Artifacts     │
-    │  - Data Ingestion    │                 │  (Cloud Storage)      │
-    │  - OD Reconstruction │                 └──────────────────────┘
-    │  - Data Correction   │
-    │  - Validation        │
-    └──────────────────────┘
+```bash
+psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE \"Seoul_Transit\" ENCODING 'UTF8';"
+psql -h localhost -p 5432 -U postgres -d Seoul_Transit -f database/schema/run_all.sql
 ```
 
-## 3. Data Pipeline
-The pipeline processes raw BMS and OD datasets into a curated analysis-ready dataset.
+This creates structure only; endpoints return empty results until data is
+loaded. Full instructions, including data loading order, are in
+[`docs/deployment/database_setup.md`](docs/deployment/database_setup.md).
 
-**Steps**:
-1. Raw Data Ingestion
-2. Schema Normalization
-3. Route ID Mapping
-4. Standard Code Mapping
-5. Multi-stage Data Correction:
-   - Direct mapping (route + sequence)
-   - ARS-based fallback
-   - Stop name fallback
-   - Cross-reference correction (boarding ↔ alighting)
-6. Data Validation
-7. Curated Data Output
+### 1. Start Redis
 
-## 4. Core Features
-- Bus congestion estimation based on reconstructed passenger flow
-- OD flow exploration per route and stop
-- Section-based congestion analysis
-- Time-series passenger prediction (daily + hourly)
-- Interactive geospatial visualization using Leaflet
-- Internal analysis and validation using Folium
-
-## 5. Tech Stack
-- Python (Pandas, ETL processing)
-- Airflow (Pipeline orchestration)
-- PostgreSQL / PostGIS
-- Spring Boot (API server)
-- Redis (Caching)
-- Flask (Prediction service)
-- Leaflet (Frontend visualization)
-- GCP (Cloud Run, Cloud SQL, Cloud Storage)
-
-## 6. System Design Decisions
-- **Separation of concerns**:
-  - Data correction is handled in Airflow pipelines
-  - APIs serve only validated curated data
-
-- **SQL-first approach**:
-  Complex OD and congestion calculations are implemented using SQL (CTE and window functions)
-
-- **Multi-stage fallback correction strategy**:
-  Improves data completeness while maintaining traceability
-
-- **Prediction as a microservice**:
-  Model inference is decoupled from the API layer for scalability
-
-- **Caching strategy**:
-  Route-level congestion results are cached using Redis with TTL policies
-
-## 7. API Examples
-
-GET /api/congestion/{route}?date=YYYYMMDD
-
-GET /api/od/{route}/{ars}?date=YYYYMMDD
-
-GET /api/prediction/hourly?routeNo={route}&arsNo={ars}&date=YYYYMMDD
-
-## 8. Prediction System
-
-The prediction system is designed as a separate microservice.
-
-- **Spring Boot**:
-  - Feature engineering (day type, lag features)
-  - API orchestration
-
-- **Flask**:
-  - XGBoost model inference
-  - Hourly distribution modeling
-  - Dynamic weighting adjustments
-
-**Model features**:
-- Day type (weekday / weekend / holiday)
-- Month
-- Previous week passenger count
-- Previous month passenger count
-
-## 9. Data Quality & Correction Strategy
-
-To improve data quality, a multi-stage correction pipeline is applied:
-
-1. Direct mapping (route + sequence)
-2. ARS-based fallback
-3. Stop name-based fallback
-4. Cross-reference correction (boarding ↔ alighting)
-
-Each correction stage is tracked using metadata:
-- source
-- confidence
-This approach improves reconstruction accuracy while ensuring traceability.
-
-## 10. Deployment (GCP)
-
-The system is designed for deployment on GCP:
-
-- **Cloud Run**:
-  - API Server
-  - Prediction Service
-
-- **Cloud SQL**:
-  - PostgreSQL / PostGIS
-
-- **Cloud Storage**:
-  - Raw data and model artifacts
-
-- **Artifact Registry**:
-  - Container images
-
-- **Secret Manager**:
-  - Credentials and API keys
- 
- **Deployment Diagram**
-```text
-[Cloud Storage] → raw data / model
-
-        ↓
-
-[Airflow / Composer]
-        ↓
-[Cloud SQL (PostgreSQL + PostGIS)]
-
-        ↓
-
-[Cloud Run - Spring API]
-        ↓
-[Cloud Run - Prediction Service]
-
-        ↓
-
-[Leaflet Frontend (Static Hosting)]
+```powershell
+docker compose up -d redis
+docker ps
+docker exec -it seoul-transit-redis redis-cli ping
 ```
-## Sample Output
 
-GET /api/congestion/143
+Expected Redis response:
 
-[
-  {
-    "stopName": "Gangnam Station",
-    "congestionLevel": "High",
-    "passengers": 1200
-  }
-]
+```text
+PONG
+```
 
-## 11. Future Work
-- Real-time pipeline using Pub/Sub
-- Streaming-based congestion updates
-- Interactive frontend dashboard
-- Automated model retraining
-- BigQuery integration for large-scale analytics
+### 2. Start the API server
+
+```powershell
+cd services\api-server
+
+$env:DB_PASSWORD='your-local-postgres-password'
+$env:ADMIN_API_TOKEN='local-dev-token'
+$env:JPA_DDL_AUTO='validate'
+$env:CACHE_TYPE='redis'
+$env:REDIS_HOST='localhost'
+$env:REDIS_PORT='6379'
+
+mvn spring-boot:run
+```
+
+### 3. Run smoke tests
+
+In another window:
+
+```powershell
+curl.exe -i 'http://localhost:8080/actuator/health'
+
+curl.exe -i 'http://localhost:8080/api/map/node-catchment?lat=37.5&lng=127.03&radiusMeters=800&modes=bus,subway&dayTypes=mon&dayAggregation=average&hours=8'
+
+curl.exe -i 'http://localhost:8080/api/map/district-demand?districtCode=11230760&modes=bus,subway&dayTypes=mon,tue,wed,thu,fri&dayAggregation=average&hours=7,8,9&nodeLimit=50'
+```
+
+Expected health result:
+
+```text
+HTTP/1.1 200
+{"status":"UP"}
+```
+
+### 4. Start the frontend
+
+```powershell
+cd services\web-client
+
+npm.cmd install
+npm.cmd run dev
+```
+
+Default Vite URL:
+
+```text
+http://localhost:5173
+```
+
+## Cache profiles
+
+| Profile | Cache | Intended use |
+|---|---|---|
+| default | Redis | Local Redis and deployment-like execution |
+| local-simple | Caffeine | Lightweight local execution without Redis |
+| test | Testcontainers Redis/PostgreSQL | Automated tests |
+
+Run the API without Redis:
+
+```powershell
+cd services\api-server
+
+$env:SPRING_PROFILES_ACTIVE='local-simple'
+$env:DB_PASSWORD='your-local-postgres-password'
+$env:ADMIN_API_TOKEN='local-dev-token'
+$env:JPA_DDL_AUTO='validate'
+
+mvn spring-boot:run
+```
+
+Note that with the default profile and no Redis running,
+`/actuator/health` reports `DOWN`. That is a missing dependency, not a broken
+build — see
+[`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md).
+
+## Performance result: Phase 6.9-2
+
+The district-demand endpoint was previously measured at roughly 9.5-12.9
+seconds on local runs. After adding spatial, composite, expression, and
+mapping-support indexes and refreshing table statistics, cold calls dropped
+below one second, with a best observed local cold result of about 192 ms.
+
+| Baseline | After | Approximate improvement |
+|---:|---:|---:|
+| 9.5 s | 0.192 s | about 49x |
+| 12.9 s | 0.192 s | about 67x |
+
+Index SQL: `database/performance/phase6_9_2_district_demand_indexes.sql`
+Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md)
+
+## Documentation
+
+| File | Purpose |
+|---|---|
+| `docs/architecture/overview.md` | Project background, system design, pipeline, target GCP architecture |
+| `docs/architecture/cache_profiles.md` | Redis/Caffeine/Testcontainers cache profile explanation |
+| `docs/deployment/database_setup.md` | Database creation, schema, and data loading order |
+| `docs/deployment/local_runbook.md` | Local execution runbook |
+| `docs/deployment/smoke_tests.md` | API smoke test commands and expected results |
+| `docs/performance/phase6_9_2_district_demand_optimization.md` | 6.9-2 performance analysis |
+| `docs/changelog/` | Per-patch change records, kept for history |
+
+## Repository layout
+
+```text
+database/schema/        Schema creation scripts, run in numeric order
+database/performance/   Performance index scripts
+docs/                   Documentation (see table above)
+infra/                  Deployment configuration (placeholder, Phase 7)
+pipelines/              Python/Airflow data pipelines by phase
+scripts/db/             Data loading helper scripts
+services/api-server/    Spring Boot API
+services/prediction-service/  Flask prediction service
+services/web-client/    React/Vite/Leaflet frontend
+```
+
+## Security notes
+
+Do not commit local secrets.
+
+Never commit:
+
+```text
+.env
+real DB_PASSWORD values
+real ADMIN_API_TOKEN values
+real SEOUL_BUS_API_KEY values
+PostgreSQL passwords
+```
+
+Use `.env.example` for placeholders only, and session-level environment
+variables for local development.
+
+## Known gaps
+
+Tracked here so they are visible rather than discovered during deployment.
+
+1. No Dockerfile for `services/api-server` or `services/web-client`; only
+   `services/prediction-service` has one.
+2. `docker-compose.yaml` provides Redis only, not PostgreSQL/PostGIS.
+3. `infra/` is a placeholder.
+4. `admin_dong_boundary` has no loader script; it is imported manually from the
+   SGIS shapefile (documented in `database/schema/04_reference_admin_dong_boundary.sql`).
+
+## Recommended next work
+
+1. Close the gaps above, starting with the two missing Dockerfiles.
+2. Decide local-vs-container PostgreSQL strategy.
+3. Verify the schema scripts against a clean database on a second machine.
+4. Prepare Phase 7 GCP architecture.
