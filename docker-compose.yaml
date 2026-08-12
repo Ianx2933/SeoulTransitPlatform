@@ -17,9 +17,15 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-Seoul_Transit}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required — copy .env.example to .env}
+      # DB_PASSWORD stays required. Unlike the variables above it affects the
+      # default profile, and a silently wrong value would create a database
+      # the API server then cannot authenticate against.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required - copy .env.example to .env}
     ports:
-      - "5432:5432"
+      # Conflicts with a PostgreSQL server already running on the host. If you
+      # keep using a local install, either do not start this service or map a
+      # different host port, e.g. "5433:5432".
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -52,7 +58,7 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-Seoul_Transit}
       DB_USERNAME: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?ADMIN_API_TOKEN is required}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-local-dev-token}
       # validate, not update: the schema is created by database/schema/run_all.sql.
       JPA_DDL_AUTO: validate
       CACHE_TYPE: redis
@@ -97,7 +103,6 @@ services:
   # Airflow (optional)
   # ---------------------------------------------------------------------------
   # Airflow keeps its own metadata database, separate from Seoul_Transit.
-  # (Airflow는 Seoul_Transit과 별개의 메타데이터 DB를 사용합니다.)
   airflow-db:
     profiles: ["airflow"]
     image: postgres:16
@@ -126,7 +131,12 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow}@airflow-db/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
-      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?AIRFLOW_SECRET_KEY is required}
+      # Default rather than required. Variable interpolation runs across the
+      # whole file regardless of profile, so a required Airflow variable would
+      # block `docker compose config` and `--profile app` for people who never
+      # use Airflow. The fallback name is deliberately unpleasant so it is
+      # obvious when it reaches anything but a local machine.
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local-dev-insecure-change-me}
       PIPELINE_DB_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-Seoul_Transit}
       TRANSIT_API_BASE_URL: http://api-server:8080
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}

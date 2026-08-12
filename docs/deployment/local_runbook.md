@@ -67,6 +67,42 @@ That creates structure only. The server will start and `/actuator/health` will
 report `UP`, but map endpoints return empty results until data is loaded —
 sections 4 and 5 of `database_setup.md` cover that.
 
+## 0.1 Environment file for Docker Compose
+
+`docker compose` reads `.env` from the directory you run it in. The API server
+started directly with Maven does not — it reads the terminal's environment
+instead. Both are documented below; they do not conflict.
+
+```cmd
+copy .env.example .env
+```
+
+Fill in `DB_PASSWORD` and `ADMIN_API_TOKEN`, and update the password inside
+`PIPELINE_DB_URL` to match.
+
+Keep `PIPELINE_DB_URL` on one line. Notepad's word wrap makes it look wrapped,
+and inserting a real newline produces:
+
+```text
+unexpected character "@" in variable name "me@localhost:5432/Seoul_Transit"
+```
+
+Turn word wrap off (Format menu) before editing, or rewrite the file:
+
+```cmd
+copy .env.example .env
+powershell -Command "(Get-Content .env) -replace 'change-me','your-password' | Set-Content .env"
+```
+
+Verify:
+
+```cmd
+docker compose config > nul && echo compose OK
+```
+
+This validates the whole file, including services behind profiles you are not
+using.
+
 ## 1. PostgreSQL
 
 Start PostgreSQL through Windows Services, pgAdmin, systemd, or your existing
@@ -100,7 +136,7 @@ psql -h localhost -p 5432 -U postgres -d Seoul_Transit -c "\dt public.*"
 
 If `analysis_table_final` is missing, go back to step 0.
 
-## 2. Redis (Redis)
+## 2. Redis
 
 From the repository root:
 
@@ -233,7 +269,7 @@ Open:
 http://localhost:5173
 ```
 
-## 6. Common failures 
+## 6. Common failures
 
 ### Schema validation error on startup
 
@@ -257,6 +293,25 @@ The server requested SCRAM-based authentication, but no password was provided.
 Fix: set `DB_PASSWORD` in the same terminal window that runs
 `mvn spring-boot:run`, then restart the API server. Environment variables set in
 one window do not carry to another.
+
+### Port 5432 already in use
+
+Symptom, when starting the compose `postgres` service:
+
+```text
+Bind for 0.0.0.0:5432 failed: port is already allocated
+```
+
+A PostgreSQL server is already running on the host. Either keep using the host
+install and do not start the compose service, or map a different host port in
+`.env`:
+
+```text
+POSTGRES_HOST_PORT=5433
+```
+
+Note that the two databases are separate — data loaded into one is not visible
+in the other.
 
 ### Redis not running
 
