@@ -1,6 +1,8 @@
-# Metro Ingestion
+# Metro Ingestion (지하철 데이터 적재)
 
-## Purpose
+> Korean comments are added in parentheses for review and handoff. (지하철 역사 마스터 CSV를 DB에 적재하는 로더 문서입니다.)
+
+## Purpose (목적)
 
 This package loads metro-related raw data into PostgreSQL.
 (이 패키지는 지하철 관련 원천 데이터를 PostgreSQL에 적재한다.)
@@ -11,7 +13,7 @@ Current loader:
 load_subway_station_location.py
 ```
 
-## Directory Structure
+## Directory Structure (디렉터리 구조)
 
 ```text
 SeoulTransitPlatform/
@@ -21,16 +23,19 @@ SeoulTransitPlatform/
 │     ├─ load_subway_station_location.py
 │     └─ README.md
 └─ data/
-   └─ raw/
-      └─ subway/
-         └─ 서울시 역사마스터 정보.csv
+   └─ reference/
+      └─ 서울시 역사마스터 정보.csv
 ```
 
-## Input CSV
+## Input CSV (입력 CSV)
 
 ```text
-data/raw/subway/서울시 역사마스터 정보.csv
+data/reference/서울시 역사마스터 정보.csv
 ```
+
+Override with the `SUBWAY_STATION_CSV` environment variable if the file lives
+elsewhere. This CSV is not committed to the repository; download it from the
+Seoul Open Data Plaza station master dataset.
 
 Encoding:
 
@@ -48,7 +53,7 @@ Source columns:
 경도
 ```
 
-## Output Table
+## Output Table (출력 테이블)
 
 ```sql
 CREATE TABLE IF NOT EXISTS subway_station_location (
@@ -61,7 +66,7 @@ CREATE TABLE IF NOT EXISTS subway_station_location (
 );
 ```
 
-## Column Mapping
+## Column Mapping (컬럼 매핑)
 
 ```text
 역사_ID -> station_id
@@ -71,22 +76,34 @@ CREATE TABLE IF NOT EXISTS subway_station_location (
 경도     -> lng
 ```
 
-## Install Dependencies
+## Install Dependencies (의존성 설치)
 
 ```bash
 pip install pandas sqlalchemy psycopg2-binary
 ```
 
-## Run
+## Run (실행)
 
 Run from the project root:
 
+Set the database URL first; it is read from the environment so that no
+credential is stored in the repository.
+
 ```bash
-cd SeoulTransitPlatform
+export PIPELINE_DB_URL='postgresql+psycopg2://postgres:PASSWORD@localhost:5432/Seoul_Transit'
 python pipelines/metro_ingestion/load_subway_station_location.py
 ```
 
-## Verify
+PowerShell:
+
+```powershell
+$env:PIPELINE_DB_URL='postgresql+psycopg2://postgres:PASSWORD@localhost:5432/Seoul_Transit'
+python pipelines/metro_ingestion/load_subway_station_location.py
+```
+
+This script takes no command-line arguments.
+
+## Verify (검증)
 
 ```sql
 SELECT COUNT(*)
@@ -99,7 +116,7 @@ Expected result:
 783
 ```
 
-## Join Test
+## Join Test (조인 테스트)
 
 ```sql
 SELECT

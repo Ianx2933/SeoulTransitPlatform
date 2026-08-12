@@ -1,15 +1,16 @@
 """
 Bus Stop Location Loader
+(버스 정류장 위치 로더)
 
 Purpose:
-- Load Seoul bus stop master CSV into PostgreSQL bus_stop_location table.
-- Normalize ARS code to 5 digits.
-- Keep coordinates ready for congestion map APIs.
+- Load Seoul bus stop master CSV into PostgreSQL bus_stop_location table. (서울 버스 정류장 마스터 CSV를 PostgreSQL bus_stop_location 테이블에 적재)
+- Normalize ARS code to 5 digits. (ARS 코드를 5자리로 정규화)
+- Keep coordinates ready for congestion map APIs. (혼잡도/지도 API에서 바로 쓸 수 있도록 좌표 유지)
 
 Usage:
     python load_bus_stop_location.py \
         --csv "../../data/reference/seoul_bus_stop_master.csv" \
-        --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" \
+        --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" \
         --replace
 """
 
@@ -23,6 +24,7 @@ from sqlalchemy import create_engine, text
 TARGET_COLUMNS = ["노드id", "정류장번호", "정류장명", "경도", "위도"]
 
 
+# Read source CSV with fallback encoding. (원본 CSV를 읽고 인코딩 실패 시 대체 인코딩 사용)
 def read_source_csv(csv_path: Path) -> pd.DataFrame:
     try:
         return pd.read_csv(csv_path, encoding="cp949")
@@ -30,6 +32,7 @@ def read_source_csv(csv_path: Path) -> pd.DataFrame:
         return pd.read_csv(csv_path, encoding="utf-8-sig")
 
 
+# Transform raw columns into the canonical DB shape. (원본 컬럼을 DB 기준 형태로 변환)
 def transform(raw: pd.DataFrame) -> pd.DataFrame:
     required = ["정류장_ID", "정류장_번호", "정류장_명칭", "경도", "위도"]
     missing = [column for column in required if column not in raw.columns]
@@ -50,6 +53,7 @@ def transform(raw: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+# Ensure target table and lookup index exist. (대상 테이블과 조회 인덱스 보장)
 def ensure_table(engine) -> None:
     create_sql = """
     CREATE TABLE IF NOT EXISTS bus_stop_location (
@@ -71,6 +75,7 @@ def ensure_table(engine) -> None:
         conn.execute(text(index_sql))
 
 
+# Load transformed rows into PostgreSQL. (변환된 행을 PostgreSQL에 적재)
 def load_to_postgres(df: pd.DataFrame, db_url: str, replace: bool) -> None:
     engine = create_engine(db_url)
     ensure_table(engine)
@@ -89,11 +94,12 @@ def load_to_postgres(df: pd.DataFrame, db_url: str, replace: bool) -> None:
     )
 
 
+# Parse CLI arguments and run the loader. (CLI 인자를 읽고 로더 실행)
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", required=True, help="Path to Seoul bus stop master CSV")
-    parser.add_argument("--db-url", required=True, help="SQLAlchemy PostgreSQL URL")
-    parser.add_argument("--replace", action="store_true", help="Truncate existing table before insert")
+    parser.add_argument("--csv", required=True, help="Path to Seoul bus stop master CSV (서울 버스 정류장 마스터 CSV 경로)")
+    parser.add_argument("--db-url", required=True, help="SQLAlchemy PostgreSQL URL (SQLAlchemy용 PostgreSQL 접속 URL)")
+    parser.add_argument("--replace", action="store_true", help="Truncate existing table before insert (삽입 전 기존 테이블 비우기)")
     args = parser.parse_args()
 
     csv_path = Path(args.csv)

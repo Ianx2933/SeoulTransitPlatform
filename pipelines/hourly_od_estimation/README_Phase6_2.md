@@ -1,6 +1,8 @@
-# Phase 6.2 - Hourly OD Estimation Pipeline
+# Phase 6.2 - Hourly OD Estimation Pipeline (Phase 6.2 시간대별 OD 추정 파이프라인)
 
-## Goal
+> Korean comments are added in parentheses for review and handoff. (일 단위 OD를 시간대별 OD로 변환하는 Phase 6.2 실행 문서입니다.)
+
+## Goal (목표)
 
 Convert daily OD records from `analysis_table_final` into estimated hourly OD records.
 
@@ -18,7 +20,7 @@ MON / TUE / WED / THU / FRI / SAT / SUN_HOLIDAY
 
 ---
 
-## Recommended Location
+## Recommended Location (권장 위치)
 
 ```text
 SeoulTransitPlatform/
@@ -28,46 +30,46 @@ SeoulTransitPlatform/
 
 ---
 
-## Pipeline Order
+## Pipeline Order (파이프라인 순서)
 
-### 0. Create tables
+### 0. Create tables (테이블 생성)
 
 ```bash
 psql -d Seoul_Transit -U postgres -f db_schema_phase6_2.sql
 ```
 
-### 1. Load monthly hourly boarding/alighting API data
+### 1. Load monthly hourly boarding/alighting API data (월별 시간대 승하차 API 데이터 적재)
 
 ```bash
 python load_hourly_boarding.py ^
-  --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" ^
+  --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --api-key "%SEOUL_API_KEY%" ^
   --use-ym 202501
 ```
 
-### 2. Build month day counts
+### 2. Build month day counts (월별 요일 수 계산)
 
 ```bash
 python build_month_day_count.py ^
-  --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" ^
+  --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --start-ym 202501 ^
   --end-ym 202512 ^
   --holiday-csv "서울특별시 양천구_공휴일 목록_20251127.csv"
 ```
 
-### 3. Solve day-of-week hourly patterns
+### 3. Solve day-of-week hourly patterns (요일별 시간대 패턴 계산)
 
 ```bash
 python solve_dow_hourly_ratio.py ^
-  --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" ^
+  --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --min-months 3
 ```
 
-### 4. Estimate hourly OD
+### 4. Estimate hourly OD (시간대별 OD 추정)
 
 ```bash
 python estimate_hourly_od.py ^
-  --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" ^
+  --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --start-date 20250101 ^
   --end-date 20251231 ^
   --holiday-csv "서울특별시 양천구_공휴일 목록_20251127.csv"
@@ -75,7 +77,7 @@ python estimate_hourly_od.py ^
 
 ---
 
-## Method
+## Method (방법)
 
 For each route-stop-hour:
 

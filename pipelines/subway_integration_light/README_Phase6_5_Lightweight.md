@@ -1,10 +1,12 @@
-# Phase 6.5 Lightweight - Subway Integration for Local Environment
+# Phase 6.5 Lightweight - Subway Integration for Local Environment (Phase 6.5 경량 지하철 통합 로컬 환경)
 
-## Goal
+> Korean comments are added in parentheses for review and handoff. (로컬 환경에서 지하철 수요를 경량 통합하는 Phase 6.5 실행 문서입니다.)
+
+## Goal (목표)
 
 Build a lightweight bus + subway hourly demand layer without storing large subway raw tables.
 
-## Design
+## Design (설계)
 
 ```text
 Subway CSV
@@ -16,7 +18,7 @@ Subway CSV
 → integrated_hourly_transit_demand_light
 ```
 
-## What this phase does NOT do
+## What this phase does NOT do (이 단계에서 하지 않는 것)
 
 ```text
 - No raw subway table
@@ -25,7 +27,7 @@ Subway CSV
 - No full OD expansion
 ```
 
-## Recommended Location
+## Recommended Location (권장 위치)
 
 ```text
 SeoulTransitPlatform/
@@ -33,15 +35,15 @@ SeoulTransitPlatform/
     └── subway_integration_light/
 ```
 
-## Run Order
+## Run Order (실행 순서)
 
-### 1. Install requirements
+### 1. Install requirements (요구 패키지 설치)
 
 ```bash
 pip install -r requirements_phase6_5_light.txt
 ```
 
-### 2. Create lightweight tables
+### 2. Create lightweight tables (경량 테이블 생성)
 
 Use pgAdmin Query Tool or psql:
 
@@ -49,28 +51,28 @@ Use pgAdmin Query Tool or psql:
 "C:\Program Files\PostgreSQL\18\bin\psql.exe" -d Seoul_Transit -U postgres -f db_schema_phase6_5_light.sql
 ```
 
-### 3. Build lightweight subway demand directly from CSV
+### 3. Build lightweight subway demand directly from CSV (CSV에서 지하철 수요 생성)
 
 ```bash
 python build_subway_hourly_station_demand_light.py ^
-  --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" ^
-  --input-dir "C:\Users\miyum\SeoulTransitPlatform\data\subway_hourly" ^
-  --holiday-csv "C:\Users\miyum\SeoulTransitPlatform\pipelines\hourly_od_estimation\공휴일목록_202026.csv" ^
+  --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
+  --input-dir ".\data\subway_hourly" ^
+  --holiday-csv ".\pipelines\hourly_od_estimation\공휴일목록_202026.csv" ^
   --batch-size 50000
 ```
 
-### 4. Build lightweight integrated demand
+### 4. Build lightweight integrated demand (통합 수요 생성)
 
 ```bash
 python build_integrated_hourly_transit_demand_light.py ^
-  --db-url "postgresql://postgres:330218@localhost:5432/Seoul_Transit" ^
+  --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --batch-size 50000
 ```
 
-### 5. Validate
+### 5. Validate (검증)
 
 Run `validation_queries_phase6_5_light.sql`.
 
-## Cloud Migration Note
+## Cloud Migration Note (클라우드 이전 메모)
 
 Full raw subway ingestion should be implemented later in cloud storage/database.
