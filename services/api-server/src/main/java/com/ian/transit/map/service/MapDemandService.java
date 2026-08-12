@@ -26,6 +26,27 @@ public class MapDemandService {
     private static final int DEFAULT_NODE_SEARCH_LIMIT = 30;
     private static final int MAX_NODE_SEARCH_LIMIT = 100;
 
+    /**
+     * Day type values stored by the Phase 6.3 and 6.5 demand pipelines.
+     *
+     * Sunday and public holidays are merged into a single "sun_holiday" bucket,
+     * so "sun" is not a valid value. An unrecognized day type must be rejected
+     * here rather than passed to SQL, where it would match no rows and produce
+     * zero demand indistinguishable from a genuinely empty result.
+     *
+     * Kept in sync with DAY_TYPES in pipelines/hourly_stop_pattern/common.py
+     * and pipelines/subway_integration_light/common.py.
+     */
+    private static final List<String> ALLOWED_DAY_TYPES = List.of(
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun_holiday"
+    );
+
     private final MapDemandRepository mapDemandRepository;
     private final DistrictDemandRepository districtDemandRepository;
     private final NodeDemandRepository nodeDemandRepository;
@@ -189,8 +210,6 @@ public class MapDemandService {
      * Validates the optional district node-row limit. A null limit keeps the
      * full row set for backward compatibility; totals are unaffected either
      * way because truncation happens after aggregation.
-     * (nodeLimit이 null이면 기존과 동일하게 전체 행을 반환하며, 절단은 집계
-     * 이후에만 적용되므로 합계에는 영향이 없습니다.)
      */
     private void validateNodeLimit(Integer nodeLimit) {
         if (nodeLimit != null && (nodeLimit < 1 || nodeLimit > 10000)) {
@@ -199,7 +218,7 @@ public class MapDemandService {
     }
 
     /**
-     * Parses selected administrative district codes. (선택 행정동 코드를 파싱합니다.)
+     * Parses selected administrative district codes.
      */
     private List<String> parseDistrictCodes(String districtCode, String districtCodes) {
         List<String> parsedDistrictCodes;
@@ -225,7 +244,7 @@ public class MapDemandService {
     }
 
     /**
-     * Validates administrative district code shape. (행정동 코드 형식을 검증합니다.)
+     * Validates administrative district code shape.
      */
     private void validateDistrictCode(String districtCode) {
         if (districtCode == null || !districtCode.matches("\\d{8,10}")) {
@@ -360,11 +379,23 @@ public class MapDemandService {
     }
 
     /**
-     * Validates day type.
+     * Validates day type against the values the demand tables actually store.
+     *
+     * "sun" is rejected on purpose: Sunday demand is stored under
+     * "sun_holiday", and silently returning zero for "sun" would read as an
+     * absence of weekend demand rather than as a bad request.
      */
     private void validateDayType(String dayType) {
         if (dayType == null || dayType.isBlank()) {
             throw new IllegalArgumentException("dayType must not be blank");
+        }
+
+        if (!ALLOWED_DAY_TYPES.contains(dayType)) {
+            throw new IllegalArgumentException(
+                    "unknown dayType '" + dayType + "'; allowed values are "
+                            + String.join(", ", ALLOWED_DAY_TYPES)
+                            + " (Sunday demand is stored under 'sun_holiday')"
+            );
         }
     }
 
