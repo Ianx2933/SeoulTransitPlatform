@@ -9,6 +9,14 @@
 
 \set ON_ERROR_STOP on
 
+-- Column names in this schema are Korean, so the client encoding must be
+-- UTF8. On a Korean Windows install psql defaults to UHC and fails with:
+--   ERROR: character with byte sequence 0xa4 0x80 in encoding "UHC" has no
+--   equivalent in encoding "UTF8"
+-- Setting it here means the script works without exporting PGCLIENTENCODING.
+
+SET client_encoding = 'UTF8';
+
 \echo '=== 00 extensions ==='
 \ir 00_extensions.sql
 
@@ -34,3 +42,4 @@
 \ir 07_performance_indexes.sql
 
 \echo '=== schema creation complete ==='
+\echo 'Expect 18 tables: 16 project tables + anomaly_data + PostGIS spatial_ref_sys'

@@ -11,6 +11,9 @@
 -- scripts/db/load_curated_bus_stop_mapping.psql (its \copy column list plus
 -- the geom UPDATE) and from the columns read by NodeCatchmentRepository and
 -- DistrictDemandRepository.
+--
+-- Verified against the live database: columns, types, and the
+-- canonical_node_id primary key all match.
 
 CREATE TABLE IF NOT EXISTS public.integrated_bus_stop_location (
     canonical_node_id     VARCHAR(100) PRIMARY KEY,
@@ -27,7 +30,28 @@ CREATE TABLE IF NOT EXISTS public.integrated_bus_stop_location (
     geom                  geometry(Point, 4326)
 );
 
+-- Supporting indexes present in the live database.
+--
+-- Note: do NOT add a separate btree on canonical_node_id. The primary key
+-- already provides one, and a second index on the same column is pure
+-- overhead — it is maintained on every write and never chosen by the planner.
+
+CREATE INDEX IF NOT EXISTS idx_integrated_bus_stop_location_ars_id
+ON public.integrated_bus_stop_location (ars_id);
+
+CREATE INDEX IF NOT EXISTS idx_integrated_bus_stop_location_stop_name
+ON public.integrated_bus_stop_location (stop_name);
+
+CREATE INDEX IF NOT EXISTS idx_integrated_bus_stop_location_geom
+ON public.integrated_bus_stop_location USING GIST (geom);
+
 -- Route-level mapping between demand node ids and canonical stop ids.
+--
+-- The foreign key below is present in the live database and enforces load
+-- order: integrated_bus_stop_location must be populated first. It also means
+-- the two tables cannot be truncated in arbitrary order — the mapping table
+-- must be cleared before the location table.
+--
 CREATE TABLE IF NOT EXISTS public.bus_stop_demand_node_mapping (
     service_id                 VARCHAR(100),
     service_id_type            VARCHAR(50),
@@ -47,7 +71,10 @@ CREATE TABLE IF NOT EXISTS public.bus_stop_demand_node_mapping (
     match_confidence           DOUBLE PRECISION,
     reference_rows             INTEGER,
     passenger_sum              BIGINT,
-    canonical_candidate_count  INTEGER
+    canonical_candidate_count  INTEGER,
+    CONSTRAINT bus_stop_demand_node_mapping_canonical_node_id_fkey
+        FOREIGN KEY (canonical_node_id)
+        REFERENCES public.integrated_bus_stop_location (canonical_node_id)
 );
 
 -- Load rows with:

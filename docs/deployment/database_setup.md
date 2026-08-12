@@ -44,7 +44,44 @@ surfacing as HTTP 500 on the affected endpoint.
 So: a database created with structure only will start the server and answer
 `/actuator/health` with `UP`, while map endpoints return empty arrays.
 
+## 0. psql setup on Windows
+
+Two things trip up a first run on a Korean Windows install.
+
+### psql is not on PATH
+
+The PostgreSQL installer does not add it. Either call it by full path or add
+it to PATH for the session:
+
+```cmd
+set "PATH=%PATH%;C:\Program Files\PostgreSQL\18\bin"
+psql --version
+```
+
+Adjust the version folder to match your install.
+
+### Client encoding must be UTF8
+
+Column names in this schema are Korean. A Korean Windows psql defaults to the
+UHC encoding and fails with:
+
+```text
+ERROR: character with byte sequence 0xa4 0x80 in encoding "UHC" has no
+equivalent in encoding "UTF8"
+```
+
+`run_all.sql` sets `client_encoding` itself, so the full run works. For ad-hoc
+commands against individual files, set it for the session:
+
+```cmd
+set "PGCLIENTENCODING=UTF8"
+```
+
+If psql's own messages appear garbled in the console, that is a code page
+display issue, not a data problem. `chcp 65001` fixes the display.
+
 ## 1. Create the database
+
 ```bash
 psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE \"Seoul_Transit\" ENCODING 'UTF8';"
 ```
@@ -74,7 +111,7 @@ psql -h localhost -p 5432 -U postgres -d Seoul_Transit -c "\dt public.*"
 psql -h localhost -p 5432 -U postgres -d Seoul_Transit -c "SELECT PostGIS_Version();"
 ```
 
-Expected tables:
+Expected tables — 18 in total:
 
 ```text
 admin_dong_boundary
@@ -94,7 +131,10 @@ month_day_count
 subway_hourly_station_demand_light
 subway_station_join_alias
 subway_station_location
+spatial_ref_sys
 ```
+
+`spatial_ref_sys` is created by the PostGIS extension, not by this project.
 
 At this point the API server will start. Continue to section 4 if you need the
 endpoints to return data.
@@ -110,8 +150,8 @@ by `.gitignore`. Obtain them before running the loaders.
 
 | File | Expected path | Source |
 |---|---|---|
-| Bus stop master | `data/reference/seoul_bus_stop_master.csv` | Seoul Open Data Plaza — bus stop master |
-| Subway station master | `data/reference/서울시 역사마스터 정보.csv` | Seoul Open Data Plaza — station master |
+| Bus stop master | `data/reference/seoul_bus_stop_master.csv` | Seoul Open Data Plaza — bus stop master (정류장 마스터) |
+| Subway station master | `data/reference/서울시 역사마스터 정보.csv` | Seoul Open Data Plaza — station master (역사마스터 정보) |
 | Curated stop mapping | `data/processed/bus_stop_location/*.csv` | Produced by `pipelines/bus_stop_integration/` |
 
 Required source columns:
@@ -275,6 +315,29 @@ psql ... -f pipelines/subway_integration_light/validation_queries_phase6_5_light
 psql ... -f services/api-server/src/main/resources/sql/validate_integrated_bus_stop_coverage.sql
 ```
 
+## Verification status
+
+The schema in `database/schema/` has been run against an empty database and
+compared column-by-column with the working `Seoul_Transit` database.
+
+| Table | Status |
+|---|---|
+| `analysis_table_final` | Verified — types match; varchar lengths are 255 |
+| `integrated_bus_stop_location` | Verified — columns, types, and primary key match |
+| `admin_dong_boundary` | Verified — ogc_fid serial key, MultiPolygon geometry |
+| `holiday_config` | Verified — 날짜 is DATE, second column is holiday_name |
+| `bus_stop_location` | Not yet compared |
+| `subway_station_location` | Not yet compared |
+| Pipeline tables (6.2 / 6.3 / 6.5) | Defined by their own pipeline SQL files |
+
+The remaining two are reference tables created by Python loaders; compare them
+with:
+
+```cmd
+psql -U postgres -d Seoul_Transit -c "\d bus_stop_location"
+psql -U postgres -d Seoul_Transit -c "\d subway_station_location"
+```
+
 ## Troubleshooting
 
 ### Schema validation error on startup
@@ -295,6 +358,16 @@ JPA_DDL_AUTO=none
 Do not use this as a normal setting — it disables the check that catches
 schema drift.
 
+### Encoding error while running a schema file
+
+```text
+ERROR: character with byte sequence 0xa4 0x80 in encoding "UHC" has no
+equivalent in encoding "UTF8"
+```
+
+The client encoding is not UTF8. See section 0. All schema files are
+idempotent, so re-running after fixing the encoding is safe.
+
 ### Spatial function does not exist
 
 ```text
@@ -307,4 +380,5 @@ enabling it elsewhere does not help. Re-run `database/schema/00_extensions.sql`.
 ### Empty results from map endpoints
 
 The endpoint returns HTTP 200 with an empty array rather than an error. This is
-the structure-only state: tables exist but hold no rows. Complete sections 4 and 5.
+the structure-only state: tables exist but hold no rows. Complete sections 4
+and 5.
