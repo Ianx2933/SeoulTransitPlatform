@@ -1,3 +1,23 @@
+"""
+ARCHIVE - standalone OD preprocessing script.
+
+This is the most complete version of the CSV-era preprocessing script, and the
+only one implementing all three NULL-correction stages:
+
+    1. ARS-code based backfill
+    2. Stop-name based backfill
+    3. Cross-reference between boarding and alighting
+
+Earlier files in this directory stop at stage 1 or 2.
+
+Superseded by the API-driven correction chain in services/api-server
+(com.ian.transit.odcorrection), which is what pipelines/airflow/dags/
+od_correction_dag.py schedules. Kept as the reference implementation of the
+fallback strategy described in docs/architecture/overview.md.
+
+Local paths have been replaced with placeholders.
+"""
+
 import pandas as pd
 import time
  
@@ -6,8 +26,8 @@ start = time.time()
 # 1. 데이터 로드
 print("[1/5] 데이터 로드 중...")
  
-df_0916 = pd.read_csv(r'C:\data\seoul_od_data_20250916.csv', encoding='utf-8', dtype=str)
-df_1014 = pd.read_csv(r'C:\data\노선별OD_20251014.csv', encoding='utf-8', dtype=str)
+df_0916 = pd.read_csv(r'<DATA_DIR>/seoul_od_data_20250916.csv', encoding='utf-8', dtype=str)
+df_1014 = pd.read_csv(r'<DATA_DIR>/노선별OD_20251014.csv', encoding='utf-8', dtype=str)
  
 print(f"  0916: {len(df_0916):,}건 / 1014: {len(df_1014):,}건")
  
@@ -119,7 +139,50 @@ df_result.drop(columns=['승차_정류장표준코드_보정'], inplace=True)
 df_result = df_result.merge(ars_alighting, on='하차_정류장ARS', how='left', suffixes=('', '_보정'))
 df_result['하차_정류장표준코드'] = df_result['하차_정류장표준코드'].fillna(df_result['하차_정류장표준코드_보정'])
 df_result.drop(columns=['하차_정류장표준코드_보정'], inplace=True)
+
+# NULL 보정 2차: ARS로 못 찾은 경우 정류장명 기준으로 보정
+name_boarding = (
+    df_result[df_result['승차_정류장표준코드'].notna()]
+    [['승차_정류장명', '승차_정류장표준코드']]
+    .drop_duplicates(subset='승차_정류장명')
+)
+name_alighting = (
+    df_result[df_result['하차_정류장표준코드'].notna()]
+    [['하차_정류장명', '하차_정류장표준코드']]
+    .drop_duplicates(subset='하차_정류장명')
+)
  
+df_result = df_result.merge(name_boarding, on='승차_정류장명', how='left', suffixes=('', '_보정'))
+df_result['승차_정류장표준코드'] = df_result['승차_정류장표준코드'].fillna(df_result['승차_정류장표준코드_보정'])
+df_result.drop(columns=['승차_정류장표준코드_보정'], inplace=True)
+ 
+df_result = df_result.merge(name_alighting, on='하차_정류장명', how='left', suffixes=('', '_보정'))
+df_result['하차_정류장표준코드'] = df_result['하차_정류장표준코드'].fillna(df_result['하차_정류장표준코드_보정'])
+df_result.drop(columns=['하차_정류장표준코드_보정'], inplace=True)
+
+# NULL 보정 3차: 승차, 하차 서로 교차 참조
+# 승차 표준코드로 하차 표준코드 보정
+cross_map = (
+    df_result[df_result['승차_정류장표준코드'].notna()]
+    [['승차_정류장ARS', '승차_정류장표준코드']]
+    .rename(columns={'승차_정류장ARS': '하차_정류장ARS', '승차_정류장표준코드': '하차_정류장표준코드_보정'})
+    .drop_duplicates(subset='하차_정류장ARS')
+)
+df_result = df_result.merge(cross_map, on='하차_정류장ARS', how='left')
+df_result['하차_정류장표준코드'] = df_result['하차_정류장표준코드'].fillna(df_result['하차_정류장표준코드_보정'])
+df_result.drop(columns=['하차_정류장표준코드_보정'], inplace=True)
+
+# 하차 표준코드로 승차 표준코드 보정
+cross_map2 = (
+    df_result[df_result['하차_정류장표준코드'].notna()]
+    [['하차_정류장ARS', '하차_정류장표준코드']]
+    .rename(columns={'하차_정류장ARS': '승차_정류장ARS', '하차_정류장표준코드': '승차_정류장표준코드_보정'})
+    .drop_duplicates(subset='승차_정류장ARS')
+)
+df_result = df_result.merge(cross_map2, on='승차_정류장ARS', how='left')
+df_result['승차_정류장표준코드'] = df_result['승차_정류장표준코드'].fillna(df_result['승차_정류장표준코드_보정'])
+df_result.drop(columns=['승차_정류장표준코드_보정'], inplace=True)
+
  
 # 5. 결과 저장
 print("[5/5] 결과 저장 중...")
@@ -129,7 +192,11 @@ df_final = df_result[[
     '하차_정류장순번', '하차_정류장ARS', '하차_정류장표준코드', '하차_정류장명', '승객수'
 ]].rename(columns={'노선ID': '전환_노선ID'})
  
-df_final.to_csv(r'C:\data\merged_od_data.csv', index=False, encoding='utf-8-sig')
+df_final.to_csv(r'<DATA_DIR>/merged_od_data.csv', index=False, encoding='utf-8-sig', lineterminator='\n', sep='|')
+# 줄바꿈 문자가 마지막 컬럼에 붙는 문제 수정
+# 하차_정류장명에 쉼표가 포함된 값들이 있어서 구분자 |로 변경
+df_final.to_excel(r'<DATA_DIR>/merged_od_data.xlsx', index=False)
+# 엑셀로도 저장
  
 elapsed = time.time() - start
  
