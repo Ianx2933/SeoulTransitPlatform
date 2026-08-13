@@ -1,15 +1,30 @@
 # SeoulTransitPlatform
 
-SeoulTransitPlatform is a geospatial transit demand platform for analyzing
-Seoul public transport activity by stop, station, route, hour, and administrative district.
+A geospatial transit demand platform that turns raw smart-card records into
+stop-, station-, and district-level demand analysis for the Seoul metropolitan
+area.
 
-The project combines a Spring Boot API server, PostgreSQL/PostGIS demand
-tables, Redis/Caffeine cache profiles, a Flask prediction service, and a
-React/Leaflet web client.
+It exists because the source data does not answer questions directly. Roughly
+10M daily transactions arrive with missing route identifiers, inconsistent stop
+codes, and incomplete origin-destination records. The platform reconstructs
+usable OD flows from that, then serves spatial demand queries on top.
 
-Background, system design, correction strategy, and the target GCP
-architecture are in
-[`docs/architecture/overview.md`](docs/architecture/overview.md).
+**What it was used to find:** a congested segment that justified a targeted
+short-turn bus service, a route segment whose demand pattern argued for
+splitting it into a local service, and three routes carrying over half their
+demand on a single core segment. See
+**[policy insights](docs/analysis/policy_insights.md)**.
+
+![Route 143 congestion analysis](docs/analysis/images/route_143_congestion.png)
+
+## Highlights
+
+| | |
+|---|---|
+| **Query performance** | District-demand endpoint reduced from ~10 s to 192 ms cold — [analysis](docs/performance/phase6_9_2_district_demand_optimization.md) |
+| **Data correction** | Four-stage fallback pipeline with per-row match method and confidence recorded |
+| **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
+| **Reproducibility** | Schema scripts verified against an empty database; full local stack in Docker Compose |
 
 ## Current phase status
 
@@ -18,7 +33,7 @@ architecture are in
 | Phase 6.8 | Done | Node-centered map demand analysis and catchment API |
 | Phase 6.9 | Done | District-centered all-route demand analysis |
 | Phase 6.9-2 | Done | District-demand performance indexing and statistics refresh |
-| Phase 6.10 | In progress | Deployment readiness, runbooks, profiles, smoke tests |
+| Phase 6.10 | Done | Deployment readiness — schema scripts, runbooks, profiles, smoke tests, container images |
 | Phase 7 | Planned | GCP deployment architecture and implementation |
 
 ## Key capabilities
@@ -36,10 +51,10 @@ architecture are in
 
 | Layer | Technology |
 |---|---|
-| Backend API | Spring Boot, Java, Maven |
+| Backend API | Spring Boot, Java 21, Maven |
 | Database | PostgreSQL, PostGIS |
 | Cache | Redis, Caffeine |
-| Prediction service | Python, Flask |
+| Prediction service | Python, Flask, XGBoost |
 | Frontend | React, Vite, Leaflet |
 | Pipelines | Python, Airflow |
 | Local infra | Docker Compose |
@@ -62,14 +77,20 @@ psql -h localhost -p 5432 -U postgres -d Seoul_Transit -f database/schema/run_al
 ```
 
 This creates structure only; endpoints return empty results until data is
-loaded. Full instructions, including data loading order, are in
+loaded. Full instructions, including data loading order and Windows-specific
+psql setup, are in
 [`docs/deployment/database_setup.md`](docs/deployment/database_setup.md).
 
-### 1. Start Redis
+### 1. Start infrastructure
 
 ```powershell
-docker compose up -d redis
-docker ps
+copy .env.example .env
+```
+
+Fill in `DB_PASSWORD` and `ADMIN_API_TOKEN`, then:
+
+```powershell
+docker compose up -d
 docker exec -it seoul-transit-redis redis-cli ping
 ```
 
@@ -94,9 +115,13 @@ $env:REDIS_PORT='6379'
 mvn spring-boot:run
 ```
 
-### 3. Run smoke tests
+Or run the whole stack in containers:
 
-In another window:
+```powershell
+docker compose --profile app up -d
+```
+
+### 3. Run smoke tests
 
 ```powershell
 curl.exe -i 'http://localhost:8080/actuator/health'
@@ -112,6 +137,9 @@ Expected health result:
 HTTP/1.1 200
 {"status":"UP"}
 ```
+
+Full request examples and timing interpretation are in
+[`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md).
 
 ### 4. Start the frontend
 
@@ -149,22 +177,29 @@ $env:JPA_DDL_AUTO='validate'
 mvn spring-boot:run
 ```
 
-Note that with the default profile and no Redis running,
-`/actuator/health` reports `DOWN`. That is a missing dependency, not a broken
-build — see
+With the default profile and no Redis running, `/actuator/health` reports
+`DOWN`. That is a missing dependency, not a broken build — see
 [`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md).
 
 ## Performance result: Phase 6.9-2
 
 The district-demand endpoint was previously measured at roughly 9.5-12.9
-seconds on local runs. After adding spatial, composite, expression, and
-mapping-support indexes and refreshing table statistics, cold calls dropped
-below one second, with a best observed local cold result of about 192 ms.
+seconds on local runs. Profiling identified two causes: spatial joins running
+without GIST support, and identifier comparisons normalised with `LPAD` that no
+plain btree index could serve.
+
+Adding spatial, composite, and expression indexes and refreshing table
+statistics brought cold calls below one second, with a best observed local
+result of about 192 ms.
 
 | Baseline | After | Approximate improvement |
 |---:|---:|---:|
 | 9.5 s | 0.192 s | about 49x |
 | 12.9 s | 0.192 s | about 67x |
+
+A precomputed node-to-district mapping table was considered and deliberately
+not built — indexing was sufficient, and the table would have needed rebuilding
+whenever stop locations or boundaries changed.
 
 Index SQL: `database/performance/phase6_9_2_district_demand_indexes.sql`
 Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md)
@@ -173,13 +208,16 @@ Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/p
 
 | File | Purpose |
 |---|---|
-| `docs/architecture/overview.md` | Project background, system design, pipeline, target GCP architecture |
-| `docs/architecture/cache_profiles.md` | Redis/Caffeine/Testcontainers cache profile explanation |
-| `docs/deployment/database_setup.md` | Database creation, schema, and data loading order |
-| `docs/deployment/local_runbook.md` | Local execution runbook |
-| `docs/deployment/smoke_tests.md` | API smoke test commands and expected results |
-| `docs/performance/phase6_9_2_district_demand_optimization.md` | 6.9-2 performance analysis |
-| `docs/changelog/` | Per-patch change records, kept for history |
+| [`docs/analysis/policy_insights.md`](docs/analysis/policy_insights.md) | Transit policy findings derived from OD analysis |
+| [`docs/architecture/overview.md`](docs/architecture/overview.md) | Project background, system design, pipeline, target GCP architecture |
+| [`docs/architecture/map_demand_api.md`](docs/architecture/map_demand_api.md) | Map demand endpoint reference |
+| [`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md) | Redis/Caffeine/Testcontainers cache profiles |
+| [`docs/architecture/target_architecture.md`](docs/architecture/target_architecture.md) | Domain-oriented package refactoring design |
+| [`docs/deployment/database_setup.md`](docs/deployment/database_setup.md) | Database creation, schema, and data loading order |
+| [`docs/deployment/local_runbook.md`](docs/deployment/local_runbook.md) | Local execution runbook |
+| [`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md) | API smoke test commands and expected results |
+| [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md) | 6.9-2 performance analysis |
+| [`docs/changelog/`](docs/changelog/) | Change records and predecessor project artefacts |
 
 ## Repository layout
 
@@ -188,7 +226,8 @@ database/schema/        Schema creation scripts, run in numeric order
 database/performance/   Performance index scripts
 docs/                   Documentation (see table above)
 infra/                  Deployment configuration (placeholder, Phase 7)
-pipelines/              Python/Airflow data pipelines by phase
+pipelines/              Python data pipelines by phase
+pipelines/airflow/      Airflow DAGs
 scripts/db/             Data loading helper scripts
 services/api-server/    Spring Boot API
 services/prediction-service/  Flask prediction service
@@ -216,16 +255,22 @@ variables for local development.
 
 Tracked here so they are visible rather than discovered during deployment.
 
-1. No Dockerfile for `services/api-server` or `services/web-client`; only
-   `services/prediction-service` has one.
-2. `docker-compose.yaml` provides Redis only, not PostgreSQL/PostGIS.
-3. `infra/` is a placeholder.
-4. `admin_dong_boundary` has no loader script; it is imported manually from the
-   SGIS shapefile (documented in `database/schema/04_reference_admin_dong_boundary.sql`).
+1. `infra/` is a placeholder; Phase 7 will populate it.
+2. `admin_dong_boundary` has no loader script — it is imported manually with
+   ogr2ogr, documented in
+   `database/schema/04_reference_admin_dong_boundary.sql`.
+3. `bus_stop_location` and `subway_station_location` have not been compared
+   against the live database; the remaining schema files have. See the
+   verification table in `docs/deployment/database_setup.md`.
+4. Reference CSVs are not committed. Sources and required columns are listed in
+   section 4.0 of `docs/deployment/database_setup.md`.
 
-## Recommended next work
+## Next work
 
-1. Close the gaps above, starting with the two missing Dockerfiles.
-2. Decide local-vs-container PostgreSQL strategy.
-3. Verify the schema scripts against a clean database on a second machine.
-4. Prepare Phase 7 GCP architecture.
+1. Phase 7 — GCP deployment (Cloud Run, Cloud SQL, Artifact Registry, Secret
+   Manager). The container images and compose stack built in Phase 6.10 are the
+   input to this.
+2. Schedule the existing hourly loader from Airflow; only the correction DAG is
+   migrated so far.
+3. Extend OD analysis toward trip-chain analysis — transfer patterns and
+   full journey flows rather than single-leg boarding and alighting.
