@@ -20,11 +20,11 @@ section.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| JDK | 17+ | For the API server |
+| JDK | 21+ | For the API server |
 | Maven | 3.9+ | Wrapper not checked in |
 | Node.js | 18+ | For the web client |
 | Docker | any recent | For Redis |
-| PostgreSQL | 13+ | With PostGIS |
+| PostgreSQL | 18+ | With PostGIS |
 
 ## Required local services
 
