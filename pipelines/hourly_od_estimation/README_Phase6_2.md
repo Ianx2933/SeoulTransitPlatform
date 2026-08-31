@@ -54,7 +54,7 @@ python build_month_day_count.py ^
   --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --start-ym 202501 ^
   --end-ym 202512 ^
-  --holiday-csv "서울특별시 양천구_공휴일 목록_20251127.csv"
+  --holiday-csv "korea_public_holidays_2020_2026.csv"
 ```
 
 ### 3. Solve day-of-week hourly patterns (요일별 시간대 패턴 계산)
@@ -72,7 +72,7 @@ python estimate_hourly_od.py ^
   --db-url "postgresql://postgres:${DB_PASSWORD}@localhost:5432/Seoul_Transit" ^
   --start-date 20250101 ^
   --end-date 20251231 ^
-  --holiday-csv "서울특별시 양천구_공휴일 목록_20251127.csv"
+  --holiday-csv "korea_public_holidays_2020_2026.csv"
 ```
 
 ---

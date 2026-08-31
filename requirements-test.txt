@@ -1,0 +1,3 @@
+pandas>=2.2,<3
+pytest>=8,<10
+flask>=3,<4

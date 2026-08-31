@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 /**
  * Calculator for congestion percentage, level, and visualisation color.
  * 
- * This class is intentionally stateless that so the congestion rules can be unit-tested independently
+ * This class is intentionally stateless so the congestion rules can be unit-tested independently
  * from database queries.
  */
 @Component

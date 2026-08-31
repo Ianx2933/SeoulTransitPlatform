@@ -17,24 +17,45 @@ Outputs:
 """
 
 import pandas as pd
-from config import (
-    MISSING_UNIQUE_STOPS_CSV,
-    NODE_INFO_CSV,
-    CURATED_REFERENCE_CSV,
-    OUTPUT_MISSING_DIR,
-    OUTPUT_LOCATION_DIR,
-    SERVICE_MAPPING_CSV,
-    ARS_MAPPING_CSV,
-    AMBIGUOUS_CSV,
-    UNRESOLVED_CSV,
-    SUMMARY_CSV,
-    NODE_INFO_COLUMNS,
-    LAT_MIN,
-    LAT_MAX,
-    LNG_MIN,
-    LNG_MAX,
-)
-from common import clean_df, norm_ars_id, norm_name, require_columns
+
+try:  # Package import for tests/library use.
+    from .config import (
+        MISSING_UNIQUE_STOPS_CSV,
+        NODE_INFO_CSV,
+        CURATED_REFERENCE_CSV,
+        OUTPUT_MISSING_DIR,
+        OUTPUT_LOCATION_DIR,
+        SERVICE_MAPPING_CSV,
+        ARS_MAPPING_CSV,
+        AMBIGUOUS_CSV,
+        UNRESOLVED_CSV,
+        SUMMARY_CSV,
+        NODE_INFO_COLUMNS,
+        LAT_MIN,
+        LAT_MAX,
+        LNG_MIN,
+        LNG_MAX,
+    )
+    from .common import clean_df, norm_ars_id, norm_name, require_columns
+except ImportError:  # Direct-script compatibility.
+    from config import (
+        MISSING_UNIQUE_STOPS_CSV,
+        NODE_INFO_CSV,
+        CURATED_REFERENCE_CSV,
+        OUTPUT_MISSING_DIR,
+        OUTPUT_LOCATION_DIR,
+        SERVICE_MAPPING_CSV,
+        ARS_MAPPING_CSV,
+        AMBIGUOUS_CSV,
+        UNRESOLVED_CSV,
+        SUMMARY_CSV,
+        NODE_INFO_COLUMNS,
+        LAT_MIN,
+        LAT_MAX,
+        LNG_MIN,
+        LNG_MAX,
+    )
+    from common import clean_df, norm_ars_id, norm_name, require_columns
 
 
 def load_node_info() -> pd.DataFrame:
@@ -90,8 +111,26 @@ def _split_matched_rows(
     ref_columns: list[str],
     already_resolved_ref_ids: set,
 ) -> tuple[pd.DataFrame, pd.DataFrame, set]:
-    """Split a merged candidate table into matched rows and remaining refs."""
-    matched = merged[merged["canonical_node_id"].notna()].copy()
+    """Resolve only reference rows with exactly one canonical candidate.
+
+    A left join can legitimately produce multiple candidate rows for one
+    reference record. Treating every non-null candidate as a match would
+    multiply record cardinality and silently pick/emit ambiguous locations.
+    Ambiguous rows therefore remain unresolved for the next, more specific
+    cascade stage; only a single distinct canonical node may resolve a row.
+    """
+    candidates = merged[merged["canonical_node_id"].notna()].copy()
+    candidate_counts = (
+        candidates.groupby("_ref_row_id", dropna=False)["canonical_node_id"]
+        .nunique()
+    )
+    unique_ref_ids = set(candidate_counts[candidate_counts == 1].index)
+
+    matched = (
+        candidates[candidates["_ref_row_id"].isin(unique_ref_ids)]
+        .drop_duplicates("_ref_row_id")
+        .copy()
+    )
     matched_ref_ids = set(matched["_ref_row_id"].dropna())
     resolved_ref_ids = already_resolved_ref_ids | matched_ref_ids
 

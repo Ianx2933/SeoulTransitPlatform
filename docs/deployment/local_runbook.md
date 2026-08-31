@@ -21,10 +21,10 @@ section.
 | Requirement | Version | Notes |
 |---|---|---|
 | JDK | 21+ | For the API server |
-| Maven | 3.9+ | Wrapper not checked in |
+| Maven | 3.9+ | Shell wrapper is included under `services/api-server/mvnw`; Windows can use installed Maven |
 | Node.js | 18+ | For the web client |
-| Docker | any recent | For Redis |
-| PostgreSQL | 18+ | With PostGIS |
+| Docker | any recent | Compose services and Testcontainers |
+| PostgreSQL | 16+ | With PostGIS; Compose pins `postgis/postgis:16-3.4` |
 
 ## Required local services
 
@@ -34,7 +34,7 @@ section.
 | Redis | Default cache profile | Started by Docker Compose |
 | API server | Backend endpoints | Spring Boot/Maven |
 | Web client | Map UI | React/Vite |
-| Prediction service | Prediction endpoint | Flask, if prediction flows are tested |
+| Prediction service | Prediction endpoint | Flask; requires generated model artifacts documented in `services/prediction-service/README.md` |
 
 ## Window layout
 

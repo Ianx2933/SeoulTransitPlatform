@@ -66,8 +66,9 @@ ON public.admin_dong_boundary USING GIST (geom);
 --     BND_ADM_DONG_PG/BND_ADM_DONG_PG.shp public.admin_dong_boundary \
 --     | psql -h localhost -p 5432 -U postgres -d Seoul_Transit
 --
--- The same GeoJSON is also served to the frontend from
+-- The frontend serves a separate display-simplified derivative from
 -- services/web-client/public/data/capital_area_admin_dong_4326.geojson.
+-- Analytical PostGIS loading should use the unsimplified source boundary data.
 
 -- Sanity check after loading.
 --   SELECT adm_cd, adm_nm FROM public.admin_dong_boundary WHERE adm_cd = '11230760';

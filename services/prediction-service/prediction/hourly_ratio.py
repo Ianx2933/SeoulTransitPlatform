@@ -40,6 +40,8 @@ class HourlyRatioProvider:
         KR: 하나의 일별 수요 예측값을 24시간 승차/하차 값으로 변환한다.
         """
         boarding_ratio, alighting_ratio = self._get_ratios(route_no, ars_no)
+        boarding_ratio = self._normalize_ratios(boarding_ratio)
+        alighting_ratio = self._normalize_ratios(alighting_ratio)
 
         return [
             {
@@ -49,6 +51,26 @@ class HourlyRatioProvider:
             }
             for h in range(24)
         ]
+
+
+    @staticmethod
+    def _normalize_ratios(ratios: list[float]) -> list[float]:
+        """Return a non-negative distribution that sums to one.
+
+        Daily OD passengers imply one boarding and one alighting event per
+        passenger. Baseline or future route-specific hourly weights therefore
+        must not inflate the daily prediction when expanded to 24 hours.
+        """
+        if len(ratios) != 24:
+            raise ValueError("hourly ratio must contain 24 values")
+        if any(value < 0 for value in ratios):
+            raise ValueError("hourly ratio must not contain negative values")
+
+        total = sum(ratios)
+        if total <= 0:
+            raise ValueError("hourly ratio sum must be positive")
+
+        return [value / total for value in ratios]
 
     def _get_ratios(self, route_no: str, ars_no: str) -> tuple[list[float], list[float]]:
         """

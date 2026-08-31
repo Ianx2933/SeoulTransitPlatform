@@ -347,30 +347,62 @@ class ODCorrectionPipeline:
         self.raw_df = df
 
     @staticmethod
-    def _fill_by_key(df: pd.DataFrame, key_col: str, code_col: str) -> pd.DataFrame:
-        lookup = (
-            df[df[code_col].ne("")][[key_col, code_col]]
-            .drop_duplicates(subset=[key_col])
+    def _build_unambiguous_lookup(
+        df: pd.DataFrame,
+        key_cols: str | list[str],
+        code_col: str,
+    ) -> pd.DataFrame:
+        """Build a key-to-code lookup only when the mapping is one-to-one.
+
+        A fallback must never pick an arbitrary code from an ambiguous key.
+        This helper intentionally drops keys associated with two or more
+        distinct non-empty codes, leaving those rows unresolved for a weaker
+        stage or for explicit inspection.
+        """
+        keys = [key_cols] if isinstance(key_cols, str) else list(key_cols)
+
+        candidates = (
+            df.loc[df[code_col].fillna("").ne(""), keys + [code_col]]
+            .dropna(subset=keys)
+            .drop_duplicates()
+        )
+        if candidates.empty:
+            return candidates
+
+        candidate_counts = (
+            candidates.groupby(keys, dropna=False)[code_col]
+            .nunique()
+            .reset_index(name="_candidate_count")
+        )
+        unique_keys = candidate_counts.loc[
+            candidate_counts["_candidate_count"].eq(1),
+            keys,
+        ]
+
+        return (
+            candidates.merge(unique_keys, on=keys, how="inner")
+            .drop_duplicates(subset=keys)
         )
 
+    @staticmethod
+    def _fill_by_key(df: pd.DataFrame, key_col: str, code_col: str) -> pd.DataFrame:
+        lookup = ODCorrectionPipeline._build_unambiguous_lookup(df, key_col, code_col)
+
         result = df.merge(lookup, on=key_col, how="left", suffixes=("", "_fill"))
-        result[code_col] = result[code_col].replace("", pd.NA)
-        result[code_col] = result[code_col].fillna(result[f"{code_col}_fill"])
-        result[code_col] = result[code_col].fillna("")
+        result[code_col] = result[code_col].replace("", pd.NA).astype("string")
+        fill_col = result[f"{code_col}_fill"].astype("string")
+        result[code_col] = result[code_col].combine_first(fill_col).fillna("")
         result.drop(columns=[f"{code_col}_fill"], inplace=True)
         return result
 
     @staticmethod
     def _fill_by_name(df: pd.DataFrame, name_col: str, code_col: str) -> pd.DataFrame:
-        lookup = (
-            df[df[code_col].ne("")][[name_col, code_col]]
-            .drop_duplicates(subset=[name_col])
-        )
+        lookup = ODCorrectionPipeline._build_unambiguous_lookup(df, name_col, code_col)
 
         result = df.merge(lookup, on=name_col, how="left", suffixes=("", "_fill"))
-        result[code_col] = result[code_col].replace("", pd.NA)
-        result[code_col] = result[code_col].fillna(result[f"{code_col}_fill"])
-        result[code_col] = result[code_col].fillna("")
+        result[code_col] = result[code_col].replace("", pd.NA).astype("string")
+        fill_col = result[f"{code_col}_fill"].astype("string")
+        result[code_col] = result[code_col].combine_first(fill_col).fillna("")
         result.drop(columns=[f"{code_col}_fill"], inplace=True)
         return result
 
@@ -382,19 +414,19 @@ class ODCorrectionPipeline:
         target_ars_col: str,
         target_code_col: str,
     ) -> pd.DataFrame:
-        lookup = (
-            df[df[source_code_col].ne("")][[source_ars_col, source_code_col]]
-            .rename(columns={
-                source_ars_col: target_ars_col,
-                source_code_col: f"{target_code_col}_fill",
-            })
-            .drop_duplicates(subset=[target_ars_col])
-        )
+        lookup = ODCorrectionPipeline._build_unambiguous_lookup(
+            df,
+            source_ars_col,
+            source_code_col,
+        ).rename(columns={
+            source_ars_col: target_ars_col,
+            source_code_col: f"{target_code_col}_fill",
+        })
 
         result = df.merge(lookup, on=target_ars_col, how="left")
-        result[target_code_col] = result[target_code_col].replace("", pd.NA)
-        result[target_code_col] = result[target_code_col].fillna(result[f"{target_code_col}_fill"])
-        result[target_code_col] = result[target_code_col].fillna("")
+        result[target_code_col] = result[target_code_col].replace("", pd.NA).astype("string")
+        fill_col = result[f"{target_code_col}_fill"].astype("string")
+        result[target_code_col] = result[target_code_col].combine_first(fill_col).fillna("")
         result.drop(columns=[f"{target_code_col}_fill"], inplace=True)
         return result
 

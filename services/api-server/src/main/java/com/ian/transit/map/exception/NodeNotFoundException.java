@@ -1,15 +1,15 @@
 package com.ian.transit.map.exception;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.ResponseStatus;
+import com.ian.transit.common.exception.NotFoundException;
 
 /**
- * Thrown when a requested node has no demand rows for the given parameters.
+ * Domain-specific not-found error for map node demand.
  *
- * Mapped to HTTP 404 so the frontend can distinguish "node not in dataset" from "node exists but has zero demand".
+ * Extending the shared NotFoundException keeps the HTTP 404 contract aligned
+ * with GlobalExceptionHandler instead of falling through to its generic 500
+ * handler.
  */
-@ResponseStatus(HttpStatus.NOT_FOUND)
-public class NodeNotFoundException extends RuntimeException {
+public class NodeNotFoundException extends NotFoundException {
 
     public NodeNotFoundException(String message) {
         super(message);

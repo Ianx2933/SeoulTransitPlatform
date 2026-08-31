@@ -211,12 +211,12 @@ README.
 [Leaflet Frontend (Static Hosting)]
 ```
 
-Known gaps before this is buildable:
+Current deployment baseline:
 
-- no Dockerfile for `services/api-server` or `services/web-client`
-  (only `services/prediction-service` has one);
-- `docker-compose.yaml` provides Redis only, not PostgreSQL/PostGIS;
-- `infra/` is a placeholder.
+- Dockerfiles exist for the API, prediction service, and web client;
+- `docker-compose.yaml` provides PostGIS and Redis plus optional application and
+  Airflow profiles;
+- target GCP resources are documented but not provisioned as committed IaC yet.
 
 ## 9. Future work
 

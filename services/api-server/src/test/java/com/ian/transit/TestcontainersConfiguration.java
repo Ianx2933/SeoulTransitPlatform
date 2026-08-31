@@ -10,7 +10,9 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * Testcontainers used by Spring Boot integration tests.
  *
- * Redis is kept in the test environment because Redis is the default cache
+ * The database image is PostGIS rather than plain PostgreSQL so repository
+ * tests exercise the same spatial functions used in production. Redis is kept
+ * in the test environment because Redis is the default cache
  * provider for deployment parity. A GenericContainer needs an explicit
  * service-connection name so Spring Boot can create Redis connection details.
  */
@@ -20,7 +22,11 @@ public class TestcontainersConfiguration {
     @Bean
     @ServiceConnection
     PostgreSQLContainer<?> postgresContainer() {
-        return new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
+        DockerImageName postgisImage = DockerImageName
+                .parse("postgis/postgis:16-3.4")
+                .asCompatibleSubstituteFor("postgres");
+
+        return new PostgreSQLContainer<>(postgisImage);
     }
 
     @Bean

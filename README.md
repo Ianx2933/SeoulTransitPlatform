@@ -1,5 +1,7 @@
 # SeoulTransitPlatform
 
+[![CI](https://github.com/Ianx2933/SeoulTransitPlatform/actions/workflows/ci.yml/badge.svg)](https://github.com/Ianx2933/SeoulTransitPlatform/actions/workflows/ci.yml)
+
 A geospatial transit demand platform that turns raw smart-card records into
 stop-, station-, and district-level demand analysis for the Seoul metropolitan
 area.
@@ -22,9 +24,9 @@ demand on a single core segment. See
 | | |
 |---|---|
 | **Query performance** | District-demand endpoint reduced from ~10 s to 192 ms cold — [analysis](docs/performance/phase6_9_2_district_demand_optimization.md) |
-| **Data correction** | Four-stage fallback pipeline with per-row match method and confidence recorded |
+| **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
-| **Reproducibility** | Schema scripts verified against an empty database; full local stack in Docker Compose |
+| **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Current phase status
 
@@ -58,7 +60,7 @@ demand on a single core segment. See
 | Frontend | React, Vite, Leaflet |
 | Pipelines | Python, Airflow |
 | Local infra | Docker Compose |
-| Testing | Maven tests, Testcontainers, Vitest |
+| Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
 
 ## Local quick start
 
@@ -115,7 +117,8 @@ $env:REDIS_PORT='6379'
 mvn spring-boot:run
 ```
 
-Or run the whole stack in containers:
+Or run the whole stack in containers after placing the prediction model
+artifacts described in `services/prediction-service/README.md`:
 
 ```powershell
 docker compose --profile app up -d
@@ -162,7 +165,7 @@ http://localhost:5173
 |---|---|---|
 | default | Redis | Local Redis and deployment-like execution |
 | local-simple | Caffeine | Lightweight local execution without Redis |
-| test | Testcontainers Redis/PostgreSQL | Automated tests |
+| test | Testcontainers Redis/PostGIS | Automated tests |
 
 Run the API without Redis:
 
@@ -180,6 +183,46 @@ mvn spring-boot:run
 With the default profile and no Redis running, `/actuator/health` reports
 `DOWN`. That is a missing dependency, not a broken build — see
 [`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md).
+
+
+## Tests
+
+The repository treats tests as executable engineering contracts rather than a
+coverage-number exercise. The highest-value cases lock down fallback precedence,
+ambiguity handling, provenance, record-cardinality preservation, coordinate
+validation, prediction distribution totals, API input/error contracts, and
+PostGIS boundary semantics.
+
+Python pipeline and prediction-service tests:
+
+```bash
+python -m pip install -r requirements-test.txt
+pytest -q
+```
+
+Backend tests include unit coverage for `OccupancyCalculator` and
+`MapDemandService`, MVC-slice 400/404 response contracts, and repository
+integration tests. Docker must be available for the shared PostGIS/Redis
+Testcontainers context. The PostGIS fixture includes a stop exactly on an
+administrative-district boundary and verifies that `ST_Covers` includes it
+without changing aggregate totals when `nodeLimit` is applied.
+
+```bash
+cd services/api-server
+./mvnw test
+```
+
+Frontend tests:
+
+```bash
+cd services/web-client
+npm ci
+npm test
+```
+
+CI runs all three layers on every push to `main` and on pull requests. See
+[`docs/engineering/testing_strategy.md`](docs/engineering/testing_strategy.md)
+for the rationale and the highest-value invariants.
 
 ## Performance result: Phase 6.9-2
 
@@ -217,6 +260,7 @@ Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/p
 | [`docs/deployment/local_runbook.md`](docs/deployment/local_runbook.md) | Local execution runbook |
 | [`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md) | API smoke test commands and expected results |
 | [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md) | 6.9-2 performance analysis |
+| [`docs/engineering/testing_strategy.md`](docs/engineering/testing_strategy.md) | Test philosophy, invariants, PostGIS integration tests, and CI |
 | [`docs/changelog/`](docs/changelog/) | Change records and predecessor project artefacts |
 
 ## Repository layout
@@ -225,8 +269,9 @@ Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/p
 database/schema/        Schema creation scripts, run in numeric order
 database/performance/   Performance index scripts
 docs/                   Documentation (see table above)
-infra/                  Deployment configuration (placeholder, Phase 7)
 pipelines/              Python data pipelines by phase
+tests/                  pytest contracts for matching and OD correction
+.github/workflows/       CI for Python, backend/PostGIS, and frontend tests
 pipelines/airflow/      Airflow DAGs
 scripts/db/             Data loading helper scripts
 services/api-server/    Spring Boot API
@@ -255,15 +300,16 @@ variables for local development.
 
 Tracked here so they are visible rather than discovered during deployment.
 
-1. `infra/` is a placeholder; Phase 7 will populate it.
-2. `admin_dong_boundary` has no loader script — it is imported manually with
+1. `admin_dong_boundary` has no loader script — it is imported manually with
    ogr2ogr, documented in
    `database/schema/04_reference_admin_dong_boundary.sql`.
-3. `bus_stop_location` and `subway_station_location` have not been compared
+2. `bus_stop_location` and `subway_station_location` have not been compared
    against the live database; the remaining schema files have. See the
    verification table in `docs/deployment/database_setup.md`.
-4. Reference CSVs are not committed. Sources and required columns are listed in
+3. Reference CSVs are not committed. Sources and required columns are listed in
    section 4.0 of `docs/deployment/database_setup.md`.
+4. Prediction binary model artifacts are intentionally excluded; retraining and
+   expected artifact names are documented in `services/prediction-service/README.md`.
 
 ## Next work
 
