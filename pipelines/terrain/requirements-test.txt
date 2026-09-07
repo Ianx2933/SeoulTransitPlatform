@@ -1,0 +1,4 @@
+pytest>=8,<10
+psycopg2-binary>=2.9,<3
+# Optional for RUN_TERRAIN_INTEGRATION=1:
+testcontainers[postgres]>=4,<5
