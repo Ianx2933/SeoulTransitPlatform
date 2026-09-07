@@ -13,8 +13,9 @@ usable OD flows from that, then serves spatial demand queries on top.
 
 **What it was used to find:** a congested segment that justified a targeted
 short-turn bus service, a route segment whose demand pattern argued for
-splitting it into a local service, and three routes carrying over half their
-demand on a single core segment. See
+splitting it into a local service, three routes carrying over half their
+demand on a single core segment, and — after joining terrain data — a dong where
+27 of 29 bus stops sit on ground at or above an 8% grade. See
 **[policy insights](docs/analysis/policy_insights.md)**.
 
 ![Route 143 congestion analysis](docs/analysis/images/route_143_congestion.png)
@@ -26,6 +27,7 @@ demand on a single core segment. See
 | **Query performance** | District-demand endpoint reduced from ~10 s to 192 ms cold — [analysis](docs/performance/phase6_9_2_district_demand_optimization.md) |
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
+| **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Current phase status
@@ -36,12 +38,15 @@ demand on a single core segment. See
 | Phase 6.9 | Done | District-centered all-route demand analysis |
 | Phase 6.9-2 | Done | District-demand performance indexing and statistics refresh |
 | Phase 6.10 | Done | Deployment readiness — schema scripts, runbooks, profiles, smoke tests, container images |
+| Terrain integration | Done | Versioned terrain snapshots and the stop/dong screening API |
 | Phase 7 | Planned | GCP deployment architecture and implementation |
 
 ## Key capabilities
 
 - Node-centered demand lookup around a coordinate radius.
 - District-centered demand aggregation by administrative dong.
+- Terrain screening by stop and by administrative dong, from published DEM
+  snapshots.
 - Bus and subway mode filtering.
 - Weekday/day-type and hour filtering.
 - Route, node, and district-level demand summaries.
@@ -59,8 +64,89 @@ demand on a single core segment. See
 | Prediction service | Python, Flask, XGBoost |
 | Frontend | React, Vite, Leaflet |
 | Pipelines | Python, Airflow |
+| Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
 | Local infra | Docker Compose |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
+
+## Terrain screening API
+
+Bus stop demand is served alongside terrain attributes derived from a Copernicus
+GLO-30 DEM by the companion project
+[geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline).
+
+```text
+GET /api/stops/accessibility?minSlope=8&limit=100&offset=0
+GET /api/stops/accessibility/summary?minSlope=8&minStops=10
+GET /api/stops/accessibility/metadata
+```
+
+The first returns individual stops at or above a slope threshold, steepest
+first, with coordinates. The second aggregates by administrative dong, worst
+ratio first. The third reports which snapshot is active and how it was produced.
+
+**Result.** Of 11,480 stops, 4,536 (39.5%) sit on terrain at or above an 8%
+grade; the median is 6.51%. Per dong the range is wide — Seonghyeon-dong
+(성현동) tops the list with 27 of 29 stops (93.1%), while riverside dongs sit
+near zero.
+
+### Versioned snapshots, not columns on the master
+
+Terrain values are not stored on `bus_stop_location`. That table is periodically
+reloaded from source CSV, and a derived column written there would be destroyed
+by the next reload with no error raised — the API would keep returning 200 while
+the values quietly emptied out.
+
+Instead each processing run is published as an immutable snapshot:
+
+| Table | Contents |
+|---|---|
+| `terrain_dataset` | One row per snapshot: source DEM, slope method, boundary base date, per-category counts |
+| `bus_stop_terrain_stats` | Elevation and slope per stop, per dataset |
+| `terrain_stop_dong_assignment` | Exactly one dong per stop, per dataset, with the method used |
+| `terrain_active_dataset` | Single-row pointer to the snapshot currently served |
+
+Publication and activation are separate steps, so a partially loaded snapshot is
+never visible. Because snapshots are immutable, the dong-summary cache is keyed
+by dataset ID and needs no explicit invalidation.
+
+The stop-to-dong assignment is resolved **once at publication**, not per query.
+`ST_Covers` matches a point lying on the shared edge of two polygons, so a
+boundary stop would otherwise appear in both dongs and inflate every aggregate.
+Interior matches win; remaining ties break deterministically on `adm_cd`; a stop
+found strictly inside two polygons aborts the publication, because that means
+the boundary layer itself overlaps.
+
+### Publishing a snapshot
+
+```powershell
+$env:SEOUL_TRANSIT_DB='postgresql+psycopg2://postgres:...@localhost:5432/Seoul_Transit'
+
+python pipelines/terrain/publish_terrain.py --csv <geo-raster-pipeline output> --dry-run `
+    --dataset-id glo30-20260907 `
+    --source-id copernicus-glo30 `
+    --slope-method "gdaldem slope -p -s 0.7934" `
+    --boundary-date 20250630 `
+    --expected-stops 11480 --expected-at-least 4536
+```
+
+`--dry-run` rolls back, so it exercises staging, boundary verification and dong
+assignment without writing. `--expected-stops` and `--expected-at-least` are
+optional guards: publication fails unless the source reproduces those counts.
+
+Then `database/terrain/sql/03_terrain_diagnostics.sql` to inspect, and
+`04_activate_dataset.sql` to make the snapshot live.
+
+### What the numbers mean
+
+This measures terrain gradient across the 30 m DEM cell containing each stop.
+It is **not** footway gradient and **not** an accessibility assessment. The
+source is a surface model that includes buildings, which inflates values in
+dense districts; conversely, 30 m resolution averages away short steep pitches.
+Treat it as a screening indicator for narrowing down where to survey.
+
+Source data: Copernicus WorldDEM™-30 © DLR e.V. 2010–2014 and © Airbus Defence
+and Space GmbH 2014–2018, under COPERNICUS by the European Union and ESA.
+Administrative boundaries: `admin_dong_boundary`, base date 20250630.
 
 ## Local quick start
 
@@ -82,6 +168,13 @@ This creates structure only; endpoints return empty results until data is
 loaded. Full instructions, including data loading order and Windows-specific
 psql setup, are in
 [`docs/deployment/database_setup.md`](docs/deployment/database_setup.md).
+
+The terrain tables are created separately, since they are only needed if the
+terrain endpoints are used:
+
+```bash
+psql -h localhost -p 5432 -U postgres -d Seoul_Transit -f database/terrain/sql/01_terrain_schema.sql
+```
 
 ### 1. Start infrastructure
 
@@ -132,6 +225,8 @@ curl.exe -i 'http://localhost:8080/actuator/health'
 curl.exe -i 'http://localhost:8080/api/map/node-catchment?lat=37.5&lng=127.03&radiusMeters=800&modes=bus,subway&dayTypes=mon&dayAggregation=average&hours=8'
 
 curl.exe -i 'http://localhost:8080/api/map/district-demand?districtCode=11230760&modes=bus,subway&dayTypes=mon,tue,wed,thu,fri&dayAggregation=average&hours=7,8,9&nodeLimit=50'
+
+curl.exe -i 'http://localhost:8080/api/stops/accessibility/metadata'
 ```
 
 Expected health result:
@@ -140,6 +235,9 @@ Expected health result:
 HTTP/1.1 200
 {"status":"UP"}
 ```
+
+The terrain endpoints return 503 with a diagnostic body when no snapshot has
+been published and activated. That is a missing-data condition, not a failure.
 
 Full request examples and timing interpretation are in
 [`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md).
@@ -184,7 +282,6 @@ With the default profile and no Redis running, `/actuator/health` reports
 `DOWN`. That is a missing dependency, not a broken build — see
 [`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md).
 
-
 ## Tests
 
 The repository treats tests as executable engineering contracts rather than a
@@ -206,6 +303,12 @@ integration tests. Docker must be available for the shared PostGIS/Redis
 Testcontainers context. The PostGIS fixture includes a stop exactly on an
 administrative-district boundary and verifies that `ST_Covers` includes it
 without changing aggregate totals when `nodeLimit` is applied.
+
+The terrain suite extends the same boundary fixture: it asserts that a stop on a
+shared edge is assigned to exactly one dong, that publication is rejected when a
+stop falls inside two polygons, that unmeasured stops are excluded from the
+ratio denominator rather than counted as flat, and that the row-source
+generators stay lazy so publication runs in a single transaction.
 
 ```bash
 cd services/api-server
@@ -244,6 +347,14 @@ A precomputed node-to-district mapping table was considered and deliberately
 not built — indexing was sufficient, and the table would have needed rebuilding
 whenever stop locations or boundaries changed.
 
+The terrain integration made the opposite call and precomputed its stop-to-dong
+assignment. The reason is not performance but correctness: a boundary stop
+matching two polygons inflates every aggregate, and resolving that per query
+would mean re-deriving the same tie-break on every request. Precomputation is
+acceptable there because the assignment is scoped to an immutable snapshot, so
+"needs rebuilding when boundaries change" becomes "a new snapshot is published",
+which is the intended workflow rather than a maintenance burden.
+
 Index SQL: `database/performance/phase6_9_2_district_demand_indexes.sql`
 Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md)
 
@@ -256,6 +367,8 @@ Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/p
 | [`docs/architecture/map_demand_api.md`](docs/architecture/map_demand_api.md) | Map demand endpoint reference |
 | [`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md) | Redis/Caffeine/Testcontainers cache profiles |
 | [`docs/architecture/target_architecture.md`](docs/architecture/target_architecture.md) | Domain-oriented package refactoring design |
+| [`docs/terrain/INSTALL.md`](docs/terrain/INSTALL.md) | Terrain schema setup, publication runbook, migration order |
+| [`docs/terrain/TEST_RESULTS.md`](docs/terrain/TEST_RESULTS.md) | What has and has not been verified |
 | [`docs/deployment/database_setup.md`](docs/deployment/database_setup.md) | Database creation, schema, and data loading order |
 | [`docs/deployment/local_runbook.md`](docs/deployment/local_runbook.md) | Local execution runbook |
 | [`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md) | API smoke test commands and expected results |
@@ -268,10 +381,12 @@ Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/p
 ```text
 database/schema/        Schema creation scripts, run in numeric order
 database/performance/   Performance index scripts
+database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
 pipelines/              Python data pipelines by phase
+pipelines/terrain/      Terrain snapshot publisher and its tests
 tests/                  pytest contracts for matching and OD correction
-.github/workflows/       CI for Python, backend/PostGIS, and frontend tests
+.github/workflows/      CI for Python, backend/PostGIS, and frontend tests
 pipelines/airflow/      Airflow DAGs
 scripts/db/             Data loading helper scripts
 services/api-server/    Spring Boot API
@@ -302,7 +417,8 @@ Tracked here so they are visible rather than discovered during deployment.
 
 1. `admin_dong_boundary` has no loader script — it is imported manually with
    ogr2ogr, documented in
-   `database/schema/04_reference_admin_dong_boundary.sql`.
+   `database/schema/04_reference_admin_dong_boundary.sql`. Terrain publication
+   depends on it, and validates its base date and geometry before proceeding.
 2. `bus_stop_location` and `subway_station_location` have not been compared
    against the live database; the remaining schema files have. See the
    verification table in `docs/deployment/database_setup.md`.
@@ -310,6 +426,9 @@ Tracked here so they are visible rather than discovered during deployment.
    section 4.0 of `docs/deployment/database_setup.md`.
 4. Prediction binary model artifacts are intentionally excluded; retraining and
    expected artifact names are documented in `services/prediction-service/README.md`.
+5. Terrain snapshots are published manually. There is no scheduled job to
+   re-publish when the DEM or the boundary release changes; the active dataset
+   has to be replaced deliberately.
 
 ## Next work
 
@@ -320,3 +439,7 @@ Tracked here so they are visible rather than discovered during deployment.
    migrated so far.
 3. Extend OD analysis toward trip-chain analysis — transfer patterns and
    full journey flows rather than single-leg boarding and alighting.
+4. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
+   to remove the building artefacts inherent in the current surface model, and
+   compare the two snapshots — the versioning scheme exists to make exactly that
+   comparison possible.
