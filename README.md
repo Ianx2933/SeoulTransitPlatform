@@ -28,6 +28,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
+| **Analytical warehouse** | The analytical half migrated to BigQuery as a partitioned star schema, reconciled row-for-row; serving stays in PostGIS — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Current phase status
@@ -39,6 +40,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | Phase 6.9-2 | Done | District-demand performance indexing and statistics refresh |
 | Phase 6.10 | Done | Deployment readiness — schema scripts, runbooks, profiles, smoke tests, container images |
 | Terrain integration | Done | Versioned terrain snapshots and the stop/dong screening API |
+| Analytical warehouse | Done | BigQuery star schema for the analytical half — fact plus stop/route dimensions, validated against PostGIS |
 | Phase 7 | Planned | GCP deployment architecture and implementation |
 
 ## Key capabilities
@@ -65,6 +67,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | Frontend | React, Vite, Leaflet |
 | Pipelines | Python, Airflow |
 | Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
+| Analytical warehouse | BigQuery (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
 | Local infra | Docker Compose |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
 
@@ -358,6 +361,50 @@ which is the intended workflow rather than a maintenance burden.
 Index SQL: `database/performance/phase6_9_2_district_demand_indexes.sql`
 Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md)
 
+## Analytical warehouse: what moved to BigQuery
+
+The analytical half of the platform is migrated to BigQuery as a partitioned,
+clustered star schema, reconciled row-for-row against the PostGIS source:
+[transit-bigquery](https://github.com/Ianx2933/transit-bigquery).
+
+The serving endpoints stayed here. BigQuery is columnar and scan-priced, with no
+concept of a point lookup returning in 200 ms — the 192 ms district-demand budget
+above is a serving concern, and moving it would have undone the indexing work it
+depends on. So the split is by workload, not by table:
+
+| Stays in PostGIS | Moved to BigQuery |
+|---|---|
+| District-demand and node-catchment endpoints | Hourly boarding facts |
+| `ST_Covers` against dong polygons at query time | Aggregations by route, stop, hour |
+| GIST-indexed spatial predicates | Terrain statistics joined to stops |
+| Anything with a latency budget | Ad-hoc analyst queries |
+
+Three decisions are documented in that repository.
+
+**No date dimension.** The warehoused source has primary key
+`(use_ym, route_no, stop_ars, hour)` — a monthly hourly aggregate with no
+day-level detail. A dense date dimension would imply observations that do not
+exist.
+
+**Integer partitioning, not date.** Day-partitioned historical data expires on
+arrival under the sandbox's non-negotiable 60-day partition expiry, which is
+measured from the partition's own date rather than from load time. The load job
+reports `DONE`, the table holds zero rows, and no error is raised anywhere. This
+is the same class of silent-emptying failure the terrain snapshots were designed
+around above.
+
+**Unmatched stops kept, not dropped.** 1,816 of 12,529 stops do not resolve
+against the Seoul stop master — Gyeonggi-do stops on cross-boundary routes, plus
+route terminus markers. They are carried with a `match_method` column, the same
+per-row provenance discipline the four-stage OD recovery already uses here, so
+aggregate totals reconcile against the source and analysts exclude them
+explicitly rather than inheriting a silently filtered universe.
+
+BigQuery has a native `GEOGRAPHY` type and `ST_DWITHIN` / `ST_DISTANCE` /
+`ST_CONTAINS`, but it is not PostGIS — no GIST index control, a different
+function set, spherical geometry only. Stop points are loaded as `GEOGRAPHY`
+there to demonstrate BigQuery GIS; the spatial serving path stays on PostGIS.
+
 ## Documentation
 
 | File | Purpose |
@@ -374,6 +421,7 @@ Analysis: [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/p
 | [`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md) | API smoke test commands and expected results |
 | [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md) | 6.9-2 performance analysis |
 | [`docs/engineering/testing_strategy.md`](docs/engineering/testing_strategy.md) | Test philosophy, invariants, PostGIS integration tests, and CI |
+| [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) | Warehouse star schema, partitioning, and load validation |
 | [`docs/changelog/`](docs/changelog/) | Change records and predecessor project artefacts |
 
 ## Repository layout
@@ -434,7 +482,8 @@ Tracked here so they are visible rather than discovered during deployment.
 
 1. Phase 7 — GCP deployment (Cloud Run, Cloud SQL, Artifact Registry, Secret
    Manager). The container images and compose stack built in Phase 6.10 are the
-   input to this.
+   input to this. The analytical warehouse is already on GCP; this covers the
+   serving path.
 2. Schedule the existing hourly loader from Airflow; only the correction DAG is
    migrated so far.
 3. Extend OD analysis toward trip-chain analysis — transfer patterns and
@@ -443,3 +492,7 @@ Tracked here so they are visible rather than discovered during deployment.
    to remove the building artefacts inherent in the current surface model, and
    compare the two snapshots — the versioning scheme exists to make exactly that
    comparison possible.
+5. Extend the warehouse — district dimension, Airflow orchestration of the load,
+   and a Type 2 decision for stop renames. The 1,815 Gyeonggi stops carry 2,963
+   distinct names, which is the case for a slowly-changing dimension rather than
+   the Type 1 currently in place.
