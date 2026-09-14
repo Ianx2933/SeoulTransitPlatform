@@ -28,6 +28,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
+| **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
 | **Analytical warehouse** | The analytical half migrated to BigQuery as a partitioned star schema, reconciled row-for-row; serving stays in PostGIS — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
@@ -66,6 +67,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | Prediction service | Python, Flask, XGBoost |
 | Frontend | React, Vite, Leaflet |
 | Pipelines | Python, Airflow |
+| Multidimensional analysis | xarray, dask, netCDF |
 | Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
 | Analytical warehouse | BigQuery (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
 | Local infra | Docker Compose |
@@ -405,6 +407,44 @@ BigQuery has a native `GEOGRAPHY` type and `ST_DWITHIN` / `ST_DISTANCE` /
 function set, spherical geometry only. Stop points are loaded as `GEOGRAPHY`
 there to demonstrate BigQuery GIS; the spatial serving path stays on PostGIS.
 
+## Terrain and demand: an hourly profile in xarray
+
+The boarding source is already three-dimensional — month, hour, stop — so
+`pipelines/analysis/demand_xarray.py` loads it as a labelled array rather than a
+flat frame, attaches slope as a non-dimension coordinate on the stop axis, and
+groups by terrain band. That turns what would be a `CASE WHEN` pivot into one
+`groupby` call, and it is the same reconciliation discipline used elsewhere here:
+the array total is asserted against the PostgreSQL sum before anything is read
+from it.
+
+Building the full grid is itself informative. 1.79M source rows expand to
+6 × 24 × 12,529 cells, and the gaps are real — a stop with no service at 03:00 is
+a missing observation, not a zero. Every aggregate uses `skipna` accordingly.
+
+**Result.** Mean boardings per stop-hour, 2025-01 to 2025-06, by slope band:
+
+| Hour | 0–4% | 4–8% | 8–12% | 12%+ | 12%+ as share of 0–4% |
+| ---- | ---- | ---- | ----- | ---- | --------------------- |
+| 04   | 85.6 | 79.1 | 66.9  | 37.2 | **43%** |
+| 05   | 178.9 | 172.5 | 164.2 | 113.8 | 64% |
+| 07   | 773.4 | 758.3 | 742.6 | 601.8 | 78% |
+| 08   | 963.7 | 951.9 | 960.2 | 756.3 | 78% |
+| 18   | 981.4 | 992.6 | 1054.4 | 796.5 | 81% |
+| 22   | 451.8 | 490.6 | 521.5 | 379.0 | 84% |
+
+The steepest band carries roughly 78–84% of flat-ground demand through most of the
+day. Between 04:00 and 06:00 that gap roughly doubles, reaching 43% at 04:00. In
+the evening the 8–12% band exceeds flat ground outright, and its share of the daily
+total peaks higher than any other band (0.084 against 0.080 at 18:00).
+
+**This is an observation, not a finding.** Slope is confounded with land use here:
+steep districts in Seoul are largely residential and flat ground is largely
+commercial, so a residential-versus-commercial hourly profile would produce a
+similar shape with no terrain effect at all. Separating the two needs a land-use
+control the platform does not currently carry. The figure is recorded because it
+is a testable question, not because it answers one — the same standing as the
+surface-model caveat on the slope values themselves.
+
 ## Documentation
 
 | File | Purpose |
@@ -421,6 +461,7 @@ there to demonstrate BigQuery GIS; the spatial serving path stays on PostGIS.
 | [`docs/deployment/smoke_tests.md`](docs/deployment/smoke_tests.md) | API smoke test commands and expected results |
 | [`docs/performance/phase6_9_2_district_demand_optimization.md`](docs/performance/phase6_9_2_district_demand_optimization.md) | 6.9-2 performance analysis |
 | [`docs/engineering/testing_strategy.md`](docs/engineering/testing_strategy.md) | Test philosophy, invariants, PostGIS integration tests, and CI |
+| [`pipelines/analysis/demand_xarray.py`](pipelines/analysis/demand_xarray.py) | Hourly demand as a labelled array, profiled by terrain band |
 | [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) | Warehouse star schema, partitioning, and load validation |
 | [`docs/changelog/`](docs/changelog/) | Change records and predecessor project artefacts |
 
@@ -432,6 +473,7 @@ database/performance/   Performance index scripts
 database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
 pipelines/              Python data pipelines by phase
+pipelines/analysis/     xarray demand profiling against terrain bands
 pipelines/terrain/      Terrain snapshot publisher and its tests
 tests/                  pytest contracts for matching and OD correction
 .github/workflows/      CI for Python, backend/PostGIS, and frontend tests
