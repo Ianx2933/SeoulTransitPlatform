@@ -30,6 +30,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
 | **Analytical warehouse** | The analytical half migrated to BigQuery as a partitioned star schema, reconciled row-for-row; serving stays in PostGIS — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) |
+| **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in four months; fixed and rebuilt on 32 months — [details](#data-quality-rebuilding-the-hourly-pipeline) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Current phase status
@@ -42,6 +43,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | Phase 6.10 | Done | Deployment readiness — schema scripts, runbooks, profiles, smoke tests, container images |
 | Terrain integration | Done | Versioned terrain snapshots and the stop/dong screening API |
 | Analytical warehouse | Done | BigQuery star schema for the analytical half — fact plus stop/route dimensions, validated against PostGIS |
+| Hourly pipeline rebuild | Done | Loader and ratio-model fixes, rebuilt on 2024-01 to 2026-08 and validated |
 | Phase 7 | Planned | GCP deployment architecture and implementation |
 
 ## Key capabilities
@@ -407,6 +409,71 @@ BigQuery has a native `GEOGRAPHY` type and `ST_DWITHIN` / `ST_DISTANCE` /
 function set, spherical geometry only. Stop points are loaded as `GEOGRAPHY`
 there to demonstrate BigQuery GIS; the spatial serving path stays on PostGIS.
 
+## Data quality: rebuilding the hourly pipeline
+
+Extending the hourly boarding table from six months (2025-01 to 2025-06) to
+thirty-two (2024-01 to 2026-08) surfaced four defects that had been producing
+plausible numbers. None raised an error. Each was found by reconciling a figure
+against something independent of the pipeline that produced it.
+
+**The loader overwrote passengers.** The table key is
+`(use_ym, route_no, stop_ars, hour)`, but the source API returns one row per
+stop *visit*. A route that passes the same stop twice — near its origin and
+again at its turnaround — arrives as two rows with the same stop ID and ARS code
+and different sequence numbers, and the upsert kept only one of them. On route
+동대문01 at 회기역 the two rows for 2024-01 carried 97,271 and 3,389 boardings;
+the table held one of those figures instead of their sum. Every month 3,400–3,900
+of roughly 42,000 source rows collided this way, and 2024-01 boarding was
+understated by 4,518,304 (3.6%). Row counts were unaffected, so a row-for-row
+reconciliation would not have caught it.
+
+Two checks ruled out the other explanation, that the API was sending duplicates:
+none of the 3,328 colliding groups had identical values, and every group shared a
+single stop ID. The loader now sums a whole month before writing — summing per API
+page is not enough, because a collision can straddle a page boundary — and the
+upsert still assigns rather than adds, so re-running a month stays idempotent.
+
+**The holiday table had wrong dates.** Day-type counts per month are the design
+matrix of the ratio model, so they were checked against the calendar: each count,
+not just the monthly total. Six months failed. 2024 Lunar New Year was recorded
+as January 9–12 instead of February 9–12, the 2024-10-01 temporary holiday was
+missing, and the 2025-01-27 temporary holiday was recorded as the 24th. The 2026
+rows listed substitute holidays but omitted the holidays that fell on weekends;
+two of those were Saturdays, which shifted the June and August counts. A sum
+check alone would have passed all six.
+
+**The fallback ratio did not sum to one.** OD rows with no fitted hourly profile
+are spread across the day with a hand-written 24-hour profile. It summed to 1.105,
+inflating every fallback estimate by 10.5%. It is now normalised.
+
+**Virtual stops leaked into the ratio model.** The filter excluded
+`stop_ars = '00000'`, but the API marks virtual stops with `~`, which passed
+through into 24,696 rows in each derived table. The filter now accepts only
+five-digit codes other than `00000`.
+
+The rebuild also changed the model's footing. The solver estimates seven day-type
+averages per route-stop-hour from monthly totals. With six months it had at most
+six equations for seven unknowns, so every earlier fit was the minimum-norm
+solution of an underdetermined system; with thirty-two months the system is
+overdetermined. The solver now processes routes in batches and solves all groups
+that observed the same months in one least-squares call — equivalent to the
+per-group loop, verified against the original on synthetic data — which keeps a
+30-million-row input within a machine with 8 GB of RAM. Because the estimation
+method is part of the hourly OD table's key, a row moving from the fallback to a
+fitted profile would otherwise be kept twice; the estimator now replaces a date
+range inside one transaction.
+
+| Check after rebuild | Result |
+|---|---|
+| Re-loaded months: row counts against the loader log | 24 of 24 match |
+| Hourly ratio keys summing to exactly 1 or 0 | 283,353 of 283,353 |
+| Non-numeric or `00000` ARS codes in derived tables | 0 |
+| Duplicate OD-hour rows across estimation methods | 0 |
+| Fallback-profile rows, 2025-11-11 | 316,584 → 181,272 (−43%) |
+| Daily OD passengers not distributed to hours | 18,965 of 5,345,649 (0.35%) |
+
+The last row is an open gap rather than a pass; see [Known gaps](#known-gaps).
+
 ## Terrain and demand: an hourly profile in xarray
 
 The boarding source is already three-dimensional — month, hour, stop — so
@@ -421,7 +488,9 @@ Building the full grid is itself informative. 1.79M source rows expand to
 6 × 24 × 12,529 cells, and the gaps are real — a stop with no service at 03:00 is
 a missing observation, not a zero. Every aggregate uses `skipna` accordingly.
 
-**Result.** Mean boardings per stop-hour, 2025-01 to 2025-06, by slope band:
+**Result.** Mean boardings per stop-hour, 2025-01 to 2025-06, by slope band.
+These figures predate the [loader fix](#data-quality-rebuilding-the-hourly-pipeline) and will shift when re-run;
+stops visited twice per trip were the most understated.
 
 | Hour | 0–4% | 4–8% | 8–12% | 12%+ | 12%+ as share of 0–4% |
 | ---- | ---- | ---- | ----- | ---- | --------------------- |
@@ -519,6 +588,15 @@ Tracked here so they are visible rather than discovered during deployment.
 5. Terrain snapshots are published manually. There is no scheduled job to
    re-publish when the DEM or the boundary release changes; the active dataset
    has to be replaced deliberately.
+6. About 2,300 of 283,353 hourly ratio keys are all zero after negative
+   estimates are clipped, so OD passengers boarding there are not distributed to
+   hours — 0.35% of daily OD passengers on 2025-11-11, down from 0.73% at 24
+   months. Routing those keys to the
+   normalised fallback profile would close it.
+7. Outputs derived from the hourly table before the rebuild have not been
+   regenerated: the BigQuery warehouse load and the xarray terrain profile above.
+   The holiday table has been validated against the calendar for 2024-01 to
+   2026-08 only.
 
 ## Next work
 
