@@ -5,6 +5,13 @@ The CardBusTimeNew API returns wide-format monthly rows:
 one route-stop row contains HR_0 ... HR_23 columns.
 This script unpivots those columns into one row per hour.
 
+Rows that share the table key (use_ym, route_no, stop_ars) are summed before
+they are written. The API returns several rows per route for virtual stops
+(STOPS_ARS_NO '~'), and blank ARS values normalize to '00000'. Upserting those
+rows one by one kept only the last one and silently dropped passengers.
+Merging happens over the whole month, because colliding rows can fall on
+either side of an API page boundary.
+
 Supports both a single month and a backfill over a month range:
 
     # one month
@@ -192,25 +199,93 @@ def month_range(start_ym: str, end_ym: str) -> list[str]:
     return months
 
 
+def merge_records(records: list[dict], buckets: dict) -> None:
+    """
+    Sum unpivoted records that share the upsert key.
+
+    Summing happens here, in Python, and the upsert still assigns values.
+    Adding in SQL (col = col + EXCLUDED.col) would double the numbers every
+    time a month is re-run, so the loader would stop being idempotent.
+    Descriptive columns (route_name, stop_id, stop_name, reg_ymd) come from
+    the first row seen for a key.
+    """
+    for record in records:
+        key = (record["use_ym"], record["route_no"], record["stop_ars"])
+        bucket = buckets.get(key)
+        if bucket is None:
+            bucket = {
+                "meta": {
+                    column: record[column]
+                    for column in (
+                        "use_ym", "route_no", "route_name", "stop_id",
+                        "stop_ars", "stop_name", "reg_ymd",
+                    )
+                },
+                "boarding": [0.0] * 24,
+                "alighting": [0.0] * 24,
+            }
+            buckets[key] = bucket
+        hour = record["hour"]
+        bucket["boarding"][hour] += record["boarding_passengers"] or 0.0
+        bucket["alighting"][hour] += record["alighting_passengers"] or 0.0
+
+
+def iter_merged_chunks(buckets: dict, chunk_size: int):
+    """
+    Expand merged buckets back into hourly rows, yielded in chunks so the
+    whole month is never built as one list of dicts.
+    """
+    chunk: list[dict] = []
+    for bucket in buckets.values():
+        for hour in range(24):
+            chunk.append({
+                **bucket["meta"],
+                "hour": hour,
+                "boarding_passengers": bucket["boarding"][hour],
+                "alighting_passengers": bucket["alighting"][hour],
+            })
+            if len(chunk) >= chunk_size:
+                yield chunk
+                chunk = []
+    if chunk:
+        yield chunk
+
+
 def load_month(engine, api_key: str, use_ym: str, route_no: str | None,
                page_size: int, sleep_seconds: float) -> int:
     """
-    Load one month, paging until the API's reported total is reached.
+    Load one month: fetch every page, merge colliding rows, then upsert.
+
+    Nothing is written until every page has been fetched, so a month that
+    fails halfway leaves the table as it was instead of half-updated.
     """
     start = 1
     total = None
-    inserted_rows = 0
+    buckets: dict = {}
+    source_rows = 0
 
     while total is None or start <= total:
         end = start + page_size - 1
         total, records = fetch_page(api_key, start, end, use_ym, route_no)
-        upsert_records(engine, records)
+        merge_records(records, buckets)
 
-        inserted_rows += len(records)
-        print(f"  {use_ym}: API rows {start}-{end}; unpivoted={len(records)}; total={total}")
+        source_rows += len(records) // 24
+        print(f"  {use_ym}: API rows {start}-{end} fetched; total={total}")
 
         start = end + 1
         time.sleep(sleep_seconds)
+
+    merged = source_rows - len(buckets)
+    print(
+        f"  {use_ym}: source rows={source_rows:,}; unique keys={len(buckets):,}; "
+        f"merged={merged:,}"
+    )
+
+    inserted_rows = 0
+    for chunk in iter_merged_chunks(buckets, page_size * 24):
+        upsert_records(engine, chunk)
+        inserted_rows += len(chunk)
+    print(f"  {use_ym}: upserted {inserted_rows:,} hourly rows")
 
     return inserted_rows
 
@@ -229,7 +304,11 @@ def main():
         default=os.getenv("PIPELINE_DB_URL"),
         help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL.",
     )
-    parser.add_argument("--api-key", default=os.getenv("SEOUL_API_KEY"))
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("SEOUL_API_KEY") or os.getenv("SEOUL_HOURLY_API_KEY"),
+        help="Defaults to SEOUL_API_KEY, then SEOUL_HOURLY_API_KEY.",
+    )
     parser.add_argument("--use-ym", help="Single month, YYYYMM, e.g. 202501")
     parser.add_argument("--start-ym", help="Backfill start month, YYYYMM")
     parser.add_argument("--end-ym", help="Backfill end month, YYYYMM")
@@ -239,7 +318,7 @@ def main():
     parser.add_argument(
         "--continue-on-error",
         action="store_true",
-        help="Keep going if one month fails, and report failures at the end ",
+        help="Keep going if one month fails, and report failures at the end",
     )
     args = parser.parse_args()
 
@@ -252,7 +331,10 @@ def main():
         )
 
     if not args.api_key:
-        raise SystemExit("API key is required. Pass --api-key or set SEOUL_API_KEY.")
+        raise SystemExit(
+            "API key is required. Pass --api-key or set SEOUL_API_KEY "
+            "(or SEOUL_HOURLY_API_KEY)."
+        )
 
     # Exactly one of the two modes must be given, so a typo in --start-ym does not silently fall back to loading a single month.
     single = args.use_ym is not None
@@ -283,7 +365,7 @@ def main():
             if not args.continue_on_error:
                 raise
             # A backfill can span months the API has no data for. Recording the
-            # failure and moving on is better than losing the months already  loaded.
+            # failure and moving on is better than losing the months already loaded.
             print(f"  {use_ym}: FAILED - {error}")
             failures.append((use_ym, str(error)))
 
