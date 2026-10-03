@@ -30,11 +30,15 @@ GROUP BY use_ym, route_no, stop_ars;
 
 The API is monthly, so a backfill iterates months rather than days.
 
+Run every command from the repository root. The loader is invoked as a module
+(`-m`) because it imports `common` through its own package; running the file by
+path puts the script's directory on `sys.path` instead, which is what the
+package-qualified imports moved away from.
+
 ```bash
 export PIPELINE_DB_URL='postgresql+psycopg2://postgres:PASSWORD@localhost:5432/Seoul_Transit'
 export SEOUL_API_KEY='your-key'
-
-python pipelines/hourly_od_estimation/load_hourly_boarding.py \
+python -m pipelines.hourly_od_estimation.load_hourly_boarding \
   --start-ym 202502 --end-ym 202512 \
   --continue-on-error
 ```
@@ -45,15 +49,15 @@ PowerShell:
 $env:PIPELINE_DB_URL='postgresql+psycopg2://postgres:PASSWORD@localhost:5432/Seoul_Transit'
 $env:SEOUL_API_KEY='your-key'
 
-python pipelines/hourly_od_estimation/load_hourly_boarding.py `
+python -m pipelines.hourly_od_estimation.load_hourly_boarding `
   --start-ym 202502 --end-ym 202512 `
   --continue-on-error
 ```
 
-Single month, unchanged from before:
+Single month:
 
 ```bash
-python pipelines/hourly_od_estimation/load_hourly_boarding.py --use-ym 202501
+python -m pipelines.hourly_od_estimation.load_hourly_boarding --use-ym 202501
 ```
 
 ## Arguments

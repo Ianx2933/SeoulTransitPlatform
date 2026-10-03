@@ -1,8 +1,5 @@
-"""
-EN: Solve day-type hourly boarding ratios from monthly aggregate API data.
-KR: 월 누적 API 데이터에서 day-type별 시간대 승차 비율을 추정한다.
+"""Solve day-type hourly boarding ratios from monthly aggregate API data.
 
-EN:
 For each route-stop-hour, this script solves:
 
     A x = b
@@ -15,19 +12,6 @@ Routes are processed in batches so memory stays bounded as months are added.
 Groups that observed the same set of months share the same A, so they are
 solved together in one least-squares call. The result is identical to
 solving each group separately.
-
-KR:
-각 노선-정류장-hour 단위로 다음 식을 푼다.
-
-    A x = b
-
-A = 월별 day-type 개수
-x = day-type별 평균 승차량
-b = 월별 해당 hour 승차량
-
-월 수가 늘어나도 메모리가 일정하도록 노선 단위로 나눠 처리한다.
-같은 월 집합을 가진 그룹은 A가 같으므로 한 번의 최소제곱 호출로 함께 푼다.
-그룹별로 따로 푼 결과와 동일하다.
 """
 
 from __future__ import annotations
@@ -38,7 +22,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-from common import DAY_TYPES, make_engine
+from .common import DAY_TYPES, make_engine
 
 
 KEY_COLUMNS = ["route_no", "stop_ars", "hour"]
@@ -46,8 +30,7 @@ KEY_COLUMNS = ["route_no", "stop_ars", "hour"]
 
 def load_month_counts(engine) -> pd.DataFrame:
     """
-    EN: Load the A-matrix source table.
-    KR: A 행렬의 원천인 month_day_count 테이블을 읽는다.
+    Load the A-matrix source table.
     """
     return pd.read_sql("""
         SELECT use_ym, mon, tue, wed, thu, fri, sat, sun_holiday
@@ -58,8 +41,7 @@ def load_month_counts(engine) -> pd.DataFrame:
 
 def load_route_list(engine) -> list[str]:
     """
-    EN: List routes so the monthly table can be read in bounded batches.
-    KR: 월 테이블을 나눠 읽기 위해 노선 목록을 가져온다.
+    List routes so the monthly table can be read in bounded batches.
     """
     df = pd.read_sql("""
         SELECT DISTINCT route_no
@@ -71,16 +53,10 @@ def load_route_list(engine) -> list[str]:
 
 def load_hourly_monthly(engine, routes: list[str] | None = None) -> pd.DataFrame:
     """
-    EN: Load monthly hourly boarding counts by route-stop-hour.
-    KR: 노선-정류장-hour별 월 누적 승차량을 읽는다.
+    Load monthly hourly boarding counts by route-stop-hour.
 
-    EN:
     Only 5-digit ARS codes are kept. Virtual stops arrive as '~' and blank codes
     normalize to '00000'; both would distort the decomposition model.
-
-    KR:
-    5자리 숫자 ARS만 사용한다. 가상 정류장은 '~', 빈 코드는 '00000'으로 들어오며
-    둘 다 요일별 시간대 패턴 분해를 왜곡한다.
     """
     route_filter = "AND route_no = ANY(:routes)" if routes is not None else ""
     sql = text(f"""
@@ -102,14 +78,9 @@ def load_hourly_monthly(engine, routes: list[str] | None = None) -> pd.DataFrame
 
 def nonnegative_lstsq(A: np.ndarray, b: np.ndarray) -> np.ndarray:
     """
-    EN: Solve least squares and clip negative estimates to zero.
-    KR: 최소제곱해를 구한 뒤 음수 추정값을 0으로 보정한다.
+    Solve least squares and clip negative estimates to zero.
 
-    EN:
     b may be a vector or a matrix with one column per group.
-
-    KR:
-    b는 벡터이거나, 그룹마다 한 열인 행렬일 수 있다.
     """
     x, *_ = np.linalg.lstsq(A, b, rcond=None)
     return np.clip(x, 0, None)
@@ -118,8 +89,7 @@ def nonnegative_lstsq(A: np.ndarray, b: np.ndarray) -> np.ndarray:
 def solve_grouped(month_counts: pd.DataFrame, hourly: pd.DataFrame, min_months: int,
                   value_columns: list[str]):
     """
-    EN: Solve A x = b for every route-stop-hour group without a Python loop per group.
-    KR: 그룹마다 파이썬 루프를 돌지 않고 모든 노선-정류장-hour의 A x = b를 푼다.
+    Solve A x = b for every route-stop-hour group without a Python loop per group.
 
     Returns (keys, solutions) where keys holds one row per solved group and
     solutions maps each value column to an array of shape (groups, day types).
@@ -155,8 +125,7 @@ def solve_grouped(month_counts: pd.DataFrame, hourly: pd.DataFrame, min_months: 
     _, first_row = np.unique(gid, return_index=True)
     keys = data.loc[first_row, KEY_COLUMNS].reset_index(drop=True)
 
-    # EN: Skip sparse groups because underdetermined estimates are unstable.
-    # KR: 월 수가 부족한 그룹은 추정이 불안정하므로 건너뛴다.
+    # Skip sparse groups because underdetermined estimates are unstable.
     valid = np.flatnonzero(present.sum(axis=1) >= min_months)
     solutions = {column: np.zeros((n_groups, len(DAY_TYPES))) for column in value_columns}
 
@@ -177,8 +146,7 @@ def solve_grouped(month_counts: pd.DataFrame, hourly: pd.DataFrame, min_months: 
 
 def solve_patterns(month_counts: pd.DataFrame, hourly: pd.DataFrame, min_months: int) -> pd.DataFrame:
     """
-    EN: Estimate day-type hourly averages and convert them into ratios.
-    KR: day-type별 시간대 평균 승차량을 추정하고 ratio로 변환한다.
+    Estimate day-type hourly averages and convert them into ratios.
     """
     keys, solutions = solve_grouped(month_counts, hourly, min_months, ["monthly_boarding"])
     if keys is None or keys.empty:
@@ -193,8 +161,7 @@ def solve_patterns(month_counts: pd.DataFrame, hourly: pd.DataFrame, min_months:
         "avg_boarding_passengers": solutions["monthly_boarding"].reshape(-1),
     })
 
-    # EN: Normalize 24 hourly averages within each route-stop-day_type into ratios.
-    # KR: 노선-정류장-day_type별 24시간 평균값을 합이 1인 ratio로 정규화한다.
+    # Normalize 24 hourly averages within each route-stop-day_type into ratios.
     total_by_day = (
         avg_df.groupby(["route_no", "stop_ars", "day_type"])["avg_boarding_passengers"]
         .transform("sum")
@@ -229,8 +196,7 @@ UPSERT_SQL = text("""
 
 def upsert_ratios(conn, ratio_df: pd.DataFrame, batch_size: int) -> None:
     """
-    EN: Write ratio rows through an open connection in bounded batches.
-    KR: 열린 connection으로 ratio row를 일정 크기 batch로 나눠 저장한다.
+    Write ratio rows through an open connection in bounded batches.
     """
     if ratio_df.empty:
         return
@@ -241,8 +207,7 @@ def upsert_ratios(conn, ratio_df: pd.DataFrame, batch_size: int) -> None:
 
 def save_ratios(engine, ratio_df: pd.DataFrame, batch_size: int = 50000) -> None:
     """
-    EN: Persist ratios in one transaction. Kept for callers of the previous version.
-    KR: 한 트랜잭션으로 ratio를 저장한다. 이전 버전 호출부 호환용.
+    Persist ratios in one transaction. Kept for callers of the previous version.
     """
     if ratio_df.empty:
         print("No ratios generated.")
@@ -253,8 +218,7 @@ def save_ratios(engine, ratio_df: pd.DataFrame, batch_size: int = 50000) -> None
 
 def main():
     """
-    EN: CLI entry point for least-squares ratio estimation.
-    KR: least-squares 기반 ratio 추정 CLI 진입점.
+    CLI entry point for least-squares ratio estimation.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--db-url", required=True)
@@ -274,8 +238,7 @@ def main():
     total_input = 0
     total_output = 0
 
-    # EN: One transaction for all batches, so an interrupted run leaves the old ratios intact.
-    # KR: 전체를 한 트랜잭션으로 묶어, 중간에 끊겨도 기존 ratio가 그대로 남게 한다.
+    # One transaction for all batches, so an interrupted run leaves the old ratios intact.
     with engine.begin() as conn:
         for start in range(0, len(routes), args.route_batch):
             batch = routes[start:start + args.route_batch]

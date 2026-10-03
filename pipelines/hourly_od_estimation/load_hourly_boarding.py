@@ -45,7 +45,7 @@ import requests
 from sqlalchemy import text
 from dotenv import load_dotenv
 
-from common import make_engine, normalize_ars
+from .common import make_engine, normalize_ars
 
 
 API_NAME = "CardBusTimeNew"

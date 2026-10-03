@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 from sqlalchemy import text
 
-from common import build_month_counts, load_holidays, make_engine, ym_range
+from .common import build_month_counts, load_holidays, make_engine, ym_range
 
 
 def upsert_month_count(engine, use_ym: str, counts: dict[str, int]) -> None:
