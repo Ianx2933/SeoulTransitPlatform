@@ -30,7 +30,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
 | **Analytical warehouse** | The analytical half migrated to BigQuery as a partitioned star schema, reconciled row-for-row; serving stays in PostGIS — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) |
-| **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in four months; fixed and rebuilt on 32 months — [details](#data-quality-rebuilding-the-hourly-pipeline) |
+| **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions — [details](#data-quality-rebuilding-the-hourly-pipeline) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Current phase status
@@ -304,6 +304,14 @@ python -m pip install -r requirements-test.txt
 pytest -q
 ```
 
+The hourly suite covers the three defects above as contracts rather than as
+history: profile precedence and passenger conservation along each of the three
+selection paths, page-boundary merging in the loader, and the holiday calendar
+against fixed-date and lunar-calendar sources independent of the committed CSV.
+These run offline on synthetic fixtures. Checks that assert the state of real
+data live in `pipelines/hourly_od_estimation/validate_rebuild.py`, which needs a
+populated database and is run after a rebuild rather than in CI.
+
 Backend tests include unit coverage for `OccupancyCalculator` and
 `MapDemandService`, MVC-slice 400/404 response contracts, and repository
 integration tests. Docker must be available for the shared PostGIS/Redis
@@ -442,9 +450,29 @@ rows listed substitute holidays but omitted the holidays that fell on weekends;
 two of those were Saturdays, which shifted the June and August counts. A sum
 check alone would have passed all six.
 
+Manual review is not a method, so the calendar is now asserted by tests: every
+fixed-date holiday in every year the CSV covers, and lunar holidays against
+dates computed by a separate calendar implementation rather than the CSV itself.
+Those tests immediately found two more omissions the manual pass had missed —
+2026-09-26 and 2026-10-03, both Saturdays, the same defect class as the June and
+August rows. Both fall outside the loaded range, so no fitted profile changed.
+
 **The fallback ratio did not sum to one.** OD rows with no fitted hourly profile
 are spread across the day with a hand-written 24-hour profile. It summed to 1.105,
 inflating every fallback estimate by 10.5%. It is now normalised.
+
+**A fitted profile of all zeros dropped passengers silently.** Clipping negative
+least-squares estimates to zero leaves 2,327 of 283,353 ratio keys summing to
+zero rather than one. Those keys exist, so the estimator preferred them over the
+fallback and multiplied the day's passengers by zero: 18,965 of 5,345,649 daily
+OD passengers on 2025-11-11 reached no hour at all. Profile selection now has
+three levels, and each row records which one applied — a fitted profile when one
+sums to one, the normalised fallback as `default_static_ratio_zero_fit` when the
+key exists but fitted to zeros, and the same fallback as `default_static_ratio`
+when no key exists. The two fallback cases share their numbers but not their
+meaning: the first is a route-stop that was observed and could not be decomposed,
+the second was never fitted at all, and merging them would hide which population
+is growing.
 
 **Virtual stops leaked into the ratio model.** The filter excluded
 `stop_ars = '00000'`, but the API marks virtual stops with `~`, which passed
@@ -469,10 +497,23 @@ range inside one transaction.
 | Hourly ratio keys summing to exactly 1 or 0 | 283,353 of 283,353 |
 | Non-numeric or `00000` ARS codes in derived tables | 0 |
 | Duplicate OD-hour rows across estimation methods | 0 |
-| Fallback-profile rows, 2025-11-11 | 316,584 → 181,272 (−43%) |
-| Daily OD passengers not distributed to hours | 18,965 of 5,345,649 (0.35%) |
+| OD keys in the estimate against the source | 514,499; 0 missing, 0 extra |
+| Hours per OD key | 24 distinct, no exceptions |
+| Daily passengers conserved per OD key | 0 mismatches at 1e-07 |
+| Daily OD passengers not distributed to hours | 0 of 5,345,649 |
+| Fallback-profile rows, 2025-11-11 | 243,960 — 181,272 with no key, 62,688 fitted to zeros |
+| Estimator re-run: row count and SHA-256 over every row | identical |
 
-The last row is an open gap rather than a pass; see [Known gaps](#known-gaps).
+Fallback rows rose from 181,272 because 2,612 OD keys that previously lost their
+passengers to a zero profile are now distributed; the figure to read alongside it
+is the zero in the row above.
+
+The totals are reconciled per OD key rather than in aggregate. A per-key
+tolerance of 1e-07 passengers catches errors that cancel out in a 5.3-million
+sum, and missing keys, extra keys and missing hours are separate checks rather
+than a difference in one total. `validate_rebuild.py` runs all of them and exits
+non-zero, so a rebuild that printed success but left the data wrong fails the
+gate instead of the reader.
 
 ## Terrain and demand: an hourly profile in xarray
 
@@ -574,10 +615,12 @@ variables for local development.
 
 Tracked here so they are visible rather than discovered during deployment.
 
-1. `admin_dong_boundary` has no loader script — it is imported manually with
-   ogr2ogr, documented in
-   `database/schema/04_reference_admin_dong_boundary.sql`. Terrain publication
-   depends on it, and validates its base date and geometry before proceeding.
+1. `admin_dong_boundary` has no loader script. The table holds the 1,208
+   administrative units of the 2025-06-30 snapshot, imported manually with
+   ogr2ogr and documented in
+   `database/schema/04_reference_admin_dong_boundary.sql`, so the data is
+   present but the import is not reproducible. Terrain publication depends on
+   it, and validates its base date and geometry before proceeding.
 2. `bus_stop_location` and `subway_station_location` have not been compared
    against the live database; the remaining schema files have. See the
    verification table in `docs/deployment/database_setup.md`.
@@ -588,15 +631,12 @@ Tracked here so they are visible rather than discovered during deployment.
 5. Terrain snapshots are published manually. There is no scheduled job to
    re-publish when the DEM or the boundary release changes; the active dataset
    has to be replaced deliberately.
-6. About 2,300 of 283,353 hourly ratio keys are all zero after negative
-   estimates are clipped, so OD passengers boarding there are not distributed to
-   hours — 0.35% of daily OD passengers on 2025-11-11, down from 0.73% at 24
-   months. Routing those keys to the
-   normalised fallback profile would close it.
-7. Outputs derived from the hourly table before the rebuild have not been
+6. Outputs derived from the hourly table before the rebuild have not been
    regenerated: the BigQuery warehouse load and the xarray terrain profile above.
-   The holiday table has been validated against the calendar for 2024-01 to
-   2026-08 only.
+   Both predate the loader fix, so their totals are understated.
+7. Temporary, election and substitute holidays are not asserted against an
+   external source. Fixed-date and lunar holidays are, but a one-off holiday
+   that is simply absent from the CSV would still pass unnoticed.
 
 ## Next work
 
