@@ -66,11 +66,15 @@ const METRIC_OPTIONS = [
 
 /**
  * Supported Leaflet tile layer options.
+ *
+ * The CARTO entries were removed because selecting them produced a watermarked
+ * basemap: CARTO's CDN now requires an API key. Keep this list in sync with
+ * TILE_LAYERS in TransitDemandMap.jsx — an option listed here that has no
+ * matching entry there silently falls back to OpenStreetMap, so the dropdown
+ * would appear to do nothing.
  */
 const TILE_LAYER_OPTIONS = [
-  { value: "osm", label: "OpenStreetMap" },
-  { value: "cartoLight", label: "CartoDB Positron" },
-  { value: "cartoDark", label: "CartoDB Dark Matter" }
+  { value: "osm", label: "OpenStreetMap" }
 ];
 
 /**

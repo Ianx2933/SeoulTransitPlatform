@@ -26,21 +26,23 @@ const ROUTE_COLOR_PALETTE = [
   "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
 ];
 
+/**
+ * Basemap options.
+ *
+ * The CartoDB Positron and Dark Matter layers were removed: CARTO's basemap
+ * CDN no longer serves unauthenticated requests and returns an "API KEY
+ * REQUIRED" watermark tile instead. Restoring them means signing up for a
+ * CARTO key, which would then be embedded in this client bundle.
+ *
+ * OpenStreetMap's attribution is required by its licence, so it stays in the
+ * rendered attribution control.
+ */
 const TILE_LAYERS = {
   osm: {
     label: "OpenStreetMap",
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attribution: "&copy; OpenStreetMap contributors"
-  },
-  cartoLight: {
-    label: "CartoDB Positron",
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-  },
-  cartoDark: {
-    label: "CartoDB Dark Matter",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }
 };
 
@@ -167,7 +169,7 @@ function summarizeDemand(points, metric) {
 export default function TransitDemandMap({
   filters,
   showAdminBoundary = true,
-  selectedTileLayer = "cartoLight",
+  selectedTileLayer = "osm",
   selectedSearchNode,
   onClearSearchNode,
   selectedSubwayLines = [],
@@ -208,7 +210,7 @@ export default function TransitDemandMap({
   const [districtRetryNonce, setDistrictRetryNonce] = useState(0);
 
   const metric = filters?.metric || "total";
-  const tileLayer = TILE_LAYERS[selectedTileLayer] || TILE_LAYERS.cartoLight;
+  const tileLayer = TILE_LAYERS[selectedTileLayer] || TILE_LAYERS.osm;
 
   // Catchment data should load when any catchment-derived display is enabled.
   // showCatchment now means "summary display", not a master switch for nodes/routes.

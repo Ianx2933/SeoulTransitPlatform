@@ -39,7 +39,9 @@ export default function App() {
   const [selectedSearchNode, setSelectedSearchNode] = useState(null);
 
   const [showAdminBoundary, setShowAdminBoundary] = useState(true);
-  const [selectedTileLayer, setSelectedTileLayer] = useState("cartoLight");
+  // CARTO's basemap CDN now answers unauthenticated tile requests with an
+  // "API KEY REQUIRED" watermark, so OpenStreetMap is the default.
+  const [selectedTileLayer, setSelectedTileLayer] = useState("osm");
 
   /**
    * Controls whether catchment nearby nodes are drawn on the map as
