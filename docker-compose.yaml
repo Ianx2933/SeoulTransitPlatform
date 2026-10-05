@@ -12,7 +12,7 @@ services:
   postgres:
     # PostGIS is required — the map demand APIs use ST_Contains and ST_DWithin.
     # The plain postgres image will not work.
-    image: postgis/postgis:16-3.4
+    image: postgis/postgis:18-3.6
     container_name: seoul-transit-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-Seoul_Transit}
@@ -27,7 +27,7 @@ services:
       # different host port, e.g. "5433:5432".
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-Seoul_Transit}"]
       interval: 10s
