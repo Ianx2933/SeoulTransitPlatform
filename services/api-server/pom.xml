@@ -28,6 +28,8 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<google-auth-library.version>1.46.0</google-auth-library.version>
+		<cloud-sql-socket-factory.version>1.28.4</cloud-sql-socket-factory.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -66,6 +68,39 @@
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>3.0.2</version>
+		</dependency>
+
+		<!--
+			Issues the ID token that PredictionClient attaches when calling the
+			prediction service. That service is deployed to Cloud Run with
+			public access disabled, so unauthenticated calls are rejected.
+			Spring Boot's parent POM does not manage this artifact, so the
+			version is pinned here.
+		-->
+		<dependency>
+			<groupId>com.google.auth</groupId>
+			<artifactId>google-auth-library-oauth2-http</artifactId>
+			<version>${google-auth-library.version}</version>
+		</dependency>
+
+		<!--
+			Lets the Postgres JDBC driver reach Cloud SQL without IP allowlisting
+			or manual certificates, via a URL of the form
+			  jdbc:postgresql:///DB?cloudSqlInstance=PROJECT:REGION:INSTANCE
+			      &amp;socketFactory=com.google.cloud.sql.postgres.SocketFactory
+
+			Runtime scope: nothing in the source imports it; the driver loads the
+			socket factory by class name from the JDBC URL.
+
+			This provides authorization, NOT a network path. The Cloud Run
+			service must still be deployed with the add-cloudsql-instances flag,
+			or the connection fails even with this dependency present.
+		-->
+		<dependency>
+			<groupId>com.google.cloud.sql</groupId>
+			<artifactId>postgres-socket-factory</artifactId>
+			<version>${cloud-sql-socket-factory.version}</version>
+			<scope>runtime</scope>
 		</dependency>
 
 		<dependency>

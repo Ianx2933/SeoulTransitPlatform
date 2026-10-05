@@ -1,5 +1,8 @@
 package com.ian.transit.prediction.client;
 
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.IdTokenCredentials;
+import com.google.auth.oauth2.IdTokenProvider;
 import com.ian.transit.prediction.dto.HourlyPredictionResponse;
 import com.ian.transit.prediction.dto.PredictionRequest;
 import com.ian.transit.prediction.dto.WeightUpdateRequest;
@@ -16,6 +19,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
+
 /**
  * HTTP client for the Flask prediction microservice.
  *
@@ -30,6 +35,25 @@ public class PredictionClient {
 
     @Value("${prediction.service.base-url:http://localhost:5000}")
     private String predictionServiceBaseUrl;
+
+    /**
+     * Whether to attach a Google-signed ID token to outgoing calls.
+     *
+     * The prediction service is deployed to Cloud Run with
+     * --no-allow-unauthenticated, so requests must carry an ID token whose
+     * audience is the service URL. Left false for local development, where
+     * Flask listens on localhost with no authentication and no application
+     * default credentials are present.
+     */
+    @Value("${prediction.service.auth-enabled:false}")
+    private boolean authEnabled;
+
+    /**
+     * Lazily built and cached. Building it requires application default
+     * credentials, which only exist on Cloud Run, so construction is deferred
+     * until the first authenticated call rather than done at startup.
+     */
+    private volatile IdTokenCredentials idTokenCredentials;
 
     /**
      * Calls Flask /predict endpoint to get daily and hourly prediction.
@@ -97,6 +121,56 @@ public class PredictionClient {
     private HttpHeaders jsonHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+
+        if (authEnabled) {
+            headers.setBearerAuth(fetchIdToken());
+        }
+
         return headers;
+    }
+
+    /**
+     * Obtains an ID token for the prediction service.
+     *
+     * The audience must be the exact service root URL that Cloud Run knows,
+     * so it is taken from the same property used to build request URLs.
+     * Tokens are refreshed only when expired, so the common path is a cached
+     * in-memory read rather than a metadata-server round trip.
+     */
+    private String fetchIdToken() {
+        try {
+            IdTokenCredentials credentials = idTokenCredentials;
+
+            if (credentials == null) {
+                synchronized (this) {
+                    credentials = idTokenCredentials;
+                    if (credentials == null) {
+                        GoogleCredentials source = GoogleCredentials.getApplicationDefault();
+
+                        if (!(source instanceof IdTokenProvider provider)) {
+                            throw new IllegalStateException(
+                                    "Application default credentials cannot issue ID tokens; "
+                                            + "prediction.service.auth-enabled requires a service "
+                                            + "account identity"
+                            );
+                        }
+
+                        credentials = IdTokenCredentials.newBuilder()
+                                .setIdTokenProvider(provider)
+                                .setTargetAudience(predictionServiceBaseUrl)
+                                .build();
+
+                        idTokenCredentials = credentials;
+                    }
+                }
+            }
+
+            credentials.refreshIfExpired();
+            return credentials.getIdToken().getTokenValue();
+        } catch (IOException exception) {
+            throw new IllegalStateException(
+                    "Failed to obtain an ID token for the prediction service", exception
+            );
+        }
     }
 }

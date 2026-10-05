@@ -3,19 +3,40 @@
 # Required environment variables.
 #   DB_PASSWORD        PostgreSQL password.
 #
-# Optional overrides. 
+# Optional overrides.
+#   PORT               HTTP listen port, default: 8080. Cloud Run injects this.
 #   DB_URL             default: jdbc:postgresql://localhost:5432/Seoul_Transit
 #   DB_USERNAME        default: postgres
+#   DB_POOL_MAX        Hikari max pool size, default: 5. Cloud SQL db-f1-micro has a
+#                      low connection limit, so this is held well below the Hikari
+#                      default of 10 and multiplied by Cloud Run max-instances.
 #   JPA_DDL_AUTO       default: validate; use 'none' to skip schema validation.
 #   ADMIN_API_TOKEN    token required by /api/od-correction/**; blank locks endpoints.
-#   CACHE_TYPE         default: redis; use caffeine only through local-simple profile.
+#   CACHE_TYPE         default: redis. Deployment uses caffeine (no Memorystore).
 #   CACHE_TTL          Redis cache TTL, default: 10m.
+#   CAFFEINE_SPEC      Caffeine cache spec, default: maximumSize=1000,expireAfterWrite=10m.
 #   REDIS_HOST         default: localhost.
 #   REDIS_PORT         default: 6379.
 #   REDIS_PASSWORD     optional Redis password.
 #   REDIS_TIMEOUT      default: 3s.
-#   PREDICTION_SERVICE_BASE_URL default: http://localhost:5000
+#   REDIS_HEALTH_ENABLED
+#                      default: true. Set false wherever CACHE_TYPE=caffeine and no
+#                      Redis exists, or /actuator/health reports DOWN forever.
+#   PREDICTION_SERVICE_BASE_URL  default: http://localhost:5000
+#   PREDICTION_SERVICE_AUTH_ENABLED
+#                      default: false. Set true on Cloud Run, where the prediction
+#                      service rejects unauthenticated calls and the client must
+#                      attach a Google-signed ID token.
 #   SEOUL_BUS_API_KEY  Seoul bus master API key.
+#
+# Cloud Run deployment sets, at minimum:
+#   CACHE_TYPE=caffeine
+#   REDIS_HEALTH_ENABLED=false
+#   PREDICTION_SERVICE_AUTH_ENABLED=true
+#   DB_POOL_MAX=3
+
+server:
+  port: ${PORT:8080}
 
 spring:
   datasource:
@@ -23,6 +44,11 @@ spring:
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # Cloud Run max-instances multiplies this; keep the product under the
+      # instance connection limit.
+      maximum-pool-size: ${DB_POOL_MAX:5}
+      minimum-idle: 1
 
   jpa:
     hibernate:
@@ -33,7 +59,9 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
   cache:
-    # Redis is the default cache provider for GCP/deployment parity.
+    # Redis remains the default for local development, where compose runs one.
+    # Deployment sets CACHE_TYPE=caffeine: Memorystore costs more per month than
+    # the Cloud SQL instance, and per-instance caches are acceptable at demo scale.
     type: ${CACHE_TYPE:redis}
     cache-names: congestion, congestionStops, arsStandardCode, terrainDongSummary
     redis:
@@ -49,6 +77,17 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: ${REDIS_TIMEOUT:3s}
 
+management:
+  health:
+    redis:
+      # The Redis starter stays on the classpath so CACHE_TYPE=redis still works
+      # locally, and Actuator registers a Redis health check from its presence
+      # rather than from the active cache provider. Where no Redis exists the
+      # check fails permanently, and because Actuator reports the worst component
+      # status, /actuator/health answers 503 DOWN even though the application is
+      # serving correctly — which Cloud Run reads as an unhealthy container.
+      enabled: ${REDIS_HEALTH_ENABLED:true}
+
 admin:
   api:
     # Requests to /api/od-correction/** must carry header "X-Admin-Token".
@@ -58,6 +97,10 @@ admin:
 prediction:
   service:
     base-url: ${PREDICTION_SERVICE_BASE_URL:http://localhost:5000}
+    # False locally: Flask listens on localhost with no authentication and no
+    # application default credentials are present. True on Cloud Run, where the
+    # prediction service is deployed without public access.
+    auth-enabled: ${PREDICTION_SERVICE_AUTH_ENABLED:false}
 
 seoul:
   bus:

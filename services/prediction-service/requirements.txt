@@ -6,3 +6,5 @@ scikit-learn
 python-dotenv
 psycopg2-binary
 sqlalchemy
+
+gunicorn==23.0.0

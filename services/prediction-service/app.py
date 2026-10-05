@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, jsonify, request
 
 from prediction.weight_service import WeightService
@@ -63,4 +65,6 @@ def create_app(predictor=None, weight_service=None) -> Flask:
 
 
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=5000)
+    # Development entry point only; the container runs gunicorn (see Dockerfile).
+    # PORT is read because Cloud Run assigns the port rather than using a fixed one.
+    create_app().run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

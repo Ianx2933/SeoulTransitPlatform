@@ -6,10 +6,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 
@@ -28,6 +31,8 @@ public class GlobalExceptionHandler {
 
     private static final String INTERNAL_ERROR_MESSAGE = "Internal server error";
 
+    private static final String NOT_FOUND_MESSAGE = "Resource not found";
+
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(
             NotFoundException exception,
@@ -35,6 +40,48 @@ public class GlobalExceptionHandler {
     ) {
         return buildResponse(
                 HttpStatus.NOT_FOUND,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    /**
+     * Unmapped URLs.
+     *
+     * Without this handler these fall through to the catch-all below and are
+     * reported as 500, which hides real server errors among ordinary typos.
+     * Spring Boot routes unmatched requests to the static resource handler,
+     * so NoResourceFoundException is the usual case; NoHandlerFoundException
+     * is kept for the throwExceptionIfNoHandlerFound configuration.
+     *
+     * The exception message is NOT echoed back: it names the resource lookup
+     * path, which tells a caller more about internal routing than they need.
+     */
+    @ExceptionHandler({
+            NoResourceFoundException.class,
+            NoHandlerFoundException.class
+    })
+    public ResponseEntity<ErrorResponse> handleUnmappedPath(
+            Exception exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.NOT_FOUND,
+                NOT_FOUND_MESSAGE,
+                request
+        );
+    }
+
+    /**
+     * Right path, wrong HTTP verb — 405 rather than 500.
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotAllowed(
+            HttpRequestMethodNotSupportedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.METHOD_NOT_ALLOWED,
                 exception.getMessage(),
                 request
         );
