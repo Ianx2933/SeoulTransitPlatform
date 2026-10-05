@@ -20,6 +20,19 @@ demand on a single core segment, and — after joining terrain data — a dong w
 
 ![Route 143 congestion analysis](docs/analysis/images/route_143_congestion.png)
 
+## Live demo
+
+**[seoul-transit-prod.web.app](https://seoul-transit-prod.web.app)** — the map
+client, served from Firebase Hosting against the deployed API.
+
+The backend scales to zero, so the first request after an idle period waits for
+a cold start. The OD correction endpoints are deliberately locked in the
+deployed environment: they mutate data, and `ADMIN_API_TOKEN` is left unset so
+they reject every request. Their contracts are still visible in the OpenAPI
+document.
+
+See [deployed architecture](#deployed-architecture) for what runs where.
+
 ## Highlights
 
 | | |
@@ -44,7 +57,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | Terrain integration | Done | Versioned terrain snapshots and the stop/dong screening API |
 | Analytical warehouse | Done | BigQuery star schema for the analytical half — fact plus stop/route dimensions, validated against PostGIS |
 | Hourly pipeline rebuild | Done | Loader and ratio-model fixes, rebuilt on 2024-01 to 2026-08 and validated |
-| Phase 7 | Planned | GCP deployment architecture and implementation |
+| Phase 7 | In progress | GCP deployment — serving path live; scheduled ingestion remaining |
 
 ## Key capabilities
 
@@ -55,7 +68,7 @@ demand on a single core segment, and — after joining terrain data — a dong w
 - Bus and subway mode filtering.
 - Weekday/day-type and hour filtering.
 - Route, node, and district-level demand summaries.
-- Redis cache by default for deployment parity.
+- Redis cache by default locally; Caffeine in the deployed environment.
 - Caffeine cache through `local-simple` profile for lightweight local execution.
 - PostgreSQL/PostGIS spatial lookup and performance indexes.
 
@@ -67,13 +80,66 @@ demand on a single core segment, and — after joining terrain data — a dong w
 | Database | PostgreSQL, PostGIS |
 | Cache | Redis, Caffeine |
 | Prediction service | Python, Flask, XGBoost |
-| Frontend | React, Vite, Leaflet |
+| Frontend | React, Vite, Leaflet (OpenStreetMap basemap) |
 | Pipelines | Python, Airflow |
 | Multidimensional analysis | xarray, dask, netCDF |
 | Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
 | Analytical warehouse | BigQuery (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
 | Local infra | Docker Compose |
+| Deployment | Cloud Run, Cloud SQL (PostgreSQL 18 + PostGIS), Artifact Registry, Secret Manager, Firebase Hosting |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
+
+## Deployed architecture
+
+Everything runs in `asia-northeast3` (Seoul).
+
+```text
+Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
+  static Vite build                     │
+                                        ├──unix socket──> Cloud SQL: PostgreSQL 18 + PostGIS
+                                        │
+                                        └──ID token─────> Cloud Run: transit-prediction (private)
+```
+
+### Decisions worth explaining
+
+**No Memorystore.** The application defaults to Redis, but the deployed service
+runs Caffeine (`CACHE_TYPE=caffeine`). Memorystore's smallest instance costs
+roughly three times the database, which is the wrong trade for a demo whose
+only fixed cost is a `db-f1-micro`. Each Cloud Run instance then holds its own
+cache; acceptable at this traffic, and the cache provider is a single
+environment variable away from changing.
+
+**The prediction service is not public.** It is deployed with
+`--no-allow-unauthenticated`, and `transit-api` attaches a Google-signed ID
+token whose audience is the service URL. Model inference is the kind of
+endpoint that costs money per call, so it should not be reachable by anyone who
+finds the URL. The token path is disabled locally
+(`PREDICTION_SERVICE_AUTH_ENABLED=false`) because no application default
+credentials exist there.
+
+**No CORS configuration.** Firebase Hosting rewrites `/api/**` to the Cloud Run
+service, so the browser only ever sees one origin. The frontend calls relative
+paths and needs no build-time API URL.
+
+**Pipeline intermediates stay out of the cloud database.** Six tables totalling
+11.2 GB — hourly passenger source rows, OD estimates, day-of-week ratio models —
+are pipeline inputs and outputs that the API never reads. Loading only what the
+serving path queries keeps the instance inside its 10 GB disk.
+
+**Browser-facing API without a hosted basemap key.** The map originally used
+CartoDB Positron, whose CDN began returning watermark tiles for
+unauthenticated requests. The client moved to OpenStreetMap rather than
+embedding a CARTO key in a public static bundle.
+
+### Environment variables added for deployment
+
+| Variable | Default | Why it exists |
+|---|---|---|
+| `PORT` | 8080 | Cloud Run assigns the port; `server.port` must read it rather than bind a fixed one |
+| `DB_POOL_MAX` | 5 | Hikari's default of 10, multiplied by Cloud Run instances, exceeds what `db-f1-micro` accepts |
+| `REDIS_HEALTH_ENABLED` | true | Actuator registers a Redis health check from the starter being on the classpath, not from the active cache provider. Where no Redis exists the check fails permanently and `/actuator/health` answers 503 |
+| `PREDICTION_SERVICE_AUTH_ENABLED` | false | Attach an ID token to prediction calls |
 
 ## Terrain screening API
 
@@ -288,6 +354,11 @@ mvn spring-boot:run
 With the default profile and no Redis running, `/actuator/health` reports
 `DOWN`. That is a missing dependency, not a broken build — see
 [`docs/architecture/cache_profiles.md`](docs/architecture/cache_profiles.md).
+
+Switching `CACHE_TYPE` alone does not silence it. Actuator registers the Redis
+health check because `spring-boot-starter-data-redis` is on the classpath, not
+because Redis is the active cache, so an environment with no Redis at all needs
+`REDIS_HEALTH_ENABLED=false` as well. The deployed service sets both.
 
 ## Tests
 
@@ -592,6 +663,7 @@ scripts/db/             Data loading helper scripts
 services/api-server/    Spring Boot API
 services/prediction-service/  Flask prediction service
 services/web-client/    React/Vite/Leaflet frontend
+firebase.json           Hosting config and the /api/** rewrite to Cloud Run
 ```
 
 ## Security notes
@@ -610,6 +682,16 @@ PostgreSQL passwords
 
 Use `.env.example` for placeholders only, and session-level environment
 variables for local development.
+
+In the deployed environment, `DB_PASSWORD` and `SEOUL_BUS_API_KEY` come from
+Secret Manager and are mounted as environment variables by Cloud Run; the
+runtime service account is granted `secretAccessor` on each secret
+individually rather than at project scope.
+
+`ADMIN_API_TOKEN` is deliberately left unset in deployment. The
+`/api/od-correction/**` endpoints issue UPDATE and DELETE statements against
+the OD table, so on a public demo they reject every request rather than
+depending on a token staying secret.
 
 ## Known gaps
 
@@ -637,15 +719,32 @@ Tracked here so they are visible rather than discovered during deployment.
 7. Temporary, election and substitute holidays are not asserted against an
    external source. Fixed-date and lunar holidays are, but a one-off holiday
    that is simply absent from the CSV would still pass unnoticed.
+8. The deployed schema differs from the local one. `pg_dump -t` exports tables
+   and their indexes and constraints but not functions, so
+   `terrain_guard_activation()` and `terrain_guard_snapshot()` were not carried
+   over and the four terrain guard triggers do not exist in Cloud SQL. The API
+   only reads those tables, so serving is unaffected — but any attempt to run
+   the terrain publisher against the cloud database would bypass the guards.
+9. Cloud Run services run as the default Compute Engine service account, which
+   carries `roles/editor`. A dedicated service account with only
+   `cloudsql.client`, `secretAccessor` and `run.invoker` would be the correct
+   scope.
+10. `seoul_transit_serving.dump` is committed but unusable — `pg_restore` fails
+    partway through its data section, and its table list predates several
+    serving tables. The cloud database was loaded from a fresh dump instead.
 
 ## Next work
 
-1. Phase 7 — GCP deployment (Cloud Run, Cloud SQL, Artifact Registry, Secret
-   Manager). The container images and compose stack built in Phase 6.10 are the
-   input to this. The analytical warehouse is already on GCP; this covers the
-   serving path.
+1. Finish Phase 7 — the serving path is deployed; scheduled ingestion is not.
+   `pipelines/hourly_od_estimation/load_hourly_boarding.py` is the only module
+   that calls an external API, so it is the one to move to Cloud Run Jobs with
+   a Cloud Scheduler trigger. Its target table exists in Cloud SQL as an empty
+   schema, waiting for the job to fill it. The source API serves whole months,
+   so the schedule is monthly rather than continuous.
 2. Schedule the existing hourly loader from Airflow; only the correction DAG is
-   migrated so far.
+   migrated so far. The remaining nine pipeline modules stay local — they
+   transform data rather than ingest it, and their outputs are what gets loaded
+   to the serving database.
 3. Extend OD analysis toward trip-chain analysis — transfer patterns and
    full journey flows rather than single-leg boarding and alighting.
 4. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
