@@ -36,8 +36,17 @@ def make_engine(db_url: str):
     Create a SQLAlchemy engine from a database URL.
 
     Keeping this wrapper makes DB creation consistent across all pipeline scripts.
+
+    executemany_mode batches rows into multi-value statements instead of
+    sending one round trip per row, which is psycopg2's default. The hourly
+    loader writes roughly 930k rows for a single month; at one round trip each
+    that exceeded a one-hour Cloud Run Jobs timeout against a shared-core
+    Cloud SQL instance, where it finishes in minutes when batched.
+
+    The setting is psycopg2-specific. Every pipeline here uses psycopg2, so it
+    applies uniformly; a non-psycopg2 URL would need this argument removed.
     """
-    return create_engine(db_url)
+    return create_engine(db_url, executemany_mode="values_plus_batch")
 
 
 def normalize_ars(value) -> str:

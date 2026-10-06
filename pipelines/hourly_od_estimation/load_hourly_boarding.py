@@ -12,13 +12,17 @@ rows one by one kept only the last one and silently dropped passengers.
 Merging happens over the whole month, because colliding rows can fall on
 either side of an API page boundary.
 
-Supports both a single month and a backfill over a month range:
+Supports a single month, a backfill over a month range, and a no-argument
+form for scheduled runs:
 
     # one month
     python load_hourly_boarding.py --use-ym 202501
 
     # backfill
     python load_hourly_boarding.py --start-ym 202502 --end-ym 202512
+
+    # previous month -- what Cloud Scheduler invokes
+    python load_hourly_boarding.py
 
 Daily totals are derived from this table rather than stored separately.
 The predecessor project kept a separate daily_od_data table fed by the
@@ -40,6 +44,7 @@ import argparse
 import os
 import time
 import xml.etree.ElementTree as ET
+from datetime import date, timedelta
 
 import requests
 from sqlalchemy import text
@@ -336,16 +341,30 @@ def main():
             "(or SEOUL_HOURLY_API_KEY)."
         )
 
-    # Exactly one of the two modes must be given, so a typo in --start-ym does not silently fall back to loading a single month.
+    # Exactly one of the two modes may be given, so a typo in --start-ym does not silently fall back to loading a single month.
     single = args.use_ym is not None
     ranged = args.start_ym is not None or args.end_ym is not None
 
     if single and ranged:
         raise SystemExit("Use either --use-ym or --start-ym/--end-ym, not both.")
-    if not single and not ranged:
-        raise SystemExit("Specify --use-ym, or --start-ym and --end-ym.")
     if ranged and not (args.start_ym and args.end_ym):
         raise SystemExit("Backfill needs both --start-ym and --end-ym.")
+
+    if not single and not ranged:
+        # Scheduled runs pass no month. A cron trigger has no way to compute
+        # one, and writing the month into the schedule would mean editing the
+        # trigger every month, which is the thing a schedule is supposed to
+        # avoid.
+        #
+        # The source publishes a month well after it ends, so a scheduled run
+        # will usually find nothing and upsert zero rows. That is the expected
+        # steady state rather than a failure: the loader is idempotent, so
+        # whichever later run first sees the month picks it up, and re-running
+        # a month already loaded rewrites the same values.
+        previous_month = date.today().replace(day=1) - timedelta(days=1)
+        args.use_ym = previous_month.strftime("%Y%m")
+        single = True
+        print(f"No month given; defaulting to the previous month: {args.use_ym}")
 
     months = [args.use_ym] if single else month_range(args.start_ym, args.end_ym)
 

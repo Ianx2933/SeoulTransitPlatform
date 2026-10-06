@@ -1,0 +1,14 @@
+﻿.git/
+.venv/
+node_modules/
+**/node_modules/
+**/target/
+**/dist/
+**/__pycache__/
+**/.pytest_cache/
+data/
+docs/
+BND_ADM_DONG_PG/
+*.dump
+.env
+.firebase/
