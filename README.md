@@ -57,7 +57,7 @@ See [deployed architecture](#deployed-architecture) for what runs where.
 | Terrain integration | Done | Versioned terrain snapshots and the stop/dong screening API |
 | Analytical warehouse | Done | BigQuery star schema for the analytical half — fact plus stop/route dimensions, validated against PostGIS |
 | Hourly pipeline rebuild | Done | Loader and ratio-model fixes, rebuilt on 2024-01 to 2026-08 and validated |
-| Phase 7 | In progress | GCP deployment — serving path live; scheduled ingestion remaining |
+| Phase 7 | Done | GCP deployment — serving path and scheduled ingestion both live |
 
 ## Key capabilities
 
@@ -97,6 +97,11 @@ Everything runs in `asia-northeast3` (Seoul).
 Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
   static Vite build                     │
                                         ├──unix socket──> Cloud SQL: PostgreSQL 18 + PostGIS
+                                        │                   ▲
+                                        │                   │ unix socket
+                                        │                   │
+                                        │   Cloud Scheduler ──> Cloud Run Jobs: transit-collector
+                                        │     monthly              └──> Seoul Open API
                                         │
                                         └──ID token─────> Cloud Run: transit-prediction (private)
 ```
@@ -122,15 +127,30 @@ credentials exist there.
 service, so the browser only ever sees one origin. The frontend calls relative
 paths and needs no build-time API URL.
 
-**Pipeline intermediates stay out of the cloud database.** Six tables totalling
-11.2 GB — hourly passenger source rows, OD estimates, day-of-week ratio models —
-are pipeline inputs and outputs that the API never reads. Loading only what the
-serving path queries keeps the instance inside its 10 GB disk.
+**Pipeline intermediates stay out of the cloud database.** Five tables holding
+OD estimates and day-of-week ratio models are transform outputs the API never
+reads, so they were left behind; loading only what the serving path queries
+keeps the instance inside its 10 GB disk. The hourly passenger table is the
+exception — it was created empty in Cloud SQL rather than copied, because the
+scheduled job rebuilds it a month at a time from the source API.
 
 **Browser-facing API without a hosted basemap key.** The map originally used
 CartoDB Positron, whose CDN began returning watermark tiles for
 unauthenticated requests. The client moved to OpenStreetMap rather than
 embedding a CARTO key in a public static bundle.
+
+**Cloud Scheduler rather than managed Airflow.** Only one of the ten pipeline
+modules calls an external API, and it is a single step with no dependencies —
+Cloud Run Jobs on a monthly trigger covers it. Airflow earns its keep on the
+local DAG, where ingestion, OD correction, hourly estimation and aggregation
+depend on each other in order. Cloud Composer, the managed option, starts
+around thirty times the monthly cost of the database it would be feeding.
+
+**The scheduled job computes its own month.** Cloud Scheduler sends no
+arguments, and writing the month into the trigger would mean editing the
+trigger every month. The loader defaults to the previous month when called
+with no arguments; because the upsert is idempotent, a month that was already
+loaded is simply rewritten with the same values.
 
 ### Environment variables added for deployment
 
@@ -729,22 +749,26 @@ Tracked here so they are visible rather than discovered during deployment.
    carries `roles/editor`. A dedicated service account with only
    `cloudsql.client`, `secretAccessor` and `run.invoker` would be the correct
    scope.
-10. `seoul_transit_serving.dump` is committed but unusable — `pg_restore` fails
-    partway through its data section, and its table list predates several
-    serving tables. The cloud database was loaded from a fresh dump instead.
+10. The Seoul Open API takes its key as a path segment, so a request URL
+    contains the key verbatim. A connection timeout inside `requests` puts that
+    URL into the exception message, which then reaches Cloud Logging. The key
+    needs rotating, and `fetch_page` should re-raise with the key redacted.
+11. Two separate Seoul Open API keys are in use — one for the bus master data
+    the API server reads, one for the hourly ridership the loader fetches.
+    Using the wrong one does not fail: the service answers `INFO-000` with an
+    empty result set, so the loader reports zero rows and exits successfully.
+    That cost an hour of looking in the wrong place.
 
 ## Next work
 
-1. Finish Phase 7 — the serving path is deployed; scheduled ingestion is not.
-   `pipelines/hourly_od_estimation/load_hourly_boarding.py` is the only module
-   that calls an external API, so it is the one to move to Cloud Run Jobs with
-   a Cloud Scheduler trigger. Its target table exists in Cloud SQL as an empty
-   schema, waiting for the job to fill it. The source API serves whole months,
-   so the schedule is monthly rather than continuous.
-2. Schedule the existing hourly loader from Airflow; only the correction DAG is
-   migrated so far. The remaining nine pipeline modules stay local — they
-   transform data rather than ingest it, and their outputs are what gets loaded
-   to the serving database.
+1. Move the remaining pipeline modules behind Airflow. Only the correction DAG
+   is migrated so far; the other eight still run by hand. The hourly loader is
+   now scheduled in the cloud, but that covers ingestion into the serving
+   database, not the transform chain that feeds it.
+2. Carry the terrain guard functions into Cloud SQL, or decide deliberately
+   that the cloud database stays read-only for pipeline writes. The current
+   state is neither — the triggers are absent because of how the schema was
+   exported, not because anyone chose that.
 3. Extend OD analysis toward trip-chain analysis — transfer patterns and
    full journey flows rather than single-leg boarding and alighting.
 4. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
