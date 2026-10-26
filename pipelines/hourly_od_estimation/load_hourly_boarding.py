@@ -82,6 +82,17 @@ def get_number(row: ET.Element, *tags: str) -> float:
     return 0.0
 
 
+class SeoulApiRequestError(RuntimeError):
+    """A transport or HTTP failure, with the API key removed from the message."""
+
+
+def redact_key(text: str, api_key: str) -> str:
+    """Replace every occurrence of the API key in ``text`` with ``***``."""
+    if not api_key:
+        return text
+    return text.replace(api_key, "***")
+
+
 def build_url(api_key: str, start: int, end: int, use_ym: str, route_no: str | None = None) -> str:
     """
     Build the Seoul Open API request URL.
@@ -99,8 +110,20 @@ def fetch_page(api_key: str, start: int, end: int, use_ym: str, route_no: str | 
     This keeps API parsing separate from database persistence.
     """
     url = build_url(api_key, start, end, use_ym, route_no)
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as error:
+        # The Seoul Open API takes the key as a path segment, and requests puts
+        # the full URL into connection, timeout and HTTP error messages. Those
+        # messages reach Cloud Logging through the traceback or the
+        # --continue-on-error summary, so re-raise with the key removed and
+        # without chaining: `from None` keeps the original exception, and the
+        # URL inside it, out of the traceback.
+        raise SeoulApiRequestError(
+            f"Seoul API request failed for {use_ym} rows {start}-{end} "
+            f"({type(error).__name__}): {redact_key(str(error), api_key)}"
+        ) from None
 
     root = ET.fromstring(response.content)
 

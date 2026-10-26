@@ -72,12 +72,27 @@ public class SeoulBusApiClient {
             return null;
 
         } catch (Exception exception) {
+            // RestTemplate puts the full request URL, including the apikey query
+            // parameter, into I/O error messages. Log the exception type and a
+            // redacted message only, never the exception object itself, whose
+            // stack trace would carry the same URL.
             log.warn(
-                    "Failed to fetch standard code / 표준코드 조회 실패: arsCode={}, reason={}",
+                    "Failed to fetch standard code / 표준코드 조회 실패: arsCode={}, error={}, reason={}",
                     arsCode,
-                    exception.getMessage()
+                    exception.getClass().getSimpleName(),
+                    redactKey(exception.getMessage(), apiKey)
             );
             return null;
         }
+    }
+
+    /**
+     * Replace every occurrence of the API key in a message with {@code ***}.
+     */
+    static String redactKey(String message, String key) {
+        if (message == null || key == null || key.isEmpty()) {
+            return message;
+        }
+        return message.replace(key, "***");
     }
 }
