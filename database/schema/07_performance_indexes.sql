@@ -6,7 +6,7 @@
 -- planner statistics will be rebuilt when rows are loaded.
 --
 -- Measured effect (local): roughly 9.5-12.9 s -> about 192 ms cold call.
--- See docs/performance/phase6_9_2_district_demand_optimization.md
+-- See docs/performance/district_demand_optimization.md
 
 -- Duplicate index caution.
 --
@@ -26,4 +26,4 @@
 --   admin_dong_boundary_geom_geom_idx        vs idx_admin_dong_boundary_geom
 --   integrated_bus_stop_location_pkey        vs idx_integrated_bus_stop_location_canonical
 
-\ir ../performance/phase6_9_2_district_demand_indexes.sql
+\ir ../performance/district_demand_indexes.sql

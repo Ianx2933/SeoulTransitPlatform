@@ -226,4 +226,4 @@ Current deployment baseline:
 - BigQuery integration for large-scale analytics
 - Precomputed `node_admin_dong_mapping` if district-demand latency regresses at
   larger scope (see
-  [`docs/performance/phase6_9_2_district_demand_optimization.md`](../performance/phase6_9_2_district_demand_optimization.md))
+  [`docs/performance/district_demand_optimization.md`](../performance/district_demand_optimization.md))

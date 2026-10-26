@@ -2,7 +2,7 @@
 
 ## Summary
 
-Phase 6.9 introduced district-centered all-route demand analysis. (Phase 6.9에서 행정동 중심 전체 노선 수요 분석을 도입했습니다.) The initial
+Phase 6.9 introduced district-centered all-route demand analysis. The initial
 implementation worked functionally, but local performance testing showed that
 the district-demand endpoint could take roughly 9.5-12.9 seconds for
 representative requests.
@@ -60,7 +60,7 @@ Table statistics were then refreshed with `ANALYZE`.
 SQL file:
 
 ```text
-database/performance/phase6_9_2_district_demand_indexes.sql
+database/performance/district_demand_indexes.sql
 ```
 
 ## After optimization
@@ -71,12 +71,11 @@ database/performance/phase6_9_2_district_demand_indexes.sql
 | Cold call after cache flush | under 1 s |
 | Best observed cold call | about 192 ms |
 
-Approximate improvement from the original observed range:
-
-| Baseline | After | Approximate improvement |
-|---:|---:|---:|
-| 9.5 s | 0.192 s | about 49x |
-| 12.9 s | 0.192 s | about 67x |
+All figures are local measurements on a single development machine. The
+baseline is two runs, and 192 ms is the best observed cold call rather than a
+median or p95, so the result is stated as "roughly 10 seconds to sub-second"
+rather than as a precise improvement ratio. Cold calls were measured after
+flushing Redis, so they reflect the indexed database path, not cache hits.
 
 ## Reproducing this measurement
 
@@ -86,7 +85,7 @@ database. To reproduce:
 1. Load data per sections 4 and 5 of
    [`docs/deployment/database_setup.md`](../deployment/database_setup.md).
 2. Measure before applying the index file.
-3. Apply `database/performance/phase6_9_2_district_demand_indexes.sql`.
+3. Apply `database/performance/district_demand_indexes.sql`.
 4. Flush the cache and measure again.
 
 Applying the index file to an empty database succeeds but proves nothing —
@@ -117,6 +116,13 @@ The 6.9-2 result is strong enough to keep the current index-based structure.
 
 `node_admin_dong_mapping` precomputation is not required immediately because
 cold calls are already under one second in local testing.
+
+## Effect on the deployed cache design
+
+Because the indexed database path is sub-second without a cache hit, the GCP
+deployment runs an in-process Caffeine cache rather than a shared Redis
+(Memorystore) instance. Production latency on Cloud Run has not yet been
+measured.
 
 ## Deferred optimization
 
@@ -154,9 +160,9 @@ Decision: Keep current query structure with performance indexes
 Next phase: Phase 6.10 Deployment Readiness
 ```
 
-## Portfolio framing
+## Engineering takeaway
 
-This optimization demonstrates a full backend performance workflow:
+This optimization followed a measurement-driven workflow:
 
 1. A geospatial demand endpoint was implemented.
 2. Functional smoke tests passed.

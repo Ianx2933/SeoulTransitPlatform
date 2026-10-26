@@ -3,7 +3,7 @@
 --
 -- Source loader: pipelines/reference_loader/load_bus_stop_location.py
 -- That loader creates the table itself, but it does NOT create the `geom`
--- column, while database/performance/phase6_9_2_district_demand_indexes.sql
+-- column, while database/performance/district_demand_indexes.sql
 -- builds a GIST index on bus_stop_location.geom. The geometry column was
 -- added manually during development and is reproduced here so that a fresh
 -- database matches the one the performance indexes were measured against.

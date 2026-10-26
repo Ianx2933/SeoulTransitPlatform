@@ -203,7 +203,7 @@ Two consequences:
 2. A plain btree index on the raw column cannot serve this comparison. The
    expression indexes added in Phase 6.9-2 exist for exactly this reason.
 
-See `docs/performance/phase6_9_2_district_demand_optimization.md`.
+See `docs/performance/district_demand_optimization.md`.
 
 ## Caching
 

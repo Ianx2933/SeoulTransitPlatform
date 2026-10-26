@@ -140,11 +140,11 @@ are stale. Re-run:
 
 ```bash
 psql -h localhost -p 5432 -U postgres -d Seoul_Transit \
-  -f database/performance/phase6_9_2_district_demand_indexes.sql
+  -f database/performance/district_demand_indexes.sql
 ```
 
 Background in
-[`docs/performance/phase6_9_2_district_demand_optimization.md`](../performance/phase6_9_2_district_demand_optimization.md).
+[`docs/performance/district_demand_optimization.md`](../performance/district_demand_optimization.md).
 
 ## 5. Failure diagnosis
 

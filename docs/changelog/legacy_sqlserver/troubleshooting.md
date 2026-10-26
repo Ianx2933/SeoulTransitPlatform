@@ -191,7 +191,7 @@ This one has a long tail. The current codebase still normalises with
 `LPAD(node_id, 5, '0')` at join time, which is why Phase 6.9-2 needed
 *expression* indexes rather than plain btree ones — a padded comparison is not
 sargable against a raw column. See
-[`docs/performance/phase6_9_2_district_demand_optimization.md`](../../performance/phase6_9_2_district_demand_optimization.md).
+[`docs/performance/district_demand_optimization.md`](../../performance/district_demand_optimization.md).
 
 ## 9. NULL standard codes
 

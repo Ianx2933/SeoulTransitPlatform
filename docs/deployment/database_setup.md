@@ -286,12 +286,12 @@ current statistics:
 
 ```bash
 psql -h localhost -p 5432 -U postgres -d Seoul_Transit \
-  -f database/performance/phase6_9_2_district_demand_indexes.sql
+  -f database/performance/district_demand_indexes.sql
 ```
 
 Skipping this is the most likely cause of a district-demand call taking
 several seconds on a freshly loaded database. The measurements in
-`docs/performance/phase6_9_2_district_demand_optimization.md` were taken with
+`docs/performance/district_demand_optimization.md` were taken with
 statistics refreshed.
 
 ## 7. Credentials
