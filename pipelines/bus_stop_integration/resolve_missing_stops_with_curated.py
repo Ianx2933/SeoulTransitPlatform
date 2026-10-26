@@ -89,7 +89,7 @@ def load_node_info() -> pd.DataFrame:
     node["lat_num"] = pd.to_numeric(node["lat"], errors="coerce")
     node["lng_num"] = pd.to_numeric(node["lng"], errors="coerce")
 
-    # Keep only plausible coordinates for Korea and nearby service areas. (한국 및 인근 서비스권 좌표만 유지)
+    # Keep only plausible coordinates for Korea and nearby service areas.
     node = node[
         node["lat_num"].between(LAT_MIN, LAT_MAX)
         & node["lng_num"].between(LNG_MIN, LNG_MAX)

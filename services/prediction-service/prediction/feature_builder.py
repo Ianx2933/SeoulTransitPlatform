@@ -3,17 +3,11 @@ import pandas as pd
 
 class FeatureBuilder:
     """
-    EN: Builds XGBoost input features from API payload.
-    KR: API payload를 XGBoost 입력 피처로 변환한다.
-
-    EN: Spring provides operational request values such as routeNo, arsNo,
+    Builds XGBoost input features from API payload.
+    Spring provides operational request values such as routeNo, arsNo,
     dayOfWeek, isHoliday, month, prevWeek, and prevMonth. Features that are
     difficult to compute at request time, such as rolling means and route-level
     trends, fall back to training-time defaults saved in feature_defaults.json.
-    KR: Spring은 routeNo, arsNo, dayOfWeek, isHoliday, month, prevWeek,
-    prevMonth 같은 운영 요청 값을 제공한다. 요청 시점에 계산하기 어려운
-    rolling mean, route-level trend 계열 feature는 feature_defaults.json에
-    저장된 학습 시점 기본값으로 보정한다.
     """
 
     REQUIRED_KEYS = [
@@ -40,11 +34,8 @@ class FeatureBuilder:
 
     def build(self, payload: dict) -> pd.DataFrame:
         """
-        EN: Validates payload and returns a single-row feature DataFrame.
-        KR: payload를 검증하고 단일 row feature DataFrame을 반환한다.
-
-        EN: The DataFrame is ordered by feature_columns to match the training schema.
-        KR: 반환 DataFrame은 학습 schema와 맞추기 위해 feature_columns 순서를 따른다.
+        Validates payload and returns a single-row feature DataFrame.
+        The DataFrame is ordered by feature_columns to match the training schema.
         """
         self._validate_required_keys(payload)
 
@@ -68,10 +59,9 @@ class FeatureBuilder:
             "prevMonth": float(payload["prevMonth"]),
         }
 
-        # EN: Optional advanced features may be supplied by Spring later. Until then,
-        # use training-time defaults so the improved model can be served safely.
-        # KR: 향후 Spring에서 고급 feature를 넘길 수 있다. 그 전까지는 개선 모델을
-        # 안전하게 serving하기 위해 학습 시점 기본값을 사용한다.
+        # Optional advanced features may be supplied by Spring later. 
+        # Until then use training-time defaults so the improved model can be served safely.
+        
         for column in self.feature_columns:
             if column in features:
                 continue

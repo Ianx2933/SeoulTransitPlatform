@@ -1,5 +1,4 @@
 -- Subway station join alias table
--- (지하철 역사 조인 alias 테이블)
 
 CREATE TABLE IF NOT EXISTS subway_station_join_alias (
     source_line_name VARCHAR(100),
@@ -11,14 +10,12 @@ CREATE TABLE IF NOT EXISTS subway_station_join_alias (
 );
 
 -- Current service-name normalization
--- (현재 서비스 기준 역명 정규화)
 UPDATE subway_station_location
 SET station_name = '자양'
 WHERE station_name = '뚝섬유원지'
   AND line_name = '7호선';
 
 -- Alias records for line/station correction
--- (노선/역명 보정을 위한 alias 데이터)
 INSERT INTO subway_station_join_alias
 (source_line_name, source_station_name, target_line_name, target_station_name, reason)
 VALUES

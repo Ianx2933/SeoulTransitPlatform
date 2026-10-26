@@ -90,7 +90,6 @@ class ODCorrectionPipeline:
     TOTAL_STEPS = 12
 
     # Route name repair map for values corrupted by Excel/manual formatting
-    # (엑셀/수동 편집으로 깨진 노선명 복원 규칙)
     ROUTE_NAME_OVERRIDES = {
         "411": "0411",
         "40": "040",
@@ -156,7 +155,6 @@ class ODCorrectionPipeline:
         """
         Normalize route names as trimmed strings, then repair known corrupted
         route labels using an override table.
-        (노선명을 문자열로 정리한 뒤, 확인된 깨진 노선명을 예외 테이블로 복원)
         """
         cleaned = series.fillna("").astype(str).str.strip()
         return cleaned.replace(self.ROUTE_NAME_OVERRIDES)

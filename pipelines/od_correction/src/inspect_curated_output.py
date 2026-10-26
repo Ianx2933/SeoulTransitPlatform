@@ -1,6 +1,5 @@
 """
 OD Curated Data Inspection Script
-(OD curated 데이터 점검 스크립트)
 
 Purpose
 -------
@@ -34,7 +33,6 @@ import pandas as pd
 class InspectionConfig:
     """
     Runtime configuration for inspection
-    (점검 실행 설정)
     """
     input_path: Path
     output_dir: Path
@@ -46,7 +44,6 @@ class InspectionConfig:
 class CuratedOutputInspector:
     """
     Inspect curated OD output
-    (curated OD 결과 점검)
     """
 
     REQUIRED_COLUMNS = [
@@ -76,7 +73,6 @@ class CuratedOutputInspector:
         """
         Normalize a single column name by removing hidden/control characters
         and trailing commas.
-        (숨은 문자/제어문자와 마지막 꼬리 쉼표를 제거해서 컬럼명을 정규화)
         """
         return (
             str(column_name)
@@ -107,11 +103,10 @@ class CuratedOutputInspector:
         ).fillna("")
 
         # Aggressive column normalization
-        # (BOM, null char, 개행, 탭, 공백, 마지막 쉼표 제거)
         self.df.columns = [self.normalize_column_name(col) for col in self.df.columns]
 
         if self.config.debug_columns:
-            print("\nNormalized column names (정규화된 컬럼명):")
+            print("\nNormalized column names:")
             print([repr(col) for col in self.df.columns])
 
     def validate_columns(self) -> None:

@@ -1,5 +1,5 @@
 @echo off
-REM Example runner. (실행 예시)
+REM Example runner.
 
 set DB_URL=postgresql://postgres:330218@localhost:5432/Seoul_Transit
 

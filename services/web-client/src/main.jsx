@@ -6,7 +6,6 @@ import App from "./App.jsx";
 
 /**
  * React application entry point.
- * (React 애플리케이션 실행 진입점이다.)
  */
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>

@@ -124,7 +124,7 @@ function UnmatchedDistrictWarning({ unmatchedDistrictCodes }) {
   );
 }
 
-/** Renders aggregate district totals. (행정동 집계 합계를 렌더링합니다.) */
+/** Renders aggregate district totals. */
 function DistrictSummary({ districtDemand }) {
   return (
     <section style={subSectionStyle}>

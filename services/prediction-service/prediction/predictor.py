@@ -7,8 +7,7 @@ from prediction.model_loader import ModelBundle
 
 class Predictor:
     """
-    EN: Runs XGBoost inference and hourly distribution.
-    KR: XGBoost 추론과 시간대별 분배를 수행한다.
+    Runs XGBoost inference and hourly distribution.
     """
 
     def __init__(self):
@@ -23,13 +22,9 @@ class Predictor:
 
     def predict(self, payload: dict) -> dict:
         """
-        EN: Runs one prediction request.
-        KR: 단일 예측 요청을 처리한다.
-
-        EN: The improved model predicts log1p(passenger_count), so its output is
+        Runs one prediction request.
+        The improved model predicts log1p(passenger_count), so its output is
         converted back with expm1 before building the API response.
-        KR: 개선 모델은 log1p(passenger_count)를 예측하므로, API 응답 생성 전에
-        expm1로 실제 승객 수 단위로 복원한다.
         """
         features = self.feature_builder.build(payload)
         raw_prediction = float(self.bundle.model.predict(features)[0])

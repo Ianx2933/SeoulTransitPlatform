@@ -1,5 +1,5 @@
 @echo off
-REM Lightweight Phase 6.5 runner. (경량 Phase 6.5 실행 예시)
+REM Lightweight Phase 6.5 runner.
 
 set DB_URL=postgresql://postgres:330218@localhost:5432/Seoul_Transit
 set SUBWAY_CSV_DIR=C:\Users\miyum\SeoulTransitPlatform\data\subway_hourly

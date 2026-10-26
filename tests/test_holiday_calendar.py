@@ -83,8 +83,6 @@ def holidays(holiday_path):
 @pytest.fixture(scope="module")
 def holiday_frame(holiday_path):
     # Try UTF-8 first; some UTF-8 byte sequences also decode as cp949 incorrectly.
-    # (UTF-8을 먼저 시도한다. 일부 UTF-8 바이트열은 cp949로도 오류 없이, 그러나
-    #  잘못 해석된다.)
     try:
         return pd.read_csv(holiday_path, encoding="utf-8-sig", dtype=str)
     except UnicodeDecodeError:

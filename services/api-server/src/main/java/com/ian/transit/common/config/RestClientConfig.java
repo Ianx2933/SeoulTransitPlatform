@@ -27,10 +27,10 @@ public class RestClientConfig {
     public RestTemplate restTemplate() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
 
-        // Bound connection wait time. (연결 대기 시간을 제한합니다.)
+        // Bound connection wait time.
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
 
-        // Bound downstream response wait time. (하위 서비스 응답 대기 시간을 제한합니다.)
+        // Bound downstream response wait time.
         requestFactory.setReadTimeout(READ_TIMEOUT);
 
         return new RestTemplate(requestFactory);

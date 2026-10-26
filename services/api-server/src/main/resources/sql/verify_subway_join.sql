@@ -1,5 +1,4 @@
 -- Verify unmatched subway demand rows after alias correction
--- (alias 보정 후 매칭되지 않는 지하철 수요 행을 검증한다.)
 
 WITH resolved_alias AS (
     SELECT DISTINCT ON (d.service_id, d.node_name)

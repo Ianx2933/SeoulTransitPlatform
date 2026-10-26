@@ -73,7 +73,7 @@ public class PredictionFeatureService {
                 routeNo,
                 paddedArsNo,
                 strippedArsNo,
-                targetDate.format(DATE_FORMAT)  // "20251111" 형식
+                targetDate.format(DATE_FORMAT)  // "20251111" FORMAT
         );
 
         return result == null ? 0.0 : result;

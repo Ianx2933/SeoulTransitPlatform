@@ -7,8 +7,7 @@ import pandas as pd
 
 class ModelBundle:
     """
-    EN: Loads and keeps prediction model artifacts in memory.
-    KR: 예측 모델 산출물을 메모리에 로드하여 보관한다.
+    Loads and keeps prediction model artifacts in memory.
     """
 
     DEFAULT_FEATURE_COLUMNS = [
@@ -43,8 +42,7 @@ class ModelBundle:
 
     def _load_feature_defaults(self) -> dict:
         """
-        EN: Loads serving defaults for feature columns added during model improvement.
-        KR: 모델 개선 과정에서 추가된 feature column의 serving 기본값을 로드한다.
+        Loads serving defaults for feature columns added during model improvement.
         """
         path = self.model_dir / "feature_defaults.json"
         if not path.exists():
@@ -63,8 +61,7 @@ class ModelBundle:
 
     def _resolve_target_transform(self) -> str | None:
         """
-        EN: Detects whether the model predicts raw passengers or log1p(passengers).
-        KR: 모델이 실제 승객 수를 직접 예측하는지 log1p(승객수)를 예측하는지 판별한다.
+        Detects whether the model predicts raw passengers or log1p(passengers).
         """
         return (
             self.feature_defaults.get("targetTransform")

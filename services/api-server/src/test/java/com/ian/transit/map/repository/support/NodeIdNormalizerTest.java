@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Unit tests for {@link NodeIdNormalizer}.
- * (NodeIdNormalizer 단위 테스트입니다.)
  */
 class NodeIdNormalizerTest {
 

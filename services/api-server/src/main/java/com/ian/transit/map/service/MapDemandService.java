@@ -173,7 +173,7 @@ public class MapDemandService {
     }
 
     /**
-     * Loads district-centered all-route demand. (행정동 중심 전체 노선 수요를 불러옵니다.)
+     * Loads district-centered all-route demand.
      */
     public DistrictDemandResponse getDistrictDemand(
             String districtCode,
@@ -300,7 +300,7 @@ public class MapDemandService {
     private String validateAndNormalizeKeyword(String keyword) {
         if (keyword == null || keyword.isBlank()) {
             throw new IllegalArgumentException(
-                    "keyword must not be blank (검색어가 비어 있습니다)"
+                    "keyword must not be blank"
             );
         }
 
@@ -308,8 +308,7 @@ public class MapDemandService {
 
         if (trimmedKeyword.length() < 2) {
             throw new IllegalArgumentException(
-                    "keyword must contain at least 2 characters " +
-                    "(검색어는 최소 2글자 이상이어야 합니다)"
+                    "keyword must contain at least 2 characters "
             );
         }
 
