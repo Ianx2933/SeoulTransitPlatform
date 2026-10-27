@@ -449,10 +449,24 @@ firebase.json           Hosting config and the /api/** rewrite to Cloud Run
 - Basemap: © OpenStreetMap contributors.
 
 Secrets are never committed; `.env.example` holds placeholders only. In the
-deployed environment `DB_PASSWORD` and `SEOUL_BUS_API_KEY` come from Secret
-Manager. `ADMIN_API_TOKEN` is deliberately left unset in deployment, so the
+deployed environment the database credentials and both Seoul Open API keys come
+from Secret Manager, and each secret is readable only by the service that uses
+it. `ADMIN_API_TOKEN` is deliberately left unset in deployment, so the
 `/api/od-correction/**` endpoints — which issue UPDATE and DELETE statements —
 reject every request rather than depending on a token staying secret.
+
+**Runtime identities.** The API, prediction service, collector job and its
+scheduler each run as a dedicated service account with only the access they
+need: Cloud SQL for the API and collector, their own secrets, `run.invoker` on
+the private prediction service for the API, and on the collector job for the
+scheduler. The prediction service holds no permissions at all. The default
+Compute Engine account, which carries `roles/editor`, is not used.
+
+**API keys stay out of logs.** The Seoul Open API takes its key as a URL path
+segment, and `requests` copies the full URL into timeout and connection error
+messages. The loader and the bus API client re-raise those errors with the key
+redacted and without exception chaining, and tests assert that neither the
+message nor the traceback contains the key.
 
 ## Known gaps
 
@@ -479,9 +493,12 @@ Tracked here so they are visible rather than discovered during deployment.
 8. The deployed schema differs from the local one: `pg_dump -t` did not carry the
    terrain guard functions, so the four guard triggers do not exist in Cloud SQL.
    Serving is unaffected because the API only reads those tables.
-9. Two separate Seoul Open API keys are in use. Using the wrong one does not
-   fail: the service answers `INFO-000` with an empty result, so the loader
-   reports zero rows and exits successfully.
+9. A key the API does not accept does not fail: the service answers with an
+   empty result, so the loader reports zero rows and exits successfully. This
+   happened in practice when a key was stored with a trailing CRLF; keys are now
+   stripped on load, but a wrong key or a month not yet published still passes
+   silently. Two separate Seoul Open API keys are in use, which makes the first
+   case easy to hit.
 
 ## Next work
 
@@ -499,5 +516,7 @@ Tracked here so they are visible rather than discovered during deployment.
 6. Extend the warehouse — district dimension, Airflow orchestration of the load,
    and a Type 2 decision for stop renames: the 1,815 Gyeonggi stops carry 2,963
    distinct names.
+7. Treat a zero-row load as a failure for months old enough to have been
+   published, so an invalid key cannot pass as a successful run.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
