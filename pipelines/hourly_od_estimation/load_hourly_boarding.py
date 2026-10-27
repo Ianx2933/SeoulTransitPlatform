@@ -357,6 +357,7 @@ def main():
             "  export PIPELINE_DB_URL="
             "'postgresql+psycopg2://postgres:PASSWORD@localhost:5432/Seoul_Transit'"
         )
+    args.api_key = (args.api_key or "").strip()
 
     if not args.api_key:
         raise SystemExit(
