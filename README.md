@@ -45,7 +45,8 @@ contracts are still visible in the OpenAPI document.
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes — [details](#performance-district-demand) |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
-| **Analytical warehouse** | Partitioned BigQuery star schema for the analytical half, validated row-for-row against PostGIS on an initial six-month load; serving stays in PostGIS — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery) |
+| **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 32 months (29.9M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
+| **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention — [details](#backups) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Data quality and validation
@@ -267,7 +268,7 @@ surface-model caveat on the slope values themselves.
 | Pipelines | Python, Airflow |
 | Multidimensional analysis | xarray, dask, netCDF |
 | Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
-| Analytical warehouse | BigQuery (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
+| Analytical warehouse | BigQuery, dbt (private repository) |
 | Local infra | Docker Compose |
 | Deployment | Cloud Run, Cloud SQL (PostgreSQL 18 + PostGIS), Artifact Registry, Secret Manager, Firebase Hosting |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
@@ -304,46 +305,134 @@ which is the intended workflow rather than a maintenance burden.
 Index SQL: `database/performance/district_demand_indexes.sql`
 Analysis: [`docs/performance/district_demand_optimization.md`](docs/performance/district_demand_optimization.md)
 
-## Analytical warehouse: what moved to BigQuery
+## Analytical warehouse (BigQuery and dbt)
 
-The analytical half of the platform has a BigQuery counterpart: a partitioned,
-clustered star schema in
-[transit-bigquery](https://github.com/Ianx2933/transit-bigquery). The current
-load covers six months (2025-01 to 2025-06) and was reconciled row-for-row
-against PostGIS, but it predates the [loader fix](#data-quality-and-validation);
-reloading the rebuilt 32 months is the next step.
+The serving API reads from PostgreSQL. Analysis runs on a separate BigQuery warehouse built
+from the same data. The warehouse code is in a private repository; this section summarizes
+it.
 
-The serving endpoints stayed here. BigQuery is columnar and scan-priced, with no
-concept of a sub-second point lookup — the sub-second district-demand path above
-is a serving concern, and moving it would have undone the indexing work it
-depends on.
-So the split is by workload, not by table:
+- **Load:** a Python script copies 13 PostgreSQL tables 1:1 into a staging dataset. It writes
+  checksums and per-month row and passenger totals at export, then recomputes the monthly
+  totals in BigQuery after loading and stops if any month differs.
+- **Transform:** dbt builds the dimensional model from staging. 8 models, 25 tests.
+- **Data:** 32 months (2024-01 to 2026-08), 29.9M rows of hourly boarding by route and stop,
+  taken from the corrected source after the [loader fix](#data-quality-and-validation).
+
+```mermaid
+flowchart LR
+  subgraph staging["transit_staging (1:1 copy)"]
+    s1[hourly_bus_stop_passenger]
+    s2[bus_stop_location]
+    s3[bus_stop_terrain_stats]
+    s4[terrain_active_dataset]
+  end
+
+  s1 --> stg1[stg_hourly_boarding]
+  s2 --> stg2[stg_bus_stop_location]
+  s3 --> stg3[stg_bus_stop_terrain]
+  s4 --> stg3
+
+  stg1 --> fct[fct_boarding]
+  stg1 --> dr[dim_route]
+  stg1 --> ds[dim_stop]
+  stg2 --> ds
+  stg3 --> ds
+  stg1 --> h[dim_stop_name_history]
+  stg1 --> rs[route_stop_sequence]
+```
+
+### What stayed in PostGIS
+
+BigQuery is columnar and priced by bytes scanned. It has no equivalent of the sub-second
+point lookups the serving path depends on, so the split follows the workload rather than the
+tables:
 
 | Stays in PostGIS | Moved to BigQuery |
 |---|---|
 | District-demand and node-catchment endpoints | Hourly boarding facts |
-| `ST_Covers` against dong polygons at query time | Aggregations by route, stop, hour |
+| `ST_Covers` against dong polygons at query time | Aggregations by route, stop and hour |
 | GIST-indexed spatial predicates | Terrain statistics joined to stops |
-| Anything with a latency budget | Ad-hoc analyst queries |
+| Anything with a latency target | Ad-hoc analysis |
 
-**No date dimension.** The warehoused source has primary key
-`(use_ym, route_no, stop_ars, hour)` — a monthly hourly aggregate with no
-day-level detail. A dense date dimension would imply observations that do not
-exist.
+### Modelling decisions
 
-**Integer partitioning, not date.** Day-partitioned historical data expires on
-arrival under the sandbox's non-negotiable 60-day partition expiry, which is
-measured from the partition's own date rather than from load time. The load job
-reports `DONE`, the table holds zero rows, and no error is raised anywhere. This
-is the same class of silent-emptying failure the terrain snapshots were designed
-around.
+**No date dimension.** The source key is `(use_ym, route_no, stop_ars, hour)`: a monthly
+aggregate by hour with no daily detail. A daily date dimension would suggest observations
+that do not exist.
 
-**Unmatched stops kept, not dropped.** 1,816 of 12,529 stops do not resolve
-against the Seoul stop master — Gyeonggi-do stops on cross-boundary routes, plus
-route terminus markers. They are carried with a `match_method` column, the same
-per-row provenance discipline the four-stage OD recovery already uses here, so
-aggregate totals reconcile against the source and analysts exclude them
-explicitly rather than inheriting a silently filtered universe.
+**Integer partitioning on the month.** The warehouse started in the BigQuery sandbox, where
+partitions expire 60 days after the partition's own date. A day-partitioned table of 2025
+data was empty right after loading, with the job reporting `DONE` and no error. Partitioning
+on an integer `YYYYMM` avoids the rule and matches the monthly grain.
+
+**Sandbox settings stay after billing is enabled.** Linking a billing account did not remove
+the 60-day expiration already set on the datasets and on each table. By the time this was
+checked, the staging tables had been deleted and the warehouse tables were seven days from
+deletion. The expirations were cleared per dataset and per table, and staging was reloaded.
+
+**Unmatched stops are kept.** 2,045 of 12,845 stops do not match the Seoul stop master:
+2,044 Gyeonggi-do stops on routes that cross the city boundary, and one code (`~`) used for
+route terminus markers. They stay in `dim_stop` with a `match_method` column so totals
+reconcile against the source and analysts exclude them on purpose.
+
+### Tests
+
+`dbt build` runs the models and tests together. If a test fails, the build stops and the
+production dataset is not updated. Builds are run by hand for now; scheduled runs are planned
+with Airflow.
+
+| Test | Fails when |
+|---|---|
+| Monthly reconciliation to staging | Any month's row count or passenger totals differ from the source copy |
+| Unique fact grain | A (month, route, stop, hour) row appears twice |
+| Stop count | `dim_stop` does not hold exactly the distinct stops in the source |
+| Referential integrity | A route or stop in the fact table has no dimension row |
+| Route type | A route name matches none of the classification rules |
+
+The reconciliation compares totals by month and does not join to the stop table. An earlier
+validation query that joined to stops counted some rows twice and overstated boardings by
+127,070.
+
+| | PostgreSQL | BigQuery |
+|---|---|---|
+| Rows | 29,855,640 | 29,855,640 |
+| Boardings | 4,509,456,552 | 4,509,456,552 |
+| Months | 32 | 32 |
+| Distinct stops | 12,845 | 12,845 |
+
+### What the modelling found
+
+**Stop names.** Source stop names end with the stop's position on the route, for example
+`동묘앞(00029)`. The same stop has a different number on each route that serves it, so 68%
+of Seoul stops looked renamed over 32 months. With the number moved to its own column, 14%
+(1,468 of 10,800) had real name changes, mostly exit numbers added or developments renamed.
+An earlier six-month analysis had reported "1,815 Gyeonggi stops with 2,963 names" for the
+same reason; the real figure is 156 of 2,044. Village and city buses also label some stops
+differently (`서울숲1번출입구` on 성동13, `서울숲1번출구` on 121).
+
+**Route types.** The 702 routes are classified from their numbers: village 260, branch 220,
+trunk 134, commuter 31, custom 28, night 14, express 10, circular 2, autonomous 2, and the
+Han River ferry. A trailing A or B marks a variant line of the same route. The source has no
+Gyeonggi-registered routes; Gyeonggi stops come from Seoul routes that cross the city
+boundary.
+
+## Backups
+
+In October 2026 the local PostgreSQL data directory disappeared. The cause was not found.
+The database was restored from a single full dump that happened to exist from a few weeks
+earlier, and the warehouse reload above was taken from that restore.
+
+`ops/backup_pg.ps1` now runs weekly from Windows Task Scheduler:
+
+1. `pg_dump` of the whole database in custom format.
+2. Checks before upload: `pg_restore` can read the dump, the core tables are present with
+   data, and the file is over a minimum size. A dump that fails any check is not uploaded.
+3. Upload to a private Cloud Storage bucket in `asia-northeast3`, then a size comparison
+   between the local and uploaded file.
+4. Only the newest dump is kept locally. A bucket lifecycle rule deletes objects after 60
+   days.
+
+The database password is read from `pgpass.conf` outside the repository.
 
 ## Status
 
@@ -354,7 +443,8 @@ explicitly rather than inheriting a silently filtered universe.
 | Terrain snapshots and stop/dong screening API | Done |
 | Hourly pipeline rebuild, 2024-01 to 2026-08 | Done, validated |
 | GCP deployment: serving path and monthly ingestion | Live, closed beta |
-| BigQuery star schema | Built; six-month pre-fix load, 32-month reload pending |
+| BigQuery warehouse | 32 months loaded and modelled in dbt; 25 tests passing |
+| Weekly database backup | Running, verified before upload |
 | Airflow orchestration | Correction DAG running locally; remaining modules by hand |
 
 ## Quick start
@@ -427,6 +517,7 @@ database/schema/        Schema creation scripts, run in numeric order
 database/performance/   Performance index scripts
 database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
+ops/                    Weekly database backup script and bucket lifecycle rule
 pipelines/              Python data pipelines by phase
 pipelines/airflow/      Airflow DAGs
 pipelines/analysis/     xarray demand profiling against terrain bands
@@ -484,9 +575,9 @@ Tracked here so they are visible rather than discovered during deployment.
    artifact names are documented in `services/prediction-service/README.md`.
 5. Terrain snapshots are published manually; there is no scheduled job to
    re-publish when the DEM or the boundary release changes.
-6. Outputs derived from the hourly table before the rebuild have not been
-   regenerated: the BigQuery warehouse load and the xarray terrain profile above.
-   Both predate the loader fix, so their totals are understated.
+6. The xarray terrain profile above was computed before the loader fix and has
+   not been regenerated, so its totals are understated. The BigQuery warehouse
+   has been reloaded from the corrected data.
 7. Temporary, election and substitute holidays are not asserted against an
    external source. A one-off holiday simply absent from the CSV would still pass
    unnoticed.
@@ -502,8 +593,7 @@ Tracked here so they are visible rather than discovered during deployment.
 
 ## Next work
 
-1. Reload the rebuilt 32 months into BigQuery and re-run the xarray terrain
-   profile on corrected data.
+1. Re-run the xarray terrain profile on corrected data.
 2. Move the remaining pipeline modules behind Airflow; only the correction DAG
    is migrated so far.
 3. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
@@ -513,9 +603,8 @@ Tracked here so they are visible rather than discovered during deployment.
 5. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
    and compare the two snapshots — the versioning scheme exists to make exactly
    that comparison possible.
-6. Extend the warehouse — district dimension, Airflow orchestration of the load,
-   and a Type 2 decision for stop renames: the 1,815 Gyeonggi stops carry 2,963
-   distinct names.
+6. Extend the warehouse: a district dimension and Airflow orchestration of the
+   export, load and `dbt build`.
 7. Treat a zero-row load as a failure for months old enough to have been
    published, so an invalid key cannot pass as a successful run.
 
