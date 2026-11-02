@@ -141,17 +141,23 @@ services:
       TRANSIT_API_BASE_URL: http://api-server:8080
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
       SEOUL_HOURLY_API_KEY: ${SEOUL_HOURLY_API_KEY:-}
+    # Every line of a folded (>) block must share one indentation. Lines indented
+    # further keep their newline, and bash then reads "--firstname ..." as a
+    # separate command, so the admin user was never created.
     command: >
       bash -c "airflow db migrate &&
-               airflow users create --username admin --password ${AIRFLOW_ADMIN_PASSWORD:-admin}
-               --firstname admin --lastname admin --role Admin --email admin@example.com"
+      airflow users create --username admin --password ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      --firstname admin --lastname admin --role Admin --email admin@example.com"
 
   airflow-webserver:
     profiles: ["airflow"]
     image: apache/airflow:2.9.0
     container_name: seoul-transit-airflow-web
+    # Wait for init to finish. Without the condition the webserver and
+    # scheduler start alongside init, before the metadata database exists.
     depends_on:
-      - airflow-init
+      airflow-init:
+        condition: service_completed_successfully
     ports:
       - "8081:8080"
     environment: *airflow_env
@@ -163,8 +169,11 @@ services:
     profiles: ["airflow"]
     image: apache/airflow:2.9.0
     container_name: seoul-transit-airflow-scheduler
+    # Wait for init to finish. Without the condition the webserver and
+    # scheduler start alongside init, before the metadata database exists.
     depends_on:
-      - airflow-init
+      airflow-init:
+        condition: service_completed_successfully
     environment: *airflow_env
     volumes:
       - ./pipelines/airflow/dags:/opt/airflow/dags
@@ -173,3 +182,4 @@ services:
 volumes:
   postgres_data:
   airflow_db_data:
+  
