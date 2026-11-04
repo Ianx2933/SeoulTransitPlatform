@@ -103,6 +103,24 @@ so the curated OD API could serve the Incheon code for them until both were
 cleaned the same way on 2026-11-04. Correction now uses that table instead of
 the API, and a test checks that different stops get different codes.
 
+A sixth defect sat in the same table and was larger. About 1–2% of rows had a
+standard code that belonged to a different stop than their ARS number: 0.8% on
+2023-10-17 and 2024-10-19, 1.7% on 2025-10-14 and 2.0% on 2025-11-11, the OD
+estimation day. OD correction took codes from a reference file by route and
+position on the route, without checking that the stop at that position was the
+same. On routes that had gained or lost stops since the reference was made,
+every later stop took the code of a neighbour a fixed number of places along.
+On 2025-10-14, 75% of the wrong codes belonged to another stop on the same route
+that day, most often two places along (17 routes) or four (8 routes). The same
+wrong route, position and code combinations recur on all four dates, which is
+what one reference applied to every date would produce. Correction now looks up
+codes in the stop master by ARS first, uses the reference only where the ARS
+at that position matches, fills by stop name only rows with no ARS, and fails
+if any code disagrees with the master. A test rebuilds a route with one stop
+inserted; the old code gives the next stop its neighbour's code and fails it.
+In both databases 117,110 rows were copied aside and 71,071 boarding and
+85,323 alighting codes rewritten from the master.
+
 How each defect was found, ruled in, and fixed — including the virtual-stop
 filter and the change from an underdetermined to an overdetermined ratio model —
 is in **[the hourly pipeline rebuild](docs/analysis/hourly_pipeline_rebuild.md)**.
@@ -639,13 +657,11 @@ Tracked here so they are visible rather than discovered during deployment.
    other than `INFO-000`, except `INFO-200` (month not published yet), which
    ends a scheduled run successfully with nothing loaded. Seven tests cover
    the cases.
-10. About 1–2% of rows in `analysis_table_final` carry a standard stop code that
-    does not match their ARS number in the stop master: 0.8% on 2023-10-17 and
-    2024-10-19, 1.7% on 2025-10-14 and 2.0% on 2025-11-11, the OD estimation day.
-    One code can cover several different stops (`112000054` appears on 염천교,
-    서울역 and 충정로역). The rate rises in recent dates, so an outdated stop
-    master is unlikely to be the cause. Not yet traced; the next step is to
-    check whether OD estimation joins stops on ARS or on the standard code.
+10. About 8% of boarding and alighting stops in `analysis_table_final` cannot be
+    checked against the stop master, because their ARS number is not in it or
+    maps to more than one node. Their standard codes came from the same
+    position-based join as the sixth defect in Data quality and may still be
+    shifted.
 
 ## Next work
 
@@ -664,6 +680,8 @@ Tracked here so they are visible rather than discovered during deployment.
 6. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-7. Trace the standard-code mismatches in Known gap 10.
+7. Find out what the unchecked stops in Known gap 10 are (stops outside Seoul,
+   closed stops, or ARS numbers shared by two nodes) and check their codes
+   another way.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.

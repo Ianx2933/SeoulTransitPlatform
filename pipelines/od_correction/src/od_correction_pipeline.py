@@ -38,6 +38,16 @@ class PipelineConfig:
     raw_encoding: str = "cp949"
     reference_encoding: str = "utf-8-sig"
     output_encoding: str = "utf-8-sig"
+    # Pipe-separated export of bus_stop_location with columns 정류장번호, 노드id.
+    # When given, it is the first source of standard codes and the output is
+    # checked against it.
+    stop_master_path: Path | None = None
+
+
+def ars5(series: pd.Series) -> pd.Series:
+    """ARS as a 5-digit string, or "" when missing. Used only as a join key."""
+    s = series.fillna("").astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    return s.where(s.eq(""), s.str.zfill(5))
 
 
 class ODCorrectionPipeline:
@@ -101,6 +111,7 @@ class ODCorrectionPipeline:
         self.raw_df: pd.DataFrame | None = None
         self.reference_df: pd.DataFrame | None = None
         self.curated_df: pd.DataFrame | None = None
+        self.stop_master: dict[str, str] | None = None
 
     def log(self, message: str) -> None:
         print(message)
@@ -145,6 +156,29 @@ class ODCorrectionPipeline:
             dtype={"노선명": str, "전환_노선ID": str},
             low_memory=False,
         )
+
+        if self.config.stop_master_path is not None:
+            master = pd.read_csv(
+                self.config.stop_master_path,
+                sep="|",
+                encoding="utf-8-sig",
+                dtype=str,
+            )
+            self.stop_master = self.build_stop_master(master)
+            self.log(f"Stop master: {len(self.stop_master):,} unambiguous ARS")
+        else:
+            self.log("WARNING: no --stop-master given; codes come from the reference only")
+
+    @staticmethod
+    def build_stop_master(master: pd.DataFrame) -> dict[str, str]:
+        """ARS -> node ID, keeping only ARS with exactly one distinct node."""
+        df = pd.DataFrame({
+            "ars": ars5(master["정류장번호"]),
+            "node": master["노드id"].fillna("").astype(str).str.strip(),
+        })
+        df = df[df["ars"].ne("") & df["node"].ne("")].drop_duplicates()
+        counts = df.groupby("ars")["node"].transform("nunique")
+        return dict(df.loc[counts.eq(1), ["ars", "node"]].drop_duplicates("ars").values)
 
     @staticmethod
     def normalize_date(series: pd.Series) -> pd.Series:
@@ -304,43 +338,46 @@ class ODCorrectionPipeline:
         self.raw_df = df
 
     def map_standard_codes(self) -> None:
+        """Fill standard codes, first from the stop master by ARS, then from
+        the reference only where the reference has the same ARS at that
+        route position.
+
+        The reference used to be joined on (route ID, sequence) alone. When a
+        route gained or lost stops after the reference was made, every later
+        position took the code of a stop two or four places along. Requiring
+        the ARS to match turns that into "no code" instead of a wrong code.
+        """
         assert self.raw_df is not None
         assert self.reference_df is not None
 
-        boarding_lookup = (
-            self.reference_df[["전환_노선ID", "승차_정류장순번", "승차_정류장표준코드"]]
-            .drop_duplicates(subset=["전환_노선ID", "승차_정류장순번"])
-        )
+        df = self.raw_df.copy()
 
-        alighting_lookup = (
-            self.reference_df[["전환_노선ID", "하차_정류장순번", "하차_정류장표준코드"]]
-            .drop_duplicates(subset=["전환_노선ID", "하차_정류장순번"])
-        )
+        for side in ("승차", "하차"):
+            ars_col = f"{side}_정류장ARS"
+            seq_col = f"{side}_정류장순번"
+            code_col = f"{side}_정류장표준코드"
+            key_col = f"_{side}_ars5"
 
-        df = self.raw_df.merge(
-            boarding_lookup,
-            on=["전환_노선ID", "승차_정류장순번"],
-            how="left",
-            suffixes=("", "_ref"),
-        )
+            df[key_col] = ars5(df[ars_col])
+            df[code_col] = df[code_col].fillna("").astype(str)
 
-        df["승차_정류장표준코드"] = df["승차_정류장표준코드"].replace("", pd.NA)
-        df["승차_정류장표준코드"] = df["승차_정류장표준코드"].fillna(df["승차_정류장표준코드_ref"])
-        df.drop(columns=["승차_정류장표준코드_ref"], inplace=True)
+            if self.stop_master:
+                from_master = df[key_col].map(self.stop_master).fillna("")
+                df[code_col] = df[code_col].where(df[code_col].ne(""), from_master)
 
-        df = df.merge(
-            alighting_lookup,
-            on=["전환_노선ID", "하차_정류장순번"],
-            how="left",
-            suffixes=("", "_ref"),
-        )
+            ref = self.reference_df[["전환_노선ID", seq_col, code_col]].copy()
+            ref[key_col] = ars5(self.reference_df[ars_col])
+            ref = ref[ref[key_col].ne("")]
+            lookup = self._build_unambiguous_lookup(
+                ref, ["전환_노선ID", seq_col, key_col], code_col
+            ).rename(columns={code_col: f"{code_col}_ref"})
 
-        df["하차_정류장표준코드"] = df["하차_정류장표준코드"].replace("", pd.NA)
-        df["하차_정류장표준코드"] = df["하차_정류장표준코드"].fillna(df["하차_정류장표준코드_ref"])
-        df.drop(columns=["하차_정류장표준코드_ref"], inplace=True)
+            df = df.merge(lookup, on=["전환_노선ID", seq_col, key_col], how="left")
+            ref_code = df[f"{code_col}_ref"].fillna("").astype(str)
+            df[code_col] = df[code_col].where(df[code_col].ne(""), ref_code)
+            df.drop(columns=[f"{code_col}_ref", key_col], inplace=True)
 
-        df["승차_정류장표준코드"] = self.normalize_standard_code(df["승차_정류장표준코드"])
-        df["하차_정류장표준코드"] = self.normalize_standard_code(df["하차_정류장표준코드"])
+            df[code_col] = self.normalize_standard_code(df[code_col])
 
         self.raw_df = df
 
@@ -394,12 +431,20 @@ class ODCorrectionPipeline:
         return result
 
     @staticmethod
-    def _fill_by_name(df: pd.DataFrame, name_col: str, code_col: str) -> pd.DataFrame:
+    def _fill_by_name(
+        df: pd.DataFrame, name_col: str, code_col: str, ars_col: str
+    ) -> pd.DataFrame:
+        """Fill by stop name only for rows that have no ARS.
+
+        Different stops share names (several 서울역 stops, for one), so a row
+        with an ARS of its own must never borrow another stop's code by name.
+        """
         lookup = ODCorrectionPipeline._build_unambiguous_lookup(df, name_col, code_col)
 
         result = df.merge(lookup, on=name_col, how="left", suffixes=("", "_fill"))
+        no_ars = result[ars_col].fillna("").astype(str).str.strip().eq("")
         result[code_col] = result[code_col].replace("", pd.NA).astype("string")
-        fill_col = result[f"{code_col}_fill"].astype("string")
+        fill_col = result[f"{code_col}_fill"].astype("string").where(no_ars)
         result[code_col] = result[code_col].combine_first(fill_col).fillna("")
         result.drop(columns=[f"{code_col}_fill"], inplace=True)
         return result
@@ -442,8 +487,8 @@ class ODCorrectionPipeline:
     def fill_missing_by_stop_name(self) -> None:
         assert self.raw_df is not None
 
-        df = self._fill_by_name(self.raw_df, "승차_정류장명", "승차_정류장표준코드")
-        df = self._fill_by_name(df, "하차_정류장명", "하차_정류장표준코드")
+        df = self._fill_by_name(self.raw_df, "승차_정류장명", "승차_정류장표준코드", "승차_정류장ARS")
+        df = self._fill_by_name(df, "하차_정류장명", "하차_정류장표준코드", "하차_정류장ARS")
 
         df["승차_정류장표준코드"] = self.normalize_standard_code(df["승차_정류장표준코드"])
         df["하차_정류장표준코드"] = self.normalize_standard_code(df["하차_정류장표준코드"])
@@ -520,6 +565,39 @@ class ODCorrectionPipeline:
         print("\nAlighting standard code length distribution (하차 표준코드 길이 분포):")
         print(df["하차_정류장표준코드"].str.len().value_counts(dropna=False).sort_index())
 
+        self.check_codes_against_master(df)
+
+    def check_codes_against_master(self, df: pd.DataFrame) -> None:
+        """Fail when a row's code disagrees with the stop master for its ARS.
+
+        Rows whose ARS is not in the master (or is ambiguous there) cannot be
+        checked and are only counted.
+        """
+        print("\nStop master check (정류장 마스터 대조)")
+        print("-" * 70)
+        if not self.stop_master:
+            print("skipped: no stop master")
+            return
+
+        failures = []
+        for side in ("승차", "하차"):
+            key = ars5(df[f"{side}_정류장ARS"])
+            expected = key.map(self.stop_master)
+            code = df[f"{side}_정류장표준코드"].fillna("").astype(str)
+            checked = expected.notna() & code.ne("")
+            wrong = int((checked & code.ne(expected)).sum())
+            print(
+                f"{side}: checked {int(checked.sum()):,}, wrong {wrong:,}, "
+                f"not in master {int(expected.isna().sum()):,}"
+            )
+            if wrong:
+                failures.append(f"{side} {wrong:,}")
+
+        if failures:
+            raise ValueError(
+                "Standard codes disagree with the stop master: " + ", ".join(failures)
+            )
+
     def save_output(self) -> None:
         assert self.curated_df is not None
 
@@ -591,6 +669,12 @@ def parse_args() -> PipelineConfig:
     parser.add_argument("--raw-encoding", required=False, default="cp949", help="Raw CSV encoding")
     parser.add_argument("--reference-encoding", required=False, default="utf-8-sig", help="Reference CSV encoding")
     parser.add_argument("--output-encoding", required=False, default="utf-8-sig", help="Output CSV encoding")
+    parser.add_argument(
+        "--stop-master",
+        required=False,
+        default=None,
+        help="Pipe-separated export of bus_stop_location (정류장번호, 노드id)",
+    )
 
     args = parser.parse_args()
 
@@ -604,6 +688,7 @@ def parse_args() -> PipelineConfig:
         raw_encoding=args.raw_encoding,
         reference_encoding=args.reference_encoding,
         output_encoding=args.output_encoding,
+        stop_master_path=Path(args.stop_master) if args.stop_master else None,
     )
 
 
