@@ -3,10 +3,18 @@
 # Profiles let you start only what you need:
 #   docker compose up -d                      # redis + postgres only
 #   docker compose --profile app up -d        # + api-server, web-client
-#   docker compose --profile airflow up -d    # + airflow
+#   docker compose --profile airflow up -d airflow-webserver airflow-scheduler
+#                                             # airflow only (see below)
 #
 # Every credential comes from .env. Copy .env.example to .env first; no
 # password is written in this file.
+
+# Airflow image with dbt and the BigQuery client in a separate virtualenv.
+# Built once; the three Airflow services share it.
+x-airflow-image: &airflow_image
+  build:
+    context: ./pipelines/airflow
+  image: seoul-transit-airflow:2.9.0-dbt1.12
 
 services:
   postgres:
@@ -103,6 +111,12 @@ services:
   # Airflow (optional)
   # ---------------------------------------------------------------------------
   # Airflow keeps its own metadata database, separate from Seoul_Transit.
+  #
+  # Start Airflow by naming its services:
+  #   docker compose --profile airflow up -d airflow-webserver airflow-scheduler
+  # A bare `--profile airflow up -d` also starts the profile-less postgres
+  # service above, whose host port 5432 collides with a PostgreSQL install
+  # already running on the host.
   airflow-db:
     profiles: ["airflow"]
     image: postgres:16
@@ -120,8 +134,8 @@ services:
       retries: 5
 
   airflow-init:
+    <<: *airflow_image
     profiles: ["airflow"]
-    image: apache/airflow:2.9.0
     container_name: seoul-transit-airflow-init
     depends_on:
       airflow-db:
@@ -141,6 +155,16 @@ services:
       TRANSIT_API_BASE_URL: http://api-server:8080
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
       SEOUL_HOURLY_API_KEY: ${SEOUL_HOURLY_API_KEY:-}
+      # Warehouse DAG. The source is the PostgreSQL install on the host, not the
+      # postgres service above, so it gets its own connection settings. The
+      # password is read by the task at run time; it is not a DAG parameter.
+      WAREHOUSE_PG_HOST: ${WAREHOUSE_PG_HOST:-host.docker.internal}
+      WAREHOUSE_PG_PORT: ${WAREHOUSE_PG_PORT:-5432}
+      WAREHOUSE_PG_USER: ${WAREHOUSE_PG_USER:-postgres}
+      WAREHOUSE_PG_DATABASE: ${WAREHOUSE_PG_DATABASE:-Seoul_Transit}
+      WAREHOUSE_PG_PASSWORD: ${WAREHOUSE_PG_PASSWORD:-}
+      WAREHOUSE_BQ_PROJECT: ${WAREHOUSE_BQ_PROJECT:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /home/airflow/gcloud/application_default_credentials.json
     # Every line of a folded (>) block must share one indentation. Lines indented
     # further keep their newline, and bash then reads "--firstname ..." as a
     # separate command, so the admin user was never created.
@@ -150,8 +174,8 @@ services:
       --firstname admin --lastname admin --role Admin --email admin@example.com"
 
   airflow-webserver:
+    <<: *airflow_image
     profiles: ["airflow"]
-    image: apache/airflow:2.9.0
     container_name: seoul-transit-airflow-web
     # Wait for init to finish. Without the condition the webserver and
     # scheduler start alongside init, before the metadata database exists.
@@ -163,11 +187,13 @@ services:
     environment: *airflow_env
     volumes:
       - ./pipelines/airflow/dags:/opt/airflow/dags
+      # Shared with the scheduler so the UI can show task logs.
+      - airflow_logs:/opt/airflow/logs
     command: webserver
 
   airflow-scheduler:
+    <<: *airflow_image
     profiles: ["airflow"]
-    image: apache/airflow:2.9.0
     container_name: seoul-transit-airflow-scheduler
     # Wait for init to finish. Without the condition the webserver and
     # scheduler start alongside init, before the metadata database exists.
@@ -175,11 +201,23 @@ services:
       airflow-init:
         condition: service_completed_successfully
     environment: *airflow_env
+    # With LocalExecutor, tasks run inside this container, so the warehouse
+    # mounts are needed here only. All host paths can be overridden in .env.
     volumes:
       - ./pipelines/airflow/dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - airflow_exports:/opt/airflow/exports
+      # The private transit-bigquery repository: loader script and dbt project.
+      - ${TRANSIT_BIGQUERY_DIR:-../transit_bigquery}:/opt/transit_bigquery:ro
+      # dbt connection profiles (kept outside both repositories).
+      - ${DBT_PROFILES_HOST_DIR:-${USERPROFILE}/.dbt}:/home/airflow/.dbt:ro
+      # Application Default Credentials from `gcloud auth application-default login`.
+      # Only this file is mounted, not the whole gcloud configuration.
+      - ${GCLOUD_ADC_FILE:-${APPDATA}/gcloud/application_default_credentials.json}:/home/airflow/gcloud/application_default_credentials.json:ro
     command: scheduler
 
 volumes:
   postgres_data:
   airflow_db_data:
-  
+  airflow_logs:
+  airflow_exports:
