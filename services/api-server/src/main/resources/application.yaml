@@ -27,7 +27,6 @@
 #                      default: false. Set true on Cloud Run, where the prediction
 #                      service rejects unauthenticated calls and the client must
 #                      attach a Google-signed ID token.
-#   SEOUL_BUS_API_KEY  Seoul bus master API key.
 #
 # Cloud Run deployment sets, at minimum:
 #   CACHE_TYPE=caffeine
@@ -101,8 +100,3 @@ prediction:
     # application default credentials are present. True on Cloud Run, where the
     # prediction service is deployed without public access.
     auth-enabled: ${PREDICTION_SERVICE_AUTH_ENABLED:false}
-
-seoul:
-  bus:
-    api:
-      key: ${SEOUL_BUS_API_KEY:}
