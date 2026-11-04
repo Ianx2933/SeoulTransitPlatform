@@ -97,9 +97,11 @@ Runs on 2023-10-17, 2024-10-19 and 2025-10-14 wrote it into 396 rows: 256
 boarding and 144 alighting codes. For later runs the stored key no longer
 matched, the API answered 404, and correction quietly fixed nothing. The rows
 were copied aside, cleared and refilled from the local stop master, whose node
-ID matches the source's standard ID for 10,685 of 10,686 stops. Correction now
-uses that table instead of the API, and a test checks that different stops get
-different codes.
+ID matches the source's standard ID for 10,685 of 10,686 stops. The deployed
+Cloud SQL database had been migrated from the local one with the same 396 rows,
+so the curated OD API could serve the Incheon code for them until both were
+cleaned the same way on 2026-11-04. Correction now uses that table instead of
+the API, and a test checks that different stops get different codes.
 
 How each defect was found, ruled in, and fixed — including the virtual-stop
 filter and the change from an underdetermined to an overdetermined ratio model —
