@@ -615,16 +615,21 @@ Tracked here so they are visible rather than discovered during deployment.
 8. The deployed schema differs from the local one: `pg_dump -t` did not carry the
    terrain guard functions, so the four guard triggers do not exist in Cloud SQL.
    Serving is unaffected because the API only reads those tables.
-9. A key the API does not accept does not fail: the service answers with an
-   empty result, so the loader reports zero rows and exits successfully. This
-   happened in practice when a key was stored with a trailing CRLF; keys are now
-   stripped on load, but a wrong key or a month not yet published still passes
-   silently. Two separate Seoul Open API keys are in use, which makes the first
-   case easy to hit. It also reached the deployed API: in November 2026 the key
-   behind `SEOUL_BUS_API_KEY` in Secret Manager turned out to be invalid
-   (`INFO-100`), with no error anywhere. It was replaced and the old secret
-   version disabled; the API still does not treat a non-`INFO-000` response as
-   an error.
+9. Until November 2026 a key the API did not accept loaded zero rows and exited
+   successfully. The loader did check the result code, but only where a
+   successful response puts it: inside the service element. Error responses
+   (invalid key, no data) return `RESULT` as the document root, so the check
+   never ran. This happened in practice when a key was stored with a trailing
+   CRLF. The loader now reads `RESULT` from either place and fails on any code
+   other than `INFO-000`, except `INFO-200` (month not published yet), which
+   ends a scheduled run successfully with nothing loaded. Seven tests cover
+   the cases.
+10. The standard stop-code lookup used by OD correction calls a T-data endpoint
+    (`BisTbisMsSttn/1.0`) that now returns HTTP 404 for any key, including an
+    invented one, so the endpoint itself is gone. The client logs a warning per
+    stop and returns nothing, so the correction step finishes with zero stops
+    fixed and no error. The deployed API is unaffected: OD correction is
+    locked there.
 
 ## Next work
 
@@ -643,8 +648,8 @@ Tracked here so they are visible rather than discovered during deployment.
 6. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-7. Treat any Seoul Open API response whose `RESULT.CODE` is not `INFO-000` as an
-   error, in the loader and in the API, so an invalid key cannot pass as an
-   empty result.
+7. Replace the retired T-data stop-code endpoint, or drop the standard-code
+   step from OD correction if the curated stop tables already cover it, and make
+   the correction fail when every lookup fails rather than report zero fixes.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.

@@ -86,6 +86,45 @@ class SeoulApiRequestError(RuntimeError):
     """A transport or HTTP failure, with the API key removed from the message."""
 
 
+class SeoulApiResultError(RuntimeError):
+    """The API answered, but with a result code other than INFO-000."""
+
+
+class MonthNotPublished(SeoulApiResultError):
+    """INFO-200: the month has not been published yet. Expected for scheduled runs."""
+
+
+SUCCESS_CODE = "INFO-000"
+NO_DATA_CODE = "INFO-200"
+
+
+def check_result(root: ET.Element, use_ym: str) -> None:
+    """
+    Raise unless the response carries INFO-000.
+
+    A successful response wraps RESULT inside the service element:
+
+        <CardBusTimeNew><list_total_count>..</list_total_count><RESULT>..</RESULT><row>..
+
+    An error response (invalid key, no data, bad request) has no service
+    element: RESULT is the document root. The previous check looked only for a
+    RESULT child, never found one on error responses, and fell through to
+    list_total_count = 0. An invalid key therefore loaded zero rows and exited
+    successfully. A response with no RESULT at all is also treated as an error,
+    because success responses always carry one.
+    """
+    node = root if root.tag == "RESULT" else root.find("RESULT")
+    if node is None:
+        raise SeoulApiResultError(f"Seoul API response for {use_ym} has no RESULT element")
+    code = get_text(node, "CODE", "")
+    if code == SUCCESS_CODE:
+        return
+    message = get_text(node, "MESSAGE", "")
+    if code == NO_DATA_CODE:
+        raise MonthNotPublished(f"{use_ym} is not published yet ({code} {message})")
+    raise SeoulApiResultError(f"Seoul API error for {use_ym}: {code} {message}")
+
+
 def redact_key(text: str, api_key: str) -> str:
     """Replace every occurrence of the API key in ``text`` with ``***``."""
     if not api_key:
@@ -126,13 +165,7 @@ def fetch_page(api_key: str, start: int, end: int, use_ym: str, route_no: str | 
         ) from None
 
     root = ET.fromstring(response.content)
-
-    result_node = root.find("RESULT")
-    if result_node is not None:
-        result_code = get_text(result_node, "CODE", "")
-        if result_code and result_code != "INFO-000":
-            message = get_text(result_node, "MESSAGE", "")
-            raise RuntimeError(f"Seoul API error: {result_code} {message}")
+    check_result(root, use_ym)
 
     total_raw = get_text(root, "list_total_count", "0")
     total_count = int(total_raw) if total_raw.isdigit() else 0
@@ -374,17 +407,21 @@ def main():
     if ranged and not (args.start_ym and args.end_ym):
         raise SystemExit("Backfill needs both --start-ym and --end-ym.")
 
-    if not single and not ranged:
+    scheduled = not single and not ranged
+    if scheduled:
         # Scheduled runs pass no month. A cron trigger has no way to compute
         # one, and writing the month into the schedule would mean editing the
         # trigger every month, which is the thing a schedule is supposed to
         # avoid.
         #
-        # The source publishes a month well after it ends, so a scheduled run
-        # will usually find nothing and upsert zero rows. That is the expected
-        # steady state rather than a failure: the loader is idempotent, so
-        # whichever later run first sees the month picks it up, and re-running
-        # a month already loaded rewrites the same values.
+        # The source publishes a month at an irregular date after it ends
+        # (2026-08 appeared on 3 September; 2026-10 was still missing on
+        # 4 November), so a scheduled run often finds the month unpublished.
+        # That answer (INFO-200) ends the run successfully with nothing
+        # loaded; any other non-INFO-000 code, such as an invalid key, fails it.
+        # The loader is idempotent, so whichever later run first sees the month
+        # picks it up, and re-running a month already loaded rewrites the same
+        # values.
         previous_month = date.today().replace(day=1) - timedelta(days=1)
         args.use_ym = previous_month.strftime("%Y%m")
         single = True
@@ -404,6 +441,16 @@ def main():
                 engine, args.api_key, use_ym, args.route_no,
                 args.page_size, args.sleep,
             )
+        except MonthNotPublished as error:
+            if scheduled:
+                print(f"  {error}; nothing to load. Exiting successfully.")
+                continue
+            # An explicitly requested month that does not exist is a failure:
+            # whoever asked for it expected data.
+            if not args.continue_on_error:
+                raise
+            print(f"  {use_ym}: FAILED - {error}")
+            failures.append((use_ym, str(error)))
         except Exception as error:
             if not args.continue_on_error:
                 raise
