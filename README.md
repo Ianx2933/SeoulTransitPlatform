@@ -46,6 +46,7 @@ contracts are still visible in the OpenAPI document.
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
 | **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 32 months (29.9M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
+| **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass — [details](#orchestration) |
 | **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention — [details](#backups) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
@@ -378,8 +379,8 @@ reconcile against the source and analysts exclude them on purpose.
 ### Tests
 
 `dbt build` runs the models and tests together. If a test fails, the build stops and the
-production dataset is not updated. Builds are run by hand for now; scheduled runs are planned
-with Airflow.
+production dataset is not updated. Builds run as the last step of the `warehouse` Airflow DAG
+(below).
 
 | Test | Fails when |
 |---|---|
@@ -416,6 +417,36 @@ Han River ferry. A trailing A or B marks a variant line of the same route. The s
 Gyeonggi-registered routes; Gyeonggi stops come from Seoul routes that cross the city
 boundary.
 
+### Orchestration
+
+The `warehouse` DAG in `pipelines/airflow/dags/` runs the whole path from the local
+PostgreSQL database to the dbt models:
+
+![warehouse DAG in Airflow](docs/images/airflow_warehouse_dag.png)
+
+| Task | What it does | On failure |
+|---|---|---|
+| `preflight` | Connects to PostgreSQL and BigQuery and reports the months found | Stops in seconds instead of partway into an export |
+| `export` | Read-only snapshot of 13 tables with checksums and per-month totals | Retried once; the retry deletes its own partial folder |
+| `load` | Replaces the staging tables, then reconciles per month | Retried twice; tables already loaded are skipped, and a load job that reached BigQuery is not submitted again |
+| `dbt_build` | `dbt build --target prod` | Not retried; a failing test leaves `transit_marts` as it was |
+| `cleanup` | Deletes the export folder | Runs only after dbt succeeds, so a failed run's files stay for inspection |
+
+The first full run took about ten minutes. Airflow runs locally in Docker on an image that
+adds dbt and the BigQuery client in their own virtualenv, so they cannot change the versions
+Airflow depends on. The PostgreSQL password is read inside the task at run time and does not
+appear in the commands shown in the Airflow UI.
+
+The DAG is triggered by hand for now. New months reach Cloud SQL through the monthly
+collector, but not the local database this DAG reads, so a schedule would copy the same data
+each time. It gets a schedule once local collection and estimation run in front of `export`.
+
+Getting the loader to run unattended meant three changes: it reads the password from the
+environment instead of prompting, calls BigQuery through the Python client instead of the `bq`
+CLI (which the container does not have), and can replace last month's staging tables instead
+of refusing to overwrite them. Its offline tests went from 5 to 16 to cover retries, replace
+mode and the missing-password case.
+
 ## Backups
 
 In October 2026 the local PostgreSQL data directory disappeared. The cause was not found.
@@ -445,7 +476,7 @@ The database password is read from `pgpass.conf` outside the repository.
 | GCP deployment: serving path and monthly ingestion | Live, closed beta |
 | BigQuery warehouse | 32 months loaded and modelled in dbt; 25 tests passing |
 | Weekly database backup | Running, verified before upload |
-| Airflow orchestration | Correction DAG running locally; remaining modules by hand |
+| Airflow orchestration | Correction and warehouse DAGs running locally; warehouse triggered by hand; collection and estimation still by hand |
 
 ## Quick start
 
@@ -589,13 +620,19 @@ Tracked here so they are visible rather than discovered during deployment.
    happened in practice when a key was stored with a trailing CRLF; keys are now
    stripped on load, but a wrong key or a month not yet published still passes
    silently. Two separate Seoul Open API keys are in use, which makes the first
-   case easy to hit.
+   case easy to hit. It also reached the deployed API: in November 2026 the key
+   behind `SEOUL_BUS_API_KEY` in Secret Manager turned out to be invalid
+   (`INFO-100`), with no error anywhere. It was replaced and the old secret
+   version disabled; the API still does not treat a non-`INFO-000` response as
+   an error.
 
 ## Next work
 
 1. Re-run the xarray terrain profile on corrected data.
-2. Move the remaining pipeline modules behind Airflow; only the correction DAG
-   is migrated so far.
+2. Put collection and estimation in front of the `warehouse` DAG and give it a
+   monthly schedule that skips, rather than fails, when the new month is not
+   published yet. Publication dates vary: August 2026 data appeared on
+   3 September, while October data was still missing on 4 November.
 3. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
    the cloud database stays read-only for pipeline writes.
 4. Extend OD analysis toward trip-chain analysis — transfer patterns and full
@@ -603,9 +640,11 @@ Tracked here so they are visible rather than discovered during deployment.
 5. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
    and compare the two snapshots — the versioning scheme exists to make exactly
    that comparison possible.
-6. Extend the warehouse: a district dimension and Airflow orchestration of the
-   export, load and `dbt build`.
-7. Treat a zero-row load as a failure for months old enough to have been
-   published, so an invalid key cannot pass as a successful run.
+6. Extend the warehouse with a district dimension, and keep the official route
+   type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
+   the number-based `route_type` rules against it.
+7. Treat any Seoul Open API response whose `RESULT.CODE` is not `INFO-000` as an
+   error, in the loader and in the API, so an invalid key cannot pass as an
+   empty result.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
