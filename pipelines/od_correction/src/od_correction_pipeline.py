@@ -432,17 +432,22 @@ class ODCorrectionPipeline:
 
     @staticmethod
     def _fill_by_name(
-        df: pd.DataFrame, name_col: str, code_col: str, ars_col: str
+        df: pd.DataFrame, name_col: str, code_col: str, ars_col: str | None = None
     ) -> pd.DataFrame:
-        """Fill by stop name only for rows that have no ARS.
+        """Fill by stop name; with ars_col, only rows that have no ARS.
 
         Different stops share names (several 서울역 stops, for one), so a row
         with an ARS of its own must never borrow another stop's code by name.
+        The pipeline always passes ars_col. Without it every empty row is
+        eligible, as before.
         """
         lookup = ODCorrectionPipeline._build_unambiguous_lookup(df, name_col, code_col)
 
         result = df.merge(lookup, on=name_col, how="left", suffixes=("", "_fill"))
-        no_ars = result[ars_col].fillna("").astype(str).str.strip().eq("")
+        if ars_col is None:
+            no_ars = pd.Series(True, index=result.index)
+        else:
+            no_ars = result[ars_col].fillna("").astype(str).str.strip().eq("")
         result[code_col] = result[code_col].replace("", pd.NA).astype("string")
         fill_col = result[f"{code_col}_fill"].astype("string").where(no_ars)
         result[code_col] = result[code_col].combine_first(fill_col).fillna("")
