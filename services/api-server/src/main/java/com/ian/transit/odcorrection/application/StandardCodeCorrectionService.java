@@ -1,25 +1,29 @@
 package com.ian.transit.odcorrection.application;
 
-import com.ian.transit.common.client.SeoulBusApiClient;
 import com.ian.transit.curatedod.infrastructure.CuratedOdRecord;
 import com.ian.transit.odcorrection.infrastructure.OdCorrectionCommandRepository;
 import com.ian.transit.odcorrection.infrastructure.OdCorrectionQueryRepository;
+import com.ian.transit.odcorrection.infrastructure.StopMasterLookup;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Handles standard code correction logic.
- * 
- * Standard stop codes are resolved through the Seoul bus API because ARS alone is not always
- * sufficient for stable among the dataset joins.
- * 
- * External API failure is tolerated so that one failed lookup does not stop the entire correction workflow.
+ * Fills missing standard stop codes from the local stop master.
+ *
+ * Earlier versions called the T-data stop API, which returned the same stop for
+ * every request. Runs on 2023-10-17, 2024-10-19 and 2025-10-14 wrote that stop's
+ * code (164000626, an Incheon stop no Seoul route serves) into 396 rows; they were
+ * cleared on 2026-11-04 and a copy kept in analysis_table_final_bad_stdcode_20261104.
+ *
+ * Stops the master cannot resolve unambiguously are left empty and counted in
+ * the log, so a run that resolves nothing is visible rather than reported as zero
+ * fixes with no explanation.
  */
-
 @Service
 @RequiredArgsConstructor
 public class StandardCodeCorrectionService {
@@ -28,27 +32,27 @@ public class StandardCodeCorrectionService {
 
     private final OdCorrectionQueryRepository queryRepository;
     private final OdCorrectionCommandRepository commandRepository;
-    private final SeoulBusApiClient seoulBusApiClient;
+    private final StopMasterLookup stopMasterLookup;
 
     public int fixNullStandardCodes(String 기준일자) {
         int fixedCount = 0;
         List<CuratedOdRecord> rows = queryRepository.findBy기준일자And승차정류장표준코드IsNull(기준일자);
 
         for (CuratedOdRecord row : rows) {
-            String standardCode = seoulBusApiClient.getStandardCodeByArs(row.get승차정류장ARS());
-            if (standardCode != null && !standardCode.isBlank()) {
+            Optional<String> standardCode = stopMasterLookup.findStandardCodeByArs(row.get승차정류장ARS());
+            if (standardCode.isPresent()) {
                 commandRepository.update승차정류장표준코드(
                     기준일자,
                     row.get노선명(),
                     row.get승차정류장ARS(),
                     row.get하차정류장ARS(),
-                    standardCode
+                    standardCode.get()
                 );
                 fixedCount++;
             }
         }
 
-        log.info("Boarding standard code correction completed / 승차 표준코드 보정 완료: {} [{}]", fixedCount, 기준일자);
+        logResult("Boarding / 승차", 기준일자, rows.size(), fixedCount);
         return fixedCount;
     }
 
@@ -57,20 +61,31 @@ public class StandardCodeCorrectionService {
         List<CuratedOdRecord> rows = queryRepository.findBy기준일자And하차정류장표준코드IsNull(기준일자);
 
         for (CuratedOdRecord row : rows) {
-            String standardCode = seoulBusApiClient.getStandardCodeByArs(row.get하차정류장ARS());
-            if (standardCode != null && !standardCode.isBlank()) {
+            Optional<String> standardCode = stopMasterLookup.findStandardCodeByArs(row.get하차정류장ARS());
+            if (standardCode.isPresent()) {
                 commandRepository.update하차정류장표준코드(
                     기준일자,
                     row.get노선명(),
                     row.get승차정류장ARS(),
                     row.get하차정류장ARS(),
-                    standardCode
+                    standardCode.get()
                 );
                 fixedCount++;
             }
         }
 
-        log.info("Alighting standard code correction completed / 하차 표준코드 보정 완료: {} [{}]", fixedCount, 기준일자);
+        logResult("Alighting / 하차", 기준일자, rows.size(), fixedCount);
         return fixedCount;
+    }
+
+    private void logResult(String side, String 기준일자, int candidates, int fixed) {
+        int unresolved = candidates - fixed;
+        if (unresolved > 0) {
+            log.warn("{} standard code correction [{}]: {} of {} rows fixed, {} left empty "
+                    + "(ARS not in bus_stop_location or mapped to more than one node)",
+                    side, 기준일자, fixed, candidates, unresolved);
+        } else {
+            log.info("{} standard code correction [{}]: {} of {} rows fixed", side, 기준일자, fixed, candidates);
+        }
     }
 }

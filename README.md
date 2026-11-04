@@ -88,6 +88,19 @@ out in a 5.3-million sum are still caught. `validate_rebuild.py` runs every chec
 and exits non-zero, so a rebuild that printed success but left the data wrong
 fails the gate instead of the reader.
 
+A fifth defect was found in November 2026, in OD correction rather than the
+hourly pipeline. Missing standard stop codes were filled from the T-data stop
+API, which ignores its filter and returns the first 1,000 stops of the whole
+master. The client took the first item as the answer, so every successful
+lookup returned the same Incheon stop (`164000626`), one no Seoul route serves.
+Runs on 2023-10-17, 2024-10-19 and 2025-10-14 wrote it into 396 rows: 256
+boarding and 144 alighting codes. For later runs the stored key no longer
+matched, the API answered 404, and correction quietly fixed nothing. The rows
+were copied aside, cleared and refilled from the local stop master, whose node
+ID matches the source's standard ID for 10,685 of 10,686 stops. Correction now
+uses that table instead of the API, and a test checks that different stops get
+different codes.
+
 How each defect was found, ruled in, and fixed — including the virtual-stop
 filter and the change from an underdetermined to an overdetermined ratio model —
 is in **[the hourly pipeline rebuild](docs/analysis/hourly_pipeline_rebuild.md)**.
@@ -624,12 +637,13 @@ Tracked here so they are visible rather than discovered during deployment.
    other than `INFO-000`, except `INFO-200` (month not published yet), which
    ends a scheduled run successfully with nothing loaded. Seven tests cover
    the cases.
-10. The standard stop-code lookup used by OD correction calls a T-data endpoint
-    (`BisTbisMsSttn/1.0`) that now returns HTTP 404 for any key, including an
-    invented one, so the endpoint itself is gone. The client logs a warning per
-    stop and returns nothing, so the correction step finishes with zero stops
-    fixed and no error. The deployed API is unaffected: OD correction is
-    locked there.
+10. About 1–2% of rows in `analysis_table_final` carry a standard stop code that
+    does not match their ARS number in the stop master: 0.8% on 2023-10-17 and
+    2024-10-19, 1.7% on 2025-10-14 and 2.0% on 2025-11-11, the OD estimation day.
+    One code can cover several different stops (`112000054` appears on 염천교,
+    서울역 and 충정로역). The rate rises in recent dates, so an outdated stop
+    master is unlikely to be the cause. Not yet traced; the next step is to
+    check whether OD estimation joins stops on ARS or on the standard code.
 
 ## Next work
 
@@ -648,8 +662,6 @@ Tracked here so they are visible rather than discovered during deployment.
 6. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-7. Replace the retired T-data stop-code endpoint, or drop the standard-code
-   step from OD correction if the curated stop tables already cover it, and make
-   the correction fail when every lookup fails rather than report zero fixes.
+7. Trace the standard-code mismatches in Known gap 10.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
