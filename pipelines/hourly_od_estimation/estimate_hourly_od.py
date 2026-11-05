@@ -5,6 +5,7 @@ Estimate hourly OD records from daily OD and day-type hourly ratios.
 from __future__ import annotations
 
 import argparse
+import os
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
@@ -271,7 +272,13 @@ def estimate(engine, daily_od: pd.DataFrame, ratio_map: dict, zero_keys: set, ho
 def main():
     # CLI entry point for hourly OD estimation.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db-url", required=True)
+    parser.add_argument(
+        "--db-url",
+        default=os.environ.get("PIPELINE_DB_URL"),
+        required="PIPELINE_DB_URL" not in os.environ,
+        help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL, so a scheduler can pass "
+             "it from a secret instead of a visible argument.",
+    )
     parser.add_argument("--start-date", required=False, help="YYYYMMDD")
     parser.add_argument("--end-date", required=False, help="YYYYMMDD")
     parser.add_argument("--holiday-csv", required=False)

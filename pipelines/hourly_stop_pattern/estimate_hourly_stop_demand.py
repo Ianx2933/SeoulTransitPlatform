@@ -8,6 +8,7 @@ for vehicle requirement, headway, and congestion estimation.
 from __future__ import annotations
 
 import argparse
+import os
 
 import pandas as pd
 from sqlalchemy import text
@@ -109,7 +110,13 @@ def main():
     CLI entry point.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db-url", required=True)
+    parser.add_argument(
+        "--db-url",
+        default=os.environ.get("PIPELINE_DB_URL"),
+        required="PIPELINE_DB_URL" not in os.environ,
+        help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL, so a scheduler can pass "
+             "it from a secret instead of a visible argument.",
+    )
     parser.add_argument("--batch-size", type=int, default=50000)
     args = parser.parse_args()
 

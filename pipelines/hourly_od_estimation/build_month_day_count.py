@@ -5,6 +5,7 @@ Build monthly day-type count matrix for weekday decomposition
 from __future__ import annotations
 
 import argparse
+import os
 from sqlalchemy import text
 
 from .common import build_month_counts, load_holidays, make_engine, ym_range
@@ -45,7 +46,13 @@ def main():
     Build month_day_count rows for an inclusive month range.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db-url", required=True)
+    parser.add_argument(
+        "--db-url",
+        default=os.environ.get("PIPELINE_DB_URL"),
+        required="PIPELINE_DB_URL" not in os.environ,
+        help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL, so a scheduler can pass "
+             "it from a secret instead of a visible argument.",
+    )
     parser.add_argument("--start-ym", required=True)
     parser.add_argument("--end-ym", required=True)
     parser.add_argument("--holiday-csv", required=False)

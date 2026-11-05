@@ -20,6 +20,7 @@ The SHA-256 covers ordered keys, hours, methods and exact float values.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import hashlib
 import json
@@ -298,7 +299,13 @@ def print_fingerprint(conn, start_date: str, end_date: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db-url", required=True)
+    parser.add_argument(
+        "--db-url",
+        default=os.environ.get("PIPELINE_DB_URL"),
+        required="PIPELINE_DB_URL" not in os.environ,
+        help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL, so a scheduler can pass "
+             "it from a secret instead of a visible argument.",
+    )
     parser.add_argument("--start-date", required=True, help="YYYYMMDD")
     parser.add_argument("--end-date", required=True, help="YYYYMMDD")
     args = parser.parse_args()
