@@ -21,7 +21,8 @@ form for scheduled runs:
     # backfill
     python load_hourly_boarding.py --start-ym 202502 --end-ym 202512
 
-    # previous month -- what Cloud Scheduler invokes
+    # every month after the latest one in the table, up to last month --
+    # what Cloud Scheduler invokes
     python load_hourly_boarding.py
 
 Daily totals are derived from this table rather than stored separately.
@@ -260,6 +261,48 @@ def month_range(start_ym: str, end_ym: str) -> list[str]:
     return months
 
 
+MAX_CATCH_UP_MONTHS = 12
+
+
+def previous_month(today: date) -> str:
+    """The month before ``today``, as YYYYMM."""
+    return (today.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
+
+
+def months_to_collect(latest_loaded: str | None, today: date,
+                      limit: int = MAX_CATCH_UP_MONTHS) -> list[str]:
+    """
+    Months a scheduled run should try, oldest first.
+
+    Every month after the latest one already in the table, up to last month.
+    Asking only for "last month" lost data: the source publishes each month at
+    an irregular date, so a month still unpublished on the run date was never
+    asked for again once the calendar moved on. Starting from what the table
+    actually holds picks such a month up on the next run, however many runs
+    were missed.
+
+    With an empty table only last month is tried; a full history is a
+    backfill and is requested explicitly. The list is capped at ``limit``
+    months so a stale table cannot start an unbounded download.
+    """
+    last = previous_month(today)
+    if latest_loaded is None:
+        return [last]
+    latest_loaded = str(latest_loaded).strip()
+    index = int(latest_loaded[:4]) * 12 + int(latest_loaded[4:]) - 1 + 1
+    first = f"{index // 12:04d}{index % 12 + 1:02d}"
+    if first > last:
+        return []
+    return month_range(first, last)[:limit]
+
+
+def latest_loaded_month(engine) -> str | None:
+    """The latest use_ym in hourly_bus_stop_passenger, or None if it is empty."""
+    with engine.connect() as conn:
+        value = conn.execute(text("SELECT MAX(use_ym) FROM hourly_bus_stop_passenger")).scalar()
+    return str(value) if value is not None else None
+
+
 def merge_records(records: list[dict], buckets: dict) -> None:
     """
     Sum unpivoted records that share the upsert key.
@@ -408,6 +451,8 @@ def main():
         raise SystemExit("Backfill needs both --start-ym and --end-ym.")
 
     scheduled = not single and not ranged
+    engine = make_engine(args.db_url)
+
     if scheduled:
         # Scheduled runs pass no month. A cron trigger has no way to compute
         # one, and writing the month into the schedule would mean editing the
@@ -416,20 +461,21 @@ def main():
         #
         # The source publishes a month at an irregular date after it ends
         # (2026-08 appeared on 3 September; 2026-10 was still missing on
-        # 4 November), so a scheduled run often finds the month unpublished.
-        # That answer (INFO-200) ends the run successfully with nothing
-        # loaded; any other non-INFO-000 code, such as an invalid key, fails it.
-        # The loader is idempotent, so whichever later run first sees the month
-        # picks it up, and re-running a month already loaded rewrites the same
-        # values.
-        previous_month = date.today().replace(day=1) - timedelta(days=1)
-        args.use_ym = previous_month.strftime("%Y%m")
-        single = True
-        print(f"No month given; defaulting to the previous month: {args.use_ym}")
-
-    months = [args.use_ym] if single else month_range(args.start_ym, args.end_ym)
-
-    engine = make_engine(args.db_url)
+        # 4 November). The run therefore tries every month after the latest
+        # one in the table, not just last month: a monthly trigger that only
+        # asked for last month never asked for a late month again.
+        #
+        # An unpublished month (INFO-200) ends the run successfully, and the
+        # months after it are not tried, because the source publishes in
+        # order. Any other non-INFO-000 code, such as an invalid key, fails it.
+        latest = latest_loaded_month(engine)
+        months = months_to_collect(latest, date.today())
+        print(f"Latest month in the table: {latest}; months to try: {months or 'none'}")
+        if not months:
+            print("Up to date. Nothing to load.")
+            return
+    else:
+        months = [args.use_ym] if single else month_range(args.start_ym, args.end_ym)
 
     total_rows = 0
     failures: list[tuple[str, str]] = []
@@ -443,8 +489,10 @@ def main():
             )
         except MonthNotPublished as error:
             if scheduled:
-                print(f"  {error}; nothing to load. Exiting successfully.")
-                continue
+                # Later months cannot be out before this one.
+                print(f"  {error}; stopping here. Exiting successfully.")
+                months = months[:position - 1]
+                break
             # An explicitly requested month that does not exist is a failure:
             # whoever asked for it expected data.
             if not args.continue_on_error:
