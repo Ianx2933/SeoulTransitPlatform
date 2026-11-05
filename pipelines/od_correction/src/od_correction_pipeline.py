@@ -692,10 +692,22 @@ def parse_args() -> PipelineConfig:
         "--stop-master",
         required=False,
         default=None,
-        help="Pipe-separated export of bus_stop_location (정류장번호, 노드id)",
+        help="Pipe-separated stop master (정류장번호, 노드id); see STOP_MASTER.md. Required.",
+    )
+    parser.add_argument(
+        "--allow-no-stop-master",
+        action="store_true",
+        help="Run without the stop master check. Codes then come from the reference only.",
     )
 
     args = parser.parse_args()
+
+    if not args.stop_master and not args.allow_no_stop_master:
+        parser.error(
+            "--stop-master is required. Without it standard codes are not checked "
+            "against the stop master. Export one as described in STOP_MASTER.md, "
+            "or pass --allow-no-stop-master to run unchecked."
+        )
 
     return PipelineConfig(
         raw_path=Path(args.raw),

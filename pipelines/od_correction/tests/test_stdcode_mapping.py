@@ -158,3 +158,17 @@ def test_name_fill_applies_to_placeholder_ars():
     })
     result = ODCorrectionPipeline._fill_by_name(df, "name", "code", "ars")
     assert result["code"].tolist() == ["277000001", "277000001"]
+
+
+def test_cli_refuses_to_run_without_stop_master(monkeypatch):
+    from od_correction_pipeline import parse_args
+    monkeypatch.setattr(sys, "argv", ["prog", "--raw", "r", "--reference", "f", "--output", "o"])
+    with pytest.raises(SystemExit):
+        parse_args()
+
+
+def test_cli_runs_unchecked_only_when_asked(monkeypatch):
+    from od_correction_pipeline import parse_args
+    monkeypatch.setattr(sys, "argv", ["prog", "--raw", "r", "--reference", "f", "--output", "o",
+                                      "--allow-no-stop-master"])
+    assert parse_args().stop_master_path is None

@@ -1,8 +1,9 @@
 # Stop master for OD correction
 
 `od_correction_pipeline.py` takes standard codes from a stop master first and
-fails if any output code disagrees with it. Without `--stop-master` it falls
-back to the reference file alone and prints a warning.
+fails if any output code disagrees with it. `--stop-master` is required; the
+pipeline refuses to start without it unless `--allow-no-stop-master` is passed,
+in which case codes come from the reference alone and are not checked.
 
 The master is one pipe-separated file with two columns, `정류장번호` (ARS) and
 `노드id`. It combines the Seoul stop table with the stops outside Seoul that
