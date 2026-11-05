@@ -17,7 +17,7 @@ def make_engine(db_url: str):
     """
     Create a SQLAlchemy engine.
     """
-    return create_engine(db_url)
+    return create_engine(db_url, executemany_mode="values_plus_batch")
 
 
 def normalize_ars(value) -> str:
