@@ -14,6 +14,9 @@ Files with `diag` in the name only read. The others change data inside one trans
 | `02_diag_stdcode_gap.sql` | Classifies codes that disagree with the stop master: another stop on the same route, a stop with the same name, or neither |
 | `03_diag_stdcode_source.sql` | Sequence gap to the stop that owns the code, and which other dates hold the same wrong code at the same position |
 | `04_fix_stdcode_by_ars.sql` | Rewrites every code that disagrees with the stop master for its ARS (Data quality, sixth defect) |
+| `05_diag_unchecked_stops.sql` | Classifies the stops file 04 could not check: ARS missing, placeholder, several nodes, or not in the Seoul master |
+| `06_diag_unchecked_vs_integrated.sql` | Checks those stops against `integrated_bus_stop_location`, and shows what ARS `00000` carries |
+| `07_fix_stdcode_outside_seoul_and_virtual.sql` | Same fix for stops outside Seoul, checked against `integrated_bus_stop_location`, and for ARS `00000` (virtual stops), where one depot's code had been copied to the others |
 
 Running a file against Cloud SQL needs the proxy on port 5433:
 

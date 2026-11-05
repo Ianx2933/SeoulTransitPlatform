@@ -123,3 +123,38 @@ def test_ars5_pads_and_strips_float_suffix():
     assert ars5(pd.Series(["2116", "2116.0", "", None, "10.05"])).tolist() == [
         "02116", "02116", "", "", "10.05",
     ]
+
+
+def test_placeholder_ars_is_treated_as_missing():
+    assert ars5(pd.Series(["00000", "0", "0.0"])).tolist() == ["", "", ""]
+
+
+def test_same_ars_fill_does_not_spread_through_placeholder():
+    # Two different depots share ARS 00000; one known code must not reach the other.
+    df = pd.DataFrame({
+        "ars": ["00000", "00000", "0"],
+        "code": ["277102436", "", ""],
+    })
+    result = ODCorrectionPipeline._fill_by_key(df, "ars", "code")
+    assert result["code"].tolist() == ["277102436", "", ""]
+
+
+def test_cross_fill_does_not_spread_through_placeholder():
+    df = pd.DataFrame({
+        "b_ars": ["00000", "01001"],
+        "b_code": ["277102436", "100000001"],
+        "a_ars": ["01001", "00000"],
+        "a_code": ["", ""],
+    })
+    result = ODCorrectionPipeline._fill_by_cross_reference(df, "b_ars", "b_code", "a_ars", "a_code")
+    assert result["a_code"].tolist() == ["100000001", ""]
+
+
+def test_name_fill_applies_to_placeholder_ars():
+    df = pd.DataFrame({
+        "ars": ["00000", "00000"],
+        "name": ["중부운수앞(가상)", "중부운수앞(가상)"],
+        "code": ["277000001", ""],
+    })
+    result = ODCorrectionPipeline._fill_by_name(df, "name", "code", "ars")
+    assert result["code"].tolist() == ["277000001", "277000001"]

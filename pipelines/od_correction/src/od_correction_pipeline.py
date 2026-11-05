@@ -44,9 +44,20 @@ class PipelineConfig:
     stop_master_path: Path | None = None
 
 
-def ars5(series: pd.Series) -> pd.Series:
-    """ARS as a 5-digit string, or "" when missing. Used only as a join key."""
+def is_placeholder_ars(series: pd.Series) -> pd.Series:
+    """True where the ARS is missing or all zeros.
+
+    00000 marks a stop with no ARS number (depots and other virtual stops), so
+    two rows that both carry it are not the same stop.
+    """
     s = series.fillna("").astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    return s.eq("") | s.str.fullmatch(r"0+")
+
+
+def ars5(series: pd.Series) -> pd.Series:
+    """ARS as a 5-digit string, or "" when missing or a placeholder. Join key only."""
+    s = series.fillna("").astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    s = s.where(~is_placeholder_ars(s), "")
     return s.where(s.eq(""), s.str.zfill(5))
 
 
@@ -422,6 +433,8 @@ class ODCorrectionPipeline:
     @staticmethod
     def _fill_by_key(df: pd.DataFrame, key_col: str, code_col: str) -> pd.DataFrame:
         lookup = ODCorrectionPipeline._build_unambiguous_lookup(df, key_col, code_col)
+        # A placeholder ARS joins unrelated stops; never fill through it.
+        lookup = lookup[~is_placeholder_ars(lookup[key_col])]
 
         result = df.merge(lookup, on=key_col, how="left", suffixes=("", "_fill"))
         result[code_col] = result[code_col].replace("", pd.NA).astype("string")
@@ -447,7 +460,7 @@ class ODCorrectionPipeline:
         if ars_col is None:
             no_ars = pd.Series(True, index=result.index)
         else:
-            no_ars = result[ars_col].fillna("").astype(str).str.strip().eq("")
+            no_ars = is_placeholder_ars(result[ars_col])
         result[code_col] = result[code_col].replace("", pd.NA).astype("string")
         fill_col = result[f"{code_col}_fill"].astype("string").where(no_ars)
         result[code_col] = result[code_col].combine_first(fill_col).fillna("")
@@ -470,6 +483,7 @@ class ODCorrectionPipeline:
             source_ars_col: target_ars_col,
             source_code_col: f"{target_code_col}_fill",
         })
+        lookup = lookup[~is_placeholder_ars(lookup[target_ars_col])]
 
         result = df.merge(lookup, on=target_ars_col, how="left")
         result[target_code_col] = result[target_code_col].replace("", pd.NA).astype("string")

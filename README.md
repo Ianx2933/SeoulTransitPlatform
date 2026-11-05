@@ -121,6 +121,15 @@ inserted; the old code gives the next stop its neighbour's code and fails it.
 In both databases 117,110 rows were copied aside and 71,071 boarding and
 85,323 alighting codes rewritten from the master.
 
+The stops that check could not reach held two more cases. Stops outside Seoul are
+missing from the Seoul master but present in `integrated_bus_stop_location`;
+950,326 of their rows matched it and 2,851 codes were rewritten from it. ARS
+`00000` marks a stop with no ARS number, such as a depot. The same-ARS fill
+treated it as one stop and copied one depot's code onto about ten others, so
+those 10,440 codes were cleared rather than guessed, and correction now treats an
+all-zero ARS as missing. The diagnostic and fix queries for these defects are in
+[`database/data_fixes/`](database/data_fixes/).
+
 How each defect was found, ruled in, and fixed — including the virtual-stop
 filter and the change from an underdetermined to an overdetermined ratio model —
 is in **[the hourly pipeline rebuild](docs/analysis/hourly_pipeline_rebuild.md)**.
@@ -657,11 +666,12 @@ Tracked here so they are visible rather than discovered during deployment.
    other than `INFO-000`, except `INFO-200` (month not published yet), which
    ends a scheduled run successfully with nothing loaded. Seven tests cover
    the cases.
-10. About 8% of boarding and alighting stops in `analysis_table_final` cannot be
-    checked against the stop master, because their ARS number is not in it or
-    maps to more than one node. Their standard codes came from the same
-    position-based join as the sixth defect in Data quality and may still be
-    shifted.
+10. 0.75% of boarding and alighting stops in `analysis_table_final` (101,864 stop
+    rows, 473 ARS numbers) appear in neither stop table, most likely stops that
+    have since closed or moved. Their standard codes came from the same
+    position-based join as the sixth defect in Data quality and cannot be
+    checked. Four ARS numbers outside Seoul map to two nodes and were also left
+    as they were.
 
 ## Next work
 
@@ -680,8 +690,7 @@ Tracked here so they are visible rather than discovered during deployment.
 6. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-7. Find out what the unchecked stops in Known gap 10 are (stops outside Seoul,
-   closed stops, or ARS numbers shared by two nodes) and check their codes
-   another way.
+7. Check the stops in Known gap 10 against an archived stop master from the
+   year of each OD date.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
