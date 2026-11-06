@@ -311,7 +311,7 @@ surface-model caveat on the slope values themselves.
 | Pipelines | Python, Airflow |
 | Multidimensional analysis | xarray, dask, netCDF |
 | Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
-| Analytical warehouse | BigQuery, dbt (private repository) |
+| Analytical warehouse | BigQuery, dbt (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
 | Local infra | Docker Compose |
 | Deployment | Cloud Run, Cloud SQL (PostgreSQL 18 + PostGIS), Artifact Registry, Secret Manager, Firebase Hosting |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
@@ -351,8 +351,8 @@ Analysis: [`docs/performance/district_demand_optimization.md`](docs/performance/
 ## Analytical warehouse (BigQuery and dbt)
 
 The serving API reads from PostgreSQL. Analysis runs on a separate BigQuery warehouse built
-from the same data. The warehouse code is in a private repository; this section summarizes
-it.
+from the same data. The warehouse code is in [transit-bigquery](https://github.com/Ianx2933/transit-bigquery);
+this section summarizes it.
 
 - **Load:** a Python script copies 13 PostgreSQL tables 1:1 into a staging dataset. It writes
   checksums and per-month row and passenger totals at export, then recomputes the monthly
