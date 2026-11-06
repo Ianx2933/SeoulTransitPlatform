@@ -1,0 +1,22 @@
+# Findings reviewed by hand. Each entry is a gitleaks fingerprint: commit:file:rule:line.
+
+# Fake keys used to test API key redaction. Compared against the real keys on 2026-11-06: no match.
+028f4db59f33ce72480f1a5ea3feaf14b1da0c43:services/api-server/src/test/java/com/ian/transit/common/SeoulBusApiClientRedactionTest.java:generic-api-key:17
+028f4db59f33ce72480f1a5ea3feaf14b1da0c43:tests/test_hourly_loader_key_redaction.py:generic-api-key:18
+
+# Local PostgreSQL password from example runners and docs, still in history.
+# Rotated on 2026-11-05 in Cloud SQL and locally; the old value no longer works anywhere.
+85af093ffdfa8712d1bccca41def5f9d6e2861a4:pipelines/subway_integration_light/README_Phase6_5_Lightweight.md:db-url-password:56
+85af093ffdfa8712d1bccca41def5f9d6e2861a4:pipelines/subway_integration_light/README_Phase6_5_Lightweight.md:db-url-password:66
+85af093ffdfa8712d1bccca41def5f9d6e2861a4:pipelines/metro_ingestion/load_subway_station_location.py:db-url-password:198
+85af093ffdfa8712d1bccca41def5f9d6e2861a4:pipelines/subway_integration_light/run_phase6_5_light_example.bat:db-url-password:4
+b07fe63ce371b8a63a303e9fc0b0632edb3d1eeb:pipelines/hourly_stop_pattern/run_phase6_3_local_example.bat:db-url-password:4
+b07fe63ce371b8a63a303e9fc0b0632edb3d1eeb:pipelines/hourly_stop_pattern/README_Phase6_3_Local.md:db-url-password:49
+b07fe63ce371b8a63a303e9fc0b0632edb3d1eeb:pipelines/hourly_stop_pattern/README_Phase6_3_Local.md:db-url-password:58
+2fc7fb90806ba7657b91992c9e54b8fc8b6f8007:pipelines/hourly_od_estimation/README_Phase6_2.md:db-url-password:43
+2fc7fb90806ba7657b91992c9e54b8fc8b6f8007:pipelines/hourly_od_estimation/README_Phase6_2.md:db-url-password:52
+2fc7fb90806ba7657b91992c9e54b8fc8b6f8007:pipelines/hourly_od_estimation/README_Phase6_2.md:db-url-password:62
+2fc7fb90806ba7657b91992c9e54b8fc8b6f8007:pipelines/hourly_od_estimation/README_Phase6_2.md:db-url-password:70
+ef92183e59b4fc0d9da0db9a285a37ee1d4cde54:pipelines/reference_loader/load_bus_stop_location.py:db-url-password:12
+2fc7fb90806ba7657b91992c9e54b8fc8b6f8007:pipelines/hourly_od_estimation/run_phase6_2_example.bat:db-url-password:5
+3f737edbb23f7f2f8ab14a6d916294939f4c63d2:docs/architecture/README_Phase6.md:db-url-password:14
