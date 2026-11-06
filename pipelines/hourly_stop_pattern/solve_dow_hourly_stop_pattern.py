@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from common import DAY_TYPES, make_engine
 
@@ -248,6 +250,35 @@ def save_patterns(engine, pattern_df: pd.DataFrame, batch_size: int) -> None:
         upsert_patterns(conn, pattern_df, batch_size)
 
 
+RETRY_ATTEMPTS = 3
+RETRY_WAIT_SECONDS = 30
+
+
+def with_retry(engine, work, label, attempts=RETRY_ATTEMPTS, wait=RETRY_WAIT_SECONDS,
+               sleep=time.sleep):
+    """
+    Run ``work()`` and retry it when the database connection drops.
+
+    On Cloud Run the connection to Cloud SQL can drop mid-query while the
+    database itself keeps running (seen on 2026-11-06: both the reading and the
+    writing connection closed at the same instant, and the server noticed six
+    minutes later). The pool is discarded before each retry so the next attempt
+    opens fresh connections. Each batch is an upsert, so repeating it gives the
+    same rows.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return work()
+        except OperationalError as error:
+            if attempt == attempts:
+                raise
+            first_line = str(error).strip().splitlines()[0]
+            print(f"  {label}: connection lost ({first_line}); "
+                  f"retry {attempt}/{attempts - 1} in {wait}s")
+            engine.dispose()
+            sleep(wait)
+
+
 def main():
     """
     CLI entry point.
@@ -264,6 +295,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=50000)
     parser.add_argument("--route-batch", type=int, default=50,
                         help="Routes read and solved per batch. Lower it if memory is tight.")
+    parser.add_argument("--start-route-index", type=int, default=0,
+                        help="Skip the first N routes of the sorted list, to resume a run "
+                             "that stopped part way. Batches already written stay as they are.")
     args = parser.parse_args()
 
     engine = make_engine(args.db_url)
@@ -276,19 +310,28 @@ def main():
     total_input = 0
     total_output = 0
 
-    # One transaction for all batches, so an interrupted run leaves the old patterns intact.
-    with engine.begin() as conn:
-        for start in range(0, len(routes), args.route_batch):
-            batch = routes[start:start + args.route_batch]
+    # Each batch commits on its own. A single transaction over all batches kept
+    # the old values intact if a run stopped, but one dropped connection after
+    # hours of work threw everything away, and the open transaction held WAL
+    # until the end. A run that stops part way now leaves some routes with new
+    # values; the next steps do not run after a failed step, and the next run
+    # rewrites every route, so mixed values are never published.
+    for start in range(args.start_route_index, len(routes), args.route_batch):
+        batch = routes[start:start + args.route_batch]
+        done = min(start + args.route_batch, len(routes))
+
+        def work():
             hourly = load_hourly_monthly(engine, batch)
             pattern_df = solve_patterns(month_counts, hourly, args.min_months)
-            upsert_patterns(conn, pattern_df, args.batch_size)
+            with engine.begin() as conn:
+                upsert_patterns(conn, pattern_df, args.batch_size)
+            return len(hourly), len(pattern_df)
 
-            total_input += len(hourly)
-            total_output += len(pattern_df)
-            done = min(start + args.route_batch, len(routes))
-            print(f"routes {done}/{len(routes)}: monthly hourly rows {total_input:,}; "
-                  f"stop pattern rows {total_output:,}")
+        rows_in, rows_out = with_retry(engine, work, f"routes {start + 1}-{done}")
+        total_input += rows_in
+        total_output += rows_out
+        print(f"routes {done}/{len(routes)}: monthly hourly rows {total_input:,}; "
+              f"stop pattern rows {total_output:,}")
 
     print(f"Done. Generated stop pattern rows: {total_output:,}")
 
