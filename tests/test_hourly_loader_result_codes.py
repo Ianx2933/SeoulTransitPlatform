@@ -72,6 +72,7 @@ def run_main(argv, load_month_error):
          patch.dict("os.environ", {"PIPELINE_DB_URL": "postgresql://x", "SEOUL_HOURLY_API_KEY": "KEY"}), \
          patch.object(loader, "load_dotenv"), \
          patch.object(loader, "make_engine"), \
+         patch.object(loader, "latest_loaded_month", return_value="202609"), \
          patch.object(loader, "load_month", side_effect=load_month_error):
         loader.main()
 
