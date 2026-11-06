@@ -15,6 +15,11 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 
+# Holiday list shipped with the repository. Scripts use it unless told otherwise,
+# because running without holidays does not fail: every holiday is silently
+# counted as an ordinary weekday.
+DEFAULT_HOLIDAY_CSV = Path(__file__).resolve().parent / "korea_public_holidays_2020_2026.csv"
+
 # Seven day-type classes used by the decomposition model.
 DAY_TYPES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun_holiday"]
 
@@ -164,3 +169,26 @@ def day_type_from_yyyymmdd(date_yyyymmdd: str, holidays: set[str]) -> str:
     """
     date = datetime.strptime(str(date_yyyymmdd), "%Y%m%d")
     return day_type_for_date(date, holidays)
+
+
+def holiday_years(holidays: set[str]) -> set[int]:
+    """Calendar years that the holiday list covers (at least one date)."""
+    return {int(d[:4]) for d in holidays}
+
+
+def require_holiday_coverage(holidays: set[str], years) -> None:
+    """
+    Fail when a year to be classified has no holidays in the list.
+
+    Korea has public holidays every year, so a year with none means the list
+    ends before the data does. Classifying anyway would put every holiday of
+    that year into its weekday class without any error.
+    """
+    missing = sorted({int(y) for y in years} - holiday_years(holidays))
+    if missing:
+        covered = sorted(holiday_years(holidays))
+        span = f"{covered[0]}-{covered[-1]}" if covered else "none"
+        raise SystemExit(
+            f"Holiday list does not cover {', '.join(map(str, missing))} "
+            f"(covers {span}). Extend the holiday CSV before processing these dates."
+        )

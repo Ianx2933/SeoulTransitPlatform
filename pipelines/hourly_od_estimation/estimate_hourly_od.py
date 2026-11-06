@@ -10,7 +10,14 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-from .common import day_type_from_yyyymmdd, load_holidays, make_engine, normalize_ars
+from .common import (
+    DEFAULT_HOLIDAY_CSV,
+    day_type_from_yyyymmdd,
+    load_holidays,
+    make_engine,
+    normalize_ars,
+    require_holiday_coverage,
+)
 
 
 # Fallback ratio used when a route-stop-day_type profile cannot be applied.
@@ -281,7 +288,7 @@ def main():
     )
     parser.add_argument("--start-date", required=False, help="YYYYMMDD")
     parser.add_argument("--end-date", required=False, help="YYYYMMDD")
-    parser.add_argument("--holiday-csv", required=False)
+    parser.add_argument("--holiday-csv", default=str(DEFAULT_HOLIDAY_CSV))
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=5000)
     parser.add_argument(
@@ -302,6 +309,7 @@ def main():
     holidays = load_holidays(args.holiday_csv)
 
     daily_od = load_daily_od(engine, args.start_date, args.end_date, args.limit)
+    require_holiday_coverage(holidays, {str(d)[:4] for d in daily_od["기준일자"].unique()})
     day_types = sorted({day_type_from_yyyymmdd(str(d), holidays) for d in daily_od["기준일자"].unique()})
     ratio_map, zero_keys = load_ratio_map(engine, day_types) if day_types else ({}, set())
 
