@@ -45,7 +45,8 @@ contracts are still visible in the OpenAPI document.
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes — [details](#performance-district-demand) |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
-| **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 32 months (29.9M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
+| **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
+| **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 9 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models in Cloud SQL, validates them and publishes to BigQuery; the database is scaled up only for the rebuild — [details](#weekly-cloud-pipeline) |
 | **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass — [details](#orchestration) |
 | **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention — [details](#backups) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
@@ -134,6 +135,21 @@ How each defect was found, ruled in, and fixed — including the virtual-stop
 filter and the change from an underdetermined to an overdetermined ratio model —
 is in **[the hourly pipeline rebuild](docs/analysis/hourly_pipeline_rebuild.md)**.
 
+### What the hourly OD is
+
+The hourly OD tables are an allocation, not an observation. Two separate sources
+meet in them: the OD records give origin, destination and passengers for a whole
+day with no time of travel (only 2025-11-11 is allocated so far), and the hourly
+boarding counts give, for each
+stop and hour, how many people boarded over 34 months, but not where they went.
+Each daily OD pair is spread over 24 hours in proportion to the day-type hourly
+boarding profile of its route at its boarding stop. That assumes every pair
+leaving a stop shares the stop's profile; in practice a stop's morning riders and
+evening riders head to different places, and the allocation cannot show that.
+The checks above prove the allocation is complete and conserves every passenger,
+not that its hours match real trips, which would need OD records with boarding
+times. More months make the profiles steadier; they do not add OD days.
+
 ## Key capabilities
 
 - Node-centered demand lookup around a coordinate radius.
@@ -155,8 +171,10 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │                   ▲
                                         │                   │ unix socket
                                         │                   │
-                                        │   Cloud Scheduler ──> Cloud Run Jobs: transit-collector
-                                        │     monthly              └──> Seoul Open API
+                                        │   Cloud Scheduler ──> Workflows: transit-pipeline
+                                        │     weekly                 ├─> Cloud Run Job: collector ──> Seoul Open API
+                                        │                            ├─> 7 rebuild + validation Jobs (new month only)
+                                        │                            └─> Cloud Run Job: warehouse ──> BigQuery + dbt
                                         │
                                         └──ID token─────> Cloud Run: transit-prediction (private)
 ```
@@ -180,31 +198,35 @@ finds the URL.
 service, so the browser only ever sees one origin. The frontend calls relative
 paths and needs no build-time API URL.
 
-**Pipeline intermediates stay out of the cloud database.** Five tables holding
-OD estimates and day-of-week ratio models are transform outputs the API never
-reads, so they were left behind; loading only what the serving path queries
-keeps the instance inside its 10 GB disk. The hourly passenger table is the
-exception — it was created empty in Cloud SQL rather than copied, because the
-scheduled job rebuilds it a month at a time from the source API.
+**Cloud SQL is the source of record, and is sized for serving.** The hourly
+table (34 months, 31.7M rows), the OD tables and every model built from them
+live in Cloud SQL, and the local database is a development copy. The instance
+idles as a `db-f1-micro`. On it the ratio solver needed 7–20 minutes per batch of
+50 routes and ran out of memory, so the workflow raises the tier to
+`db-custom-2-7680` for the rebuild and lowers it again afterwards, including when
+a step fails. The batch tier is billed only for the hours of a rebuild, which
+happens when a new month is published.
 
 **Browser-facing API without a hosted basemap key.** The map originally used
 CartoDB Positron, whose CDN began returning watermark tiles for
 unauthenticated requests. The client moved to OpenStreetMap rather than
 embedding a CARTO key in a public static bundle.
 
-**Cloud Scheduler rather than managed Airflow.** Three of the ten pipeline
-modules call external APIs, but only one runs in the cloud: the monthly
-hourly-ridership loader, a single step with no dependencies — Cloud Run Jobs on
-a monthly trigger covers it. Airflow earns its keep on the local DAG, where
-ingestion, OD correction, hourly estimation and aggregation depend on each other
-in order. Cloud Composer, the managed option, starts around thirty times the
-monthly cost of the database it would be feeding.
+**Workflows rather than managed Airflow.** The cloud pipeline is ten steps in a
+fixed order with one branch (stop if no new month) and one cleanup (scale the
+database down). Cloud Workflows covers that and costs next to nothing at one run a week;
+Cloud Composer, the managed Airflow option, starts around thirty times the
+monthly cost of the database it would be feeding. Airflow stays for local
+development, where the DAGs run against the local copy.
 
-**The scheduled job computes its own month.** Cloud Scheduler sends no
-arguments, and writing the month into the trigger would mean editing the
-trigger every month. The loader defaults to the previous month when called
-with no arguments; because the upsert is idempotent, a month that was already
-loaded is simply rewritten with the same values.
+**The collector works out which months to load.** Cloud Scheduler sends no
+arguments. Called without any, the loader starts after the latest month already
+in Cloud SQL and loads each published month up to last month, stopping at the
+first one the API reports as not published yet. Publication dates vary (August
+2026 data appeared on 3 September, October data was still missing on 4
+November), so running weekly and loading whatever has appeared is simpler than
+guessing a monthly date. The loader writes the months it loaded to a state file,
+and the workflow rebuilds only when that list is not empty.
 
 Deployment environment variables and cache profiles are described in
 [`docs/deployment/configuration.md`](docs/deployment/configuration.md).
@@ -358,8 +380,8 @@ this section summarizes it.
   checksums and per-month row and passenger totals at export, then recomputes the monthly
   totals in BigQuery after loading and stops if any month differs.
 - **Transform:** dbt builds the dimensional model from staging. 8 models, 25 tests.
-- **Data:** 32 months (2024-01 to 2026-08), 29.9M rows of hourly boarding by route and stop,
-  taken from the corrected source after the [loader fix](#data-quality-and-validation).
+- **Data:** 34 months (2024-01 to 2026-10), 31.7M rows of hourly boarding by route and stop,
+  exported from Cloud SQL by the [weekly cloud pipeline](#weekly-cloud-pipeline).
 
 ```mermaid
 flowchart LR
@@ -479,15 +501,36 @@ adds dbt and the BigQuery client in their own virtualenv, so they cannot change 
 Airflow depends on. The PostgreSQL password is read inside the task at run time and does not
 appear in the commands shown in the Airflow UI.
 
-The DAG is triggered by hand for now. New months reach Cloud SQL through the monthly
-collector, but not the local database this DAG reads, so a schedule would copy the same data
-each time. It gets a schedule once local collection and estimation run in front of `export`.
+The DAG is triggered by hand and reads the local database. The scheduled path is the
+[weekly cloud pipeline](#weekly-cloud-pipeline), which exports from Cloud SQL instead.
 
 Getting the loader to run unattended meant three changes: it reads the password from the
 environment instead of prompting, calls BigQuery through the Python client instead of the `bq`
 CLI (which the container does not have), and can replace last month's staging tables instead
 of refusing to overwrite them. Its offline tests went from 5 to 16 to cover retries, replace
 mode and the missing-password case.
+
+### Weekly cloud pipeline
+
+`ops/workflows/transit_pipeline.yaml`, deployed with `ops/workflows/deploy.ps1`:
+
+| Step | What it does |
+|---|---|
+| collect | Loads each newly published month and records which months it loaded |
+| decide | Ends the run if nothing was loaded, about 20 seconds in total |
+| scale up | Cloud SQL `db-f1-micro` → `db-custom-2-7680`, then waits until it accepts connections |
+| rebuild | Month-day counts, day-type hourly ratios (route and stop level), OD allocation to hours, stop demand, bus + subway integration |
+| validate | `validate_rebuild.py`; a failed check fails the run before anything is published |
+| warehouse | Exports from Cloud SQL, replaces the BigQuery staging tables, runs `dbt build --target prod` |
+| scale down | Back to `db-f1-micro`, also when any step fails |
+
+Steps run one at a time; with two write-heavy jobs at once, both ran several times slower.
+The two ratio solvers commit each batch of routes and retry a batch when Cloud SQL drops the
+connection, so a dropped connection three hours in costs one batch rather than the run.
+
+A forced full rebuild on 2026-11-07 took 9 h 30 min, 7 h of it in the two ratio solvers, and
+reproduced the manual rebuild exactly: the same SHA-256 over all 12,347,976 hourly OD rows.
+Timings by step and the prerequisites are in [`ops/workflows/`](ops/workflows/README.md).
 
 ## Backups
 
@@ -514,11 +557,12 @@ The database password is read from `pgpass.conf` outside the repository.
 | Map demand analysis (node-centered and district-centered) | Done |
 | District-demand indexing and statistics refresh | Done |
 | Terrain snapshots and stop/dong screening API | Done |
-| Hourly pipeline rebuild, 2024-01 to 2026-08 | Done, validated |
-| GCP deployment: serving path and monthly ingestion | Live, closed beta |
-| BigQuery warehouse | 32 months loaded and modelled in dbt; 25 tests passing |
+| Hourly pipeline rebuild, 2024-01 to 2026-10 | Done, validated; rebuilt in Cloud SQL |
+| GCP deployment: serving path | Live, closed beta |
+| Weekly cloud pipeline (collect, rebuild, validate, publish) | Scheduled weekly from 2026-11-10; forced full run passed on 2026-11-07 |
+| BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | Weekly database backup | Running, verified before upload |
-| Airflow orchestration | Correction and warehouse DAGs running locally; warehouse triggered by hand; collection and estimation still by hand |
+| Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
 
 ## Quick start
 
@@ -590,7 +634,8 @@ database/schema/        Schema creation scripts, run in numeric order
 database/performance/   Performance index scripts
 database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
-ops/                    Weekly database backup script and bucket lifecycle rule
+ops/                    Local backup script, bucket lifecycle rule
+ops/workflows/          Weekly cloud pipeline (Workflows) and its deploy script
 pipelines/              Python data pipelines by phase
 pipelines/airflow/      Airflow DAGs
 pipelines/analysis/     xarray demand profiling against terrain bands
@@ -619,11 +664,12 @@ it. `ADMIN_API_TOKEN` is deliberately left unset in deployment, so the
 `/api/od-correction/**` endpoints — which issue UPDATE and DELETE statements —
 reject every request rather than depending on a token staying secret.
 
-**Runtime identities.** The API, prediction service, collector job and its
-scheduler each run as a dedicated service account with only the access they
-need: Cloud SQL for the API and collector, their own secrets, `run.invoker` on
-the private prediction service for the API, and on the collector job for the
-scheduler. The prediction service holds no permissions at all. The default
+**Runtime identities.** The API, prediction service, pipeline jobs and the
+workflow each run as a dedicated service account with only the access they
+need: Cloud SQL for the API and pipeline jobs, their own secrets, `run.invoker` on
+the private prediction service for the API. The workflow's account runs the
+pipeline jobs, changes the database tier, and is the identity Cloud Scheduler
+uses to start the workflow. The prediction service holds no permissions at all. The default
 Compute Engine account, which carries `roles/editor`, is not used.
 
 **API keys stay out of logs.** The Seoul Open API takes its key as a URL path
@@ -672,14 +718,16 @@ Tracked here so they are visible rather than discovered during deployment.
     position-based join as the sixth defect in Data quality and cannot be
     checked. Four ARS numbers outside Seoul map to two nodes and were also left
     as they were.
+11. Hourly OD exists for one day, 2025-11-11, and is an allocation of daily OD by
+    stop boarding profiles (see [What the hourly OD is](#what-the-hourly-od-is)).
+    The weekly pipeline refreshes the profiles with each new month but adds no OD
+    days; OD records still arrive by hand through OD correction.
 
 ## Next work
 
 1. Re-run the xarray terrain profile on corrected data.
-2. Put collection and estimation in front of the `warehouse` DAG and give it a
-   monthly schedule that skips, rather than fails, when the new month is not
-   published yet. Publication dates vary: August 2026 data appeared on
-   3 September, while October data was still missing on 4 November.
+2. Make the two ratio solvers read the hourly table once instead of once per
+   route batch; they take 7 of the 9.5 hours of a rebuild.
 3. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
    the cloud database stays read-only for pipeline writes.
 4. Extend OD analysis toward trip-chain analysis — transfer patterns and full
@@ -692,5 +740,8 @@ Tracked here so they are visible rather than discovered during deployment.
    the number-based `route_type` rules against it.
 7. Check the stops in Known gap 10 against an archived stop master from the
    year of each OD date.
+8. Add OD days: allocate the three other corrected dates, then one
+   representative day a month, and look for OD records that carry boarding
+   times to test the allocation against.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
