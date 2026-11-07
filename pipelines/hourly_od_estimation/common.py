@@ -18,7 +18,7 @@ from sqlalchemy import create_engine
 # Holiday list shipped with the repository. Scripts use it unless told otherwise,
 # because running without holidays does not fail: every holiday is silently
 # counted as an ordinary weekday.
-DEFAULT_HOLIDAY_CSV = Path(__file__).resolve().parent / "korea_public_holidays_2020_2026.csv"
+DEFAULT_HOLIDAY_CSV = Path(__file__).resolve().parent / "korea_public_holidays.csv"
 
 # Seven day-type classes used by the decomposition model.
 DAY_TYPES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun_holiday"]

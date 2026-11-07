@@ -11,7 +11,7 @@ if "%DB_PASSWORD%"=="" (
 
 set DB_URL=postgresql://postgres:%DB_PASSWORD%@localhost:5432/Seoul_Transit
 set SUBWAY_CSV_DIR=%~dp0..\..\data\subway_hourly
-set HOLIDAY_CSV=%~dp0..\hourly_od_estimation\korea_public_holidays_2020_2026.csv
+set HOLIDAY_CSV=%~dp0..\hourly_od_estimation\korea_public_holidays.csv
 
 python build_subway_hourly_station_demand_light.py --db-url "%DB_URL%" --input-dir "%SUBWAY_CSV_DIR%" --holiday-csv "%HOLIDAY_CSV%" --batch-size 50000
 

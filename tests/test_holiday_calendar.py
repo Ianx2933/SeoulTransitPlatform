@@ -13,7 +13,7 @@ from pipelines.hourly_od_estimation.common import (
     DAY_TYPES, build_month_counts, day_type_for_date, load_holidays,
 )
 
-HOLIDAY_CSV = Path("pipelines/hourly_od_estimation/korea_public_holidays_2020_2026.csv")
+HOLIDAY_CSV = Path("pipelines/hourly_od_estimation/korea_public_holidays.csv")
 EXPECTED_YEARS = range(2020, 2027)
 FIXED_DATE_HOLIDAYS = {
     (1, 1): "신정", (3, 1): "삼일절", (5, 5): "어린이날", (6, 6): "현충일",

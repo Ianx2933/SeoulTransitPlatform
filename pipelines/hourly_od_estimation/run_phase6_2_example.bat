@@ -14,7 +14,7 @@ if "%DB_PASSWORD%"=="" (
 )
 
 set DB_URL=postgresql://postgres:%DB_PASSWORD%@localhost:5432/Seoul_Transit
-set HOLIDAY_CSV=korea_public_holidays_2020_2026.csv
+set HOLIDAY_CSV=korea_public_holidays.csv
 
 REM 1. Load one month from Seoul API
 REM python load_hourly_boarding.py --db-url "%DB_URL%" --api-key "%SEOUL_API_KEY%" --use-ym 202501

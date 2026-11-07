@@ -23,7 +23,7 @@ venv/
 # Bulk/generated data
 *.csv
 *.xlsx
-!pipelines/hourly_od_estimation/korea_public_holidays_2020_2026.csv
+!pipelines/hourly_od_estimation/korea_public_holidays.csv
 data/raw/
 data/processed/
 BND_ADM_DONG_PG/
