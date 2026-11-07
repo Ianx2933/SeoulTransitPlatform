@@ -658,7 +658,7 @@ firebase.json           Hosting config and the /api/** rewrite to Cloud Run
 - Basemap: © OpenStreetMap contributors.
 
 Secrets are never committed; `.env.example` holds placeholders only. In the
-deployed environment the database credentials and both Seoul Open API keys come
+deployed environment the database credentials and the collector's Seoul Open API key come
 from Secret Manager, and each secret is readable only by the service that uses
 it. `ADMIN_API_TOKEN` is deliberately left unset in deployment, so the
 `/api/od-correction/**` endpoints — which issue UPDATE and DELETE statements —
