@@ -1,0 +1,22 @@
+{
+  "displayName": "transit-pipeline-weekly trigger failed",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Cloud Scheduler could not start transit-pipeline",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"transit-pipeline-weekly\" AND severity>=ERROR"
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": {
+      "period": "3600s"
+    },
+    "autoClose": "604800s"
+  },
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Cloud Scheduler failed to start the weekly workflow, so no run took place.\n\n`gcloud scheduler jobs describe transit-pipeline-weekly --location asia-northeast3 --project seoul-transit-prod --format=\"value(status,lastAttemptTime)\"`\n\nA permission error usually means `transit-workflow-sa` lost `roles/workflows.invoker`."
+  }
+}

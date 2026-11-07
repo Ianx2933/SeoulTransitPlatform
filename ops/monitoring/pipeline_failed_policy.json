@@ -1,0 +1,31 @@
+{
+  "displayName": "transit-pipeline run did not succeed",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "transit-pipeline execution finished FAILED or CANCELLED",
+      "conditionThreshold": {
+        "filter": "resource.type = \"workflows.googleapis.com/Workflow\" AND resource.labels.workflow_id = \"transit-pipeline\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status != \"SUCCEEDED\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA"
+          }
+        ],
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "alertStrategy": {
+    "autoClose": "604800s"
+  },
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "The weekly pipeline ended without success.\n\n1. Check the database tier first; it should be `db-f1-micro`:\n   `gcloud sql instances describe transit-db --project seoul-transit-prod --format=\"value(settings.tier,state)\"`\n2. Find the failed step:\n   `gcloud workflows executions list transit-pipeline --location asia-northeast3 --project seoul-transit-prod --limit 1`\n   `gcloud run jobs executions list --region asia-northeast3 --project seoul-transit-prod --limit 10 --sort-by=\"~metadata.creationTimestamp\"`\n3. After fixing, rerun with `--data '{\"force\":true}'`."
+  }
+}
