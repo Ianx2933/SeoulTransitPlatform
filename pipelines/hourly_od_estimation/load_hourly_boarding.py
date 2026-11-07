@@ -42,10 +42,11 @@ and a daily figure can be summed from hourly rows on demand:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import time
 import xml.etree.ElementTree as ET
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from sqlalchemy import text
@@ -303,6 +304,43 @@ def latest_loaded_month(engine) -> str | None:
     return str(value) if value is not None else None
 
 
+STATE_URI_ENV = "PIPELINE_STATE_URI"
+
+
+def write_run_state(uri: str, state: dict) -> None:
+    """
+    Write what this run loaded to gs://bucket/object as JSON.
+
+    A Cloud Run Job reports only success or failure. The workflow that runs the
+    collector reads this file to decide whether a new month arrived and the
+    rest of the pipeline should run. The workflow picks a new object name for
+    every run, so the collector only creates objects and never overwrites one.
+    """
+    if not uri.startswith("gs://") or "/" not in uri[5:]:
+        raise ValueError(f"{STATE_URI_ENV} must look like gs://bucket/object, got: {uri}")
+    bucket_name, object_name = uri[5:].split("/", 1)
+    from google.cloud import storage  # only needed when the variable is set
+
+    blob = storage.Client().bucket(bucket_name).blob(object_name)
+    blob.upload_from_string(json.dumps(state), content_type="application/json")
+    print(f"Run state written to {uri}")
+
+
+def report_run(latest_before: str | None, loaded: list[str]) -> None:
+    """Print the run summary as one JSON line and write it where the workflow looks."""
+    after = max([m for m in [latest_before, *loaded] if m], default=None)
+    state = {
+        "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "latest_before": latest_before,
+        "loaded_months": loaded,
+        "latest_after": after,
+    }
+    print("RUN_STATE " + json.dumps(state))
+    uri = os.environ.get(STATE_URI_ENV)
+    if uri:
+        write_run_state(uri, state)
+
+
 def merge_records(records: list[dict], buckets: dict) -> None:
     """
     Sum unpivoted records that share the upsert key.
@@ -453,6 +491,7 @@ def main():
     scheduled = not single and not ranged
     engine = make_engine(args.db_url)
 
+    latest = None
     if scheduled:
         # Scheduled runs pass no month. A cron trigger has no way to compute
         # one, and writing the month into the schedule would mean editing the
@@ -473,12 +512,14 @@ def main():
         print(f"Latest month in the table: {latest}; months to try: {months or 'none'}")
         if not months:
             print("Up to date. Nothing to load.")
+            report_run(latest, [])
             return
     else:
         months = [args.use_ym] if single else month_range(args.start_ym, args.end_ym)
 
     total_rows = 0
     failures: list[tuple[str, str]] = []
+    loaded: list[str] = []
 
     for position, use_ym in enumerate(months, start=1):
         print(f"[{position}/{len(months)}] {use_ym}")
@@ -487,6 +528,7 @@ def main():
                 engine, args.api_key, use_ym, args.route_no,
                 args.page_size, args.sleep,
             )
+            loaded.append(use_ym)
         except MonthNotPublished as error:
             if scheduled:
                 # Later months cannot be out before this one.
@@ -509,6 +551,8 @@ def main():
 
     print(f"\nDone. Months processed: {len(months) - len(failures)}/{len(months)}")
     print(f"Inserted/updated unpivoted hourly rows: {total_rows}")
+
+    report_run(latest, loaded)
 
     if failures:
         print(f"\nFailed months ({len(failures)}):")

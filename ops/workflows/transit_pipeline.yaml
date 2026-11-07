@@ -1,0 +1,179 @@
+# Weekly pipeline: collect new months, and only when one arrived rebuild the
+# hourly estimates in Cloud SQL and publish them to BigQuery.
+#
+#   collect -> new month?  no  -> end
+#                          yes -> scale DB up -> 7 Cloud Run Jobs in order
+#                                 -> warehouse (BigQuery + dbt) -> scale DB down
+#
+# The database is scaled back down even when a step fails. The heavy writing
+# steps run one at a time: running two at once made both several times slower
+# on a two-vCPU instance (2026-11-06).
+#
+# Argument (optional): {"force": true} runs the rebuild even without a new month.
+
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - region: "asia-northeast3"
+          - instance: "transit-db"
+          - batch_tier: "db-custom-2-7680"
+          - idle_tier: "db-f1-micro"
+          - state_bucket: "seoul-transit-prod-pipeline"
+          - state_object: ${"state/" + sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + ".json"}
+          - force: false
+    - read_input:
+        switch:
+          - condition: ${input != null and "force" in input}
+            assign:
+              - force: ${input.force}
+
+    - collect:
+        call: run_job
+        args:
+          project: ${project}
+          region: ${region}
+          job: "transit-collector"
+          env:
+            - name: "PIPELINE_STATE_URI"
+              value: ${"gs://" + state_bucket + "/" + state_object}
+          timeout: 3600
+    - read_state:
+        call: googleapis.storage.v1.objects.get
+        args:
+          bucket: ${state_bucket}
+          object: ${text.url_encode(state_object)}
+          alt: "media"
+        result: state
+    - log_state:
+        call: sys.log
+        args:
+          text: '${"collector - before " + default(state.latest_before, "none") + ", loaded " + json.encode_to_string(state.loaded_months)}'
+    - decide:
+        switch:
+          - condition: ${len(state.loaded_months) == 0 and not force}
+            return: ${"No new month (latest " + default(state.latest_after, "none") + "). Nothing rebuilt."}
+
+    - rebuild:
+        try:
+          steps:
+            - scale_up:
+                call: set_tier
+                args:
+                  project: ${project}
+                  instance: ${instance}
+                  tier: ${batch_tier}
+            - month_day_count:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-month-day-count", env: [], timeout: 1800}
+            - ratio:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-dow-ratio", env: [], timeout: 21600}
+            - stop_pattern:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-stop-pattern", env: [], timeout: 21600}
+            - estimate_od:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-estimate-od", env: [], timeout: 10800}
+            - stop_demand:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-stop-demand", env: [], timeout: 7200}
+            - integrated:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-integrated-light", env: [], timeout: 7200}
+            - validate:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-validate", env: [], timeout: 3600}
+            - warehouse:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-warehouse", env: [], timeout: 7200}
+        except:
+          as: error
+          steps:
+            - scale_down_after_failure:
+                call: set_tier
+                args:
+                  project: ${project}
+                  instance: ${instance}
+                  tier: ${idle_tier}
+            - fail:
+                raise: ${error}
+
+    - scale_down:
+        call: set_tier
+        args:
+          project: ${project}
+          instance: ${instance}
+          tier: ${idle_tier}
+    - done:
+        return: ${"Rebuilt and published. Loaded " + json.encode_to_string(state.loaded_months)}
+
+
+# Run a Cloud Run Job and wait for it to finish. A failed execution raises.
+run_job:
+  params: [project, region, job, env, timeout]
+  steps:
+    - log_start:
+        call: sys.log
+        args:
+          text: ${"start " + job}
+    - run:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/" + job}
+          body:
+            overrides:
+              containerOverrides:
+                - env: ${env}
+          connector_params:
+            timeout: ${timeout}
+        result: execution
+    - log_end:
+        call: sys.log
+        args:
+          text: ${"done " + job}
+    - result:
+        return: ${execution}
+
+
+# Change the Cloud SQL tier and wait until the instance accepts connections.
+set_tier:
+  params: [project, instance, tier]
+  steps:
+    - current:
+        call: googleapis.sqladmin.v1.instances.get
+        args:
+          project: ${project}
+          instance: ${instance}
+        result: info
+    - skip_if_same:
+        switch:
+          - condition: ${info.settings.tier == tier}
+            return: ${"tier already " + tier}
+    - patch:
+        call: googleapis.sqladmin.v1.instances.patch
+        args:
+          project: ${project}
+          instance: ${instance}
+          body:
+            settings:
+              tier: ${tier}
+          connector_params:
+            timeout: 1800
+    - wait:
+        call: sys.sleep
+        args:
+          seconds: 30
+    - check:
+        call: googleapis.sqladmin.v1.instances.get
+        args:
+          project: ${project}
+          instance: ${instance}
+        result: info
+    - ready:
+        switch:
+          - condition: ${info.state == "RUNNABLE" and info.settings.tier == tier}
+            return: ${"tier " + tier}
+        next: wait
