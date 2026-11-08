@@ -13,14 +13,19 @@ import os
 import pandas as pd
 from sqlalchemy import text
 
-from common import make_engine
+from common import copy_frame, make_engine, prepare_next_table, table_target, target_table
 
 
-def load_patterns(engine) -> pd.DataFrame:
+DEMAND_TABLE = "estimated_hourly_stop_demand"
+DEMAND_COLUMNS = ["route_no", "stop_ars", "day_type", "hour",
+                  "estimated_boarding", "estimated_alighting", "method"]
+
+
+def load_patterns(engine, table: str = "dow_hourly_stop_pattern") -> pd.DataFrame:
     """
     Load solved hourly stop patterns.
     """
-    return pd.read_sql("""
+    return pd.read_sql(f"""
         SELECT
             route_no,
             stop_ars,
@@ -28,7 +33,7 @@ def load_patterns(engine) -> pd.DataFrame:
             hour,
             avg_boarding_passengers,
             avg_alighting_passengers
-        FROM dow_hourly_stop_pattern
+        FROM {table}
     """, engine)
 
 
@@ -118,17 +123,31 @@ def main():
              "it from a secret instead of a visible argument.",
     )
     parser.add_argument("--batch-size", type=int, default=50000)
+    parser.add_argument("--target", choices=["live", "next"], default=None,
+                        help="Write the table itself (live) or a copy for publish_rebuild "
+                             "(next), reading patterns from the same target. "
+                             "Defaults to PIPELINE_TABLE_TARGET, else live.")
     args = parser.parse_args()
 
     engine = make_engine(args.db_url)
+    target = table_target(args.target)
 
-    patterns = load_patterns(engine)
-    print(f"Loaded stop pattern rows: {len(patterns)}")
+    source = target_table("dow_hourly_stop_pattern", target)
+    patterns = load_patterns(engine, source)
+    print(f"Loaded stop pattern rows from {source}: {len(patterns)}")
 
     demand_df = build_stop_demand(patterns)
     print(f"Generated stop demand rows before save: {len(demand_df)}")
 
-    save_stop_demand(engine, demand_df, args.batch_size)
+    if target == "next":
+        with engine.begin() as conn:
+            nxt = prepare_next_table(conn, DEMAND_TABLE)
+            copy_frame(conn, demand_df, nxt, DEMAND_COLUMNS)
+        with engine.begin() as conn:
+            conn.execute(text(f"ANALYZE {nxt}"))
+        print(f"Wrote {nxt}")
+    else:
+        save_stop_demand(engine, demand_df, args.batch_size)
 
     print(f"Generated stop demand rows: {len(demand_df)}")
 

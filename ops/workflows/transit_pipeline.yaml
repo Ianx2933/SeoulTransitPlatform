@@ -2,8 +2,13 @@
 # hourly estimates in Cloud SQL and publish them to BigQuery.
 #
 #   collect -> new month?  no  -> end
-#                          yes -> scale DB up -> 7 Cloud Run Jobs in order
+#                          yes -> scale DB up -> rebuild into <table>__next copies
+#                                 -> validate the copies -> publish (swap them in)
 #                                 -> warehouse (BigQuery + dbt) -> scale DB down
+#
+# The rebuild steps run with PIPELINE_TABLE_TARGET=next, so the API keeps reading
+# the previous tables until validation has passed and publish swaps all five in
+# one transaction. A failed check leaves the API and BigQuery as they were.
 #
 # The database is scaled back down even when a step fails. The heavy writing
 # steps run one at a time: running two at once made both several times slower
@@ -24,6 +29,9 @@ main:
           - state_bucket: "seoul-transit-prod-pipeline"
           - state_object: ${"state/" + sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + ".json"}
           - force: false
+          - rebuild_env:
+              - name: "PIPELINE_TABLE_TARGET"
+                value: "next"
     - read_input:
         switch:
           - condition: ${input != null and "force" in input}
@@ -70,22 +78,25 @@ main:
                 args: {project: '${project}', region: '${region}', job: "transit-month-day-count", env: [], timeout: 1800}
             - ratio:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-dow-ratio", env: [], timeout: 21600}
+                args: {project: '${project}', region: '${region}', job: "transit-dow-ratio", env: '${rebuild_env}', timeout: 21600}
             - stop_pattern:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-stop-pattern", env: [], timeout: 21600}
+                args: {project: '${project}', region: '${region}', job: "transit-stop-pattern", env: '${rebuild_env}', timeout: 21600}
             - estimate_od:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-estimate-od", env: [], timeout: 10800}
+                args: {project: '${project}', region: '${region}', job: "transit-estimate-od", env: '${rebuild_env}', timeout: 10800}
             - stop_demand:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-stop-demand", env: [], timeout: 7200}
+                args: {project: '${project}', region: '${region}', job: "transit-stop-demand", env: '${rebuild_env}', timeout: 7200}
             - integrated:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-integrated-light", env: [], timeout: 7200}
+                args: {project: '${project}', region: '${region}', job: "transit-integrated-light", env: '${rebuild_env}', timeout: 7200}
             - validate:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-validate", env: [], timeout: 3600}
+                args: {project: '${project}', region: '${region}', job: "transit-validate", env: '${rebuild_env}', timeout: 3600}
+            - publish:
+                call: run_job
+                args: {project: '${project}', region: '${region}', job: "transit-publish", env: [], timeout: 1800}
             - warehouse:
                 call: run_job
                 args: {project: '${project}', region: '${region}', job: "transit-warehouse", env: [], timeout: 7200}

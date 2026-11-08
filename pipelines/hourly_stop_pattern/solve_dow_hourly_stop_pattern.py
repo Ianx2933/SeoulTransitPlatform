@@ -35,7 +35,14 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
-from common import DAY_TYPES, make_engine
+from common import (
+    DAY_TYPES,
+    copy_frame,
+    make_engine,
+    prepare_next_table,
+    table_target,
+    target_table,
+)
 
 
 KEY_COLUMNS = ["route_no", "stop_ars", "hour"]
@@ -396,10 +403,19 @@ def copy_upsert(conn, frame: pd.DataFrame, table: str, columns: list[str],
     )
 
 
-def write_batch(engine, pattern_df: pd.DataFrame) -> None:
-    """Write one batch in its own transaction."""
+def write_batch(engine, pattern_df: pd.DataFrame, table: str = PATTERN_TABLE,
+                upsert: bool = True) -> None:
+    """
+    Write one batch in its own transaction.
+
+    Into the table itself rows are upserted; into a fresh __next copy they are
+    only appended, and its primary key still rejects a repeated key.
+    """
     with engine.begin() as conn:
-        copy_upsert(conn, pattern_df, PATTERN_TABLE, PATTERN_COLUMNS, PATTERN_KEY)
+        if upsert:
+            copy_upsert(conn, pattern_df, table, PATTERN_COLUMNS, PATTERN_KEY)
+        else:
+            copy_frame(conn, pattern_df, table, PATTERN_COLUMNS)
 
 
 RETRY_ATTEMPTS = 3
@@ -531,12 +547,21 @@ def main():
                              "database's temporary file limit.")
     parser.add_argument("--chunk-rows", type=int, default=200_000,
                         help="Rows fetched from the server-side cursor at a time.")
+    parser.add_argument("--target", choices=["live", "next"], default=None,
+                        help="Write the table itself (live) or a copy for publish_rebuild "
+                             "(next). Defaults to PIPELINE_TABLE_TARGET, else live.")
     parser.add_argument("--work-mem", default="256MB",
                         help="work_mem for the read query, so its sort stays in memory. "
                              "Empty to use the server default.")
     args = parser.parse_args()
 
     engine = make_engine(args.db_url)
+    target = table_target(args.target)
+    table = target_table(PATTERN_TABLE, target)
+    if target == "next" and args.start_route_index == 0:
+        with engine.begin() as conn:
+            prepare_next_table(conn, PATTERN_TABLE)
+    print(f"Writing {table}")
     month_counts = load_month_counts(engine)
     routes = load_route_list(engine)
 
@@ -554,12 +579,13 @@ def main():
         start_index=args.start_route_index, routes_per_read=args.routes_per_read,
         chunk_rows=args.chunk_rows,
         work_mem=args.work_mem or None,
+        write=lambda e, frame: write_batch(e, frame, table, upsert=(target == "live")),
     )
 
     # The stop demand estimator reads this table next; fresh statistics keep its
     # plan from being chosen for the table as it was before the rewrite.
     with engine.begin() as conn:
-        conn.execute(text(f"ANALYZE {PATTERN_TABLE}"))
+        conn.execute(text(f"ANALYZE {table}"))
 
     print(f"Done. Generated stop pattern rows: {total_output:,}")
 

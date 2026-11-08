@@ -12,15 +12,24 @@ Cloud Scheduler (weekly)
         └─ new month(s)
              scale Cloud SQL db-f1-micro -> db-custom-2-7680
              transit-month-day-count
+             ── with PIPELINE_TABLE_TARGET=next, each writes <table>__next ──
              transit-dow-ratio          day-type x hour ratios by route and stop, least squares over all months
              transit-stop-pattern       the same at stop level
              transit-estimate-od        daily OD allocated to hours
              transit-stop-demand
              transit-integrated-light   bus + subway
-             transit-validate           validate_rebuild.py; any failed check stops the run
+             transit-validate           validate_rebuild.py on the __next copies; a failed check stops the run
+             ───────────────────────────────────────────────────────────────
+             transit-publish            publish_rebuild.py: swaps all five copies in, in one transaction
              transit-warehouse          Cloud SQL export -> BigQuery staging -> dbt build --target prod
              scale Cloud SQL back to db-f1-micro (also when any step above fails)
 ```
+
+Until `transit-publish` runs, the API and the warehouse read the previous tables. A
+run that fails at any step before it leaves them as they were; the `__next` copies
+stay behind for inspection and are replaced by the next run. Writing the copies from
+empty also keeps the tables compact. Updating them in place left each rebuilt table
+up to twice its size, which slowed every later step that reads them whole.
 
 The steps run one at a time. On a two-vCPU instance, running two write-heavy jobs at once
 made both several times slower than running them in sequence.
@@ -38,7 +47,17 @@ gcloud workflows run transit-pipeline --location asia-northeast3 --project seoul
 gcloud run jobs executions list --region asia-northeast3 --project seoul-transit-prod --limit 10 --sort-by="~metadata.creationTimestamp"
 ```
 
-## First runs (2026-11-07)
+## Runs
+
+### 2026-11-08: solvers read the table in a few sorted passes
+
+A forced rebuild after the ratio solvers stopped querying the hourly table once per
+batch of 25 routes: 3 h 42 min instead of 9 h 30 min, same SHA-256 over the hourly OD.
+Ratio 11 min 36 s (was 3 h 15 min), stop pattern 13 min 54 s (was 3 h 44 min). The
+steps after them were slower than the day before (validation 40 min against 17), with
+the rebuilt tables at about twice their row size; that run still updated tables in place.
+
+### 2026-11-07: first runs
 
 | Run | Result |
 |---|---|
@@ -54,7 +73,8 @@ reads the hourly table once per batch of routes.
 ## Prerequisites
 
 - The Cloud Run Jobs named above, on the pipeline image, with Cloud SQL attached and
-  `PIPELINE_DB_URL` from Secret Manager.
+  `PIPELINE_DB_URL` from Secret Manager. `transit-publish` runs
+  `python -m pipelines.hourly_od_estimation.publish_rebuild`.
 - Bucket `seoul-transit-prod-pipeline`. The collector's service account writes the state
   file; the workflow's reads it.
 - Service account `transit-workflow-sa`, which needs to run the jobs with environment

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import hashlib
 import json
@@ -29,7 +30,36 @@ import datetime as dt
 
 from sqlalchemy import text
 
-from .common import make_engine
+from .common import NEXT_SUFFIX, make_engine, table_target
+
+
+# Tables a rebuild writes. With --target next (the weekly workflow) the checks
+# read their __next copies, the ones publish_rebuild.py swaps in only when every
+# check here passes. Source tables are always read as they are.
+REBUILT_TABLES = [
+    "dow_hourly_ratio",
+    "dow_hourly_stop_pattern",
+    "estimated_hourly_od",
+    "estimated_hourly_stop_demand",
+    "integrated_hourly_transit_demand_light",
+]
+_REBUILT = re.compile(r"\b(" + "|".join(REBUILT_TABLES) + r")\b(?!" + NEXT_SUFFIX + ")")
+_suffix = ""
+
+
+def use_target(target: str) -> None:
+    """Point every check at the live tables or at their __next copies."""
+    global _suffix
+    _suffix = NEXT_SUFFIX if target == "next" else ""
+
+
+def qualify(sql: str) -> str:
+    """Rename rebuilt tables in a statement to the current target."""
+    return _REBUILT.sub(lambda m: m.group(1) + _suffix, sql) if _suffix else sql
+
+
+def sql_text(sql: str):
+    return text(qualify(sql))
 
 
 # Derived tables that carry stop_ars and must contain only real five-digit codes.
@@ -87,7 +117,7 @@ class Report:
 
 
 def scalar(conn, sql: str, **params):
-    return conn.execute(text(sql), params).scalar()
+    return conn.execute(sql_text(sql), params).scalar()
 
 
 def check_ratio_sums(conn, report: Report) -> None:
@@ -115,7 +145,7 @@ def check_ratio_sums(conn, report: Report) -> None:
             GROUP BY route_no, stop_ars, day_type
         ) t
     """
-    row = conn.execute(text(sql), {"tol": RATIO_TOLERANCE}).one()
+    row = conn.execute(sql_text(sql), {"tol": RATIO_TOLERANCE}).one()
     total, zero_keys, bad_keys = row.total, row.zero_keys, row.bad_keys
     report.add(
         "ratio profiles sum to 1 or 0",
@@ -144,7 +174,7 @@ def od_total_matches(source: float, estimated: float) -> bool:
 def check_od_totals(conn, report: Report, start_date: str, end_date: str) -> None:
     # Mirror estimator key normalization before grouping the source. NULL or
     # malformed source keys are checked separately rather than silently ignored.
-    row = conn.execute(text("""
+    row = conn.execute(sql_text("""
         WITH source AS (
             SELECT 기준일자, BTRIM(노선명) AS 노선명,
                    LPAD(BTRIM(승차_정류장ars), 5, '0') AS 승차_정류장ars,
@@ -201,7 +231,7 @@ def check_method_breakdown(conn, report: Report, start_date: str, end_date: str)
     Informational, but these are the figures the README validation table quotes,
     so they are printed here rather than looked up by hand afterwards.
     """
-    rows = conn.execute(text("""
+    rows = conn.execute(sql_text("""
         SELECT method, COUNT(*) AS rows
         FROM estimated_hourly_od
         WHERE 기준일자 >= :start_date AND 기준일자 <= :end_date
@@ -251,7 +281,7 @@ def check_ars_codes(conn, report: Report) -> None:
             "SELECT COUNT(*) FROM " + table +
             " WHERE stop_ars IS NULL OR stop_ars !~ '^[0-9][0-9][0-9][0-9][0-9]$' OR stop_ars = '00000'",
         )
-        report.add(f"ARS codes valid in {table}", bad == 0, f"{bad:,} invalid rows")
+        report.add(f"ARS codes valid in {qualify(table)}", bad == 0, f"{bad:,} invalid rows")
 
 
 def check_tables_not_empty(conn, report: Report) -> None:
@@ -259,7 +289,7 @@ def check_tables_not_empty(conn, report: Report) -> None:
     """
     for table in NON_EMPTY_TABLES:
         count = scalar(conn, "SELECT COUNT(*) FROM " + table)
-        report.add(f"{table} not empty", count > 0, f"{count:,} rows")
+        report.add(f"{qualify(table)} not empty", count > 0, f"{count:,} rows")
 
 
 def fingerprint_rows(rows) -> tuple[int, str]:
@@ -283,7 +313,7 @@ def fingerprint_rows(rows) -> tuple[int, str]:
 def print_fingerprint(conn, start_date: str, end_date: str) -> None:
     # Server-side streaming keeps memory bounded. ORDER BY is essential: a
     # physical table scan can change order after a rebuild or VACUUM.
-    result = conn.execution_options(stream_results=True).execute(text("""
+    result = conn.execution_options(stream_results=True).execute(sql_text("""
         SELECT 기준일자, 노선명, 승차_정류장ars, 하차_정류장ars,
                hour, estimated_passengers, method
         FROM estimated_hourly_od
@@ -308,6 +338,9 @@ def main() -> int:
     )
     parser.add_argument("--start-date", required=True, help="YYYYMMDD")
     parser.add_argument("--end-date", required=True, help="YYYYMMDD")
+    parser.add_argument("--target", choices=["live", "next"], default=None,
+                        help="Check the tables themselves (live) or the __next copies a "
+                             "rebuild wrote (next). Defaults to PIPELINE_TABLE_TARGET, else live.")
     args = parser.parse_args()
 
     try:
@@ -318,6 +351,9 @@ def main() -> int:
     except ValueError:
         parser.error("dates must be YYYYMMDD and start-date <= end-date")
     engine = make_engine(args.db_url)
+    target = table_target(args.target)
+    use_target(target)
+    print(f"Checking {'the __next copies' if target == 'next' else 'the tables themselves'}")
     report = Report()
 
     with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:

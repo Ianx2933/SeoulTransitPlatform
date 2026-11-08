@@ -8,11 +8,13 @@ Keeping shared logic here prevents duplicated date/ARS/day-type rules across scr
 from __future__ import annotations
 
 import calendar
+import io
+import os
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 
 # Holiday list shipped with the repository. Scripts use it unless told otherwise,
@@ -192,3 +194,66 @@ def require_holiday_coverage(holidays: set[str], years) -> None:
             f"Holiday list does not cover {', '.join(map(str, missing))} "
             f"(covers {span}). Extend the holiday CSV before processing these dates."
         )
+
+
+# --- Rebuilding into a copy that replaces the table only after validation ---
+#
+# The weekly workflow sets PIPELINE_TABLE_TARGET=next. Each rebuilt table is then
+# written to <table>__next, the steps after it read that copy, validation checks
+# the copies, and publish_rebuild.py swaps them in. Until then the API keeps
+# reading the previous, validated tables, and since the copies are filled from
+# empty with COPY, a rebuild leaves no dead rows behind. Without the variable,
+# scripts write the table itself as before, which is what local runs use.
+
+TABLE_TARGET_ENV = "PIPELINE_TABLE_TARGET"
+NEXT_SUFFIX = "__next"
+
+
+def table_target(value: str | None = None) -> str:
+    """'live' or 'next', from the argument, else PIPELINE_TABLE_TARGET, else live."""
+    target = (value or os.environ.get(TABLE_TARGET_ENV) or "live").strip().lower()
+    if target not in ("live", "next"):
+        raise SystemExit(f"{TABLE_TARGET_ENV} must be 'live' or 'next', not {target!r}")
+    return target
+
+
+def target_table(table: str, target: str) -> str:
+    return table + NEXT_SUFFIX if target == "next" else table
+
+
+def prepare_next_table(conn, table: str, keep_where: str | None = None,
+                       params: dict | None = None) -> str:
+    """
+    Create an empty <table>__next with the table's columns, keys and indexes.
+
+    keep_where copies the rows of the current table that this rebuild does not
+    replace, such as estimates for other dates.
+    """
+    nxt = table + NEXT_SUFFIX
+    conn.exec_driver_sql(f"DROP TABLE IF EXISTS {nxt}")
+    conn.exec_driver_sql(f"CREATE TABLE {nxt} (LIKE {table} INCLUDING ALL)")
+    if keep_where:
+        conn.execute(text(f"INSERT INTO {nxt} SELECT * FROM {table} WHERE {keep_where}"),
+                     params or {})
+    return nxt
+
+
+def copy_frame(conn, frame: pd.DataFrame, table: str, columns: list[str],
+               chunk_rows: int = 500_000) -> int:
+    """
+    Append rows with COPY. Floats are written in the shortest form that reads back
+    to the same double, so stored values match a parameterised INSERT exactly.
+    """
+    if frame.empty:
+        return 0
+    cols = ", ".join(columns)
+    cursor = conn.connection.cursor()
+    try:
+        for start in range(0, len(frame), chunk_rows):
+            buffer = io.StringIO()
+            frame.iloc[start:start + chunk_rows][columns].to_csv(buffer, index=False, header=False)
+            buffer.seek(0)
+            cursor.copy_expert(f"COPY {table} ({cols}) FROM STDIN WITH (FORMAT csv)", buffer)
+    finally:
+        cursor.close()
+    return len(frame)

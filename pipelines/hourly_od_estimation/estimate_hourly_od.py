@@ -12,11 +12,15 @@ from sqlalchemy import text
 
 from .common import (
     DEFAULT_HOLIDAY_CSV,
+    copy_frame,
     day_type_from_yyyymmdd,
     load_holidays,
     make_engine,
     normalize_ars,
+    prepare_next_table,
     require_holiday_coverage,
+    table_target,
+    target_table,
 )
 
 
@@ -142,7 +146,7 @@ def build_ratio_map(df: pd.DataFrame) -> tuple[dict[tuple[str, str, str], list[f
     return ratio_map, zero_keys
 
 
-def load_ratio_map(engine, day_types: list[str] | None = None):
+def load_ratio_map(engine, day_types: list[str] | None = None, table: str = "dow_hourly_ratio"):
     """
     Load ratio table into an in-memory lookup map.
 
@@ -156,11 +160,16 @@ def load_ratio_map(engine, day_types: list[str] | None = None):
     params = {"day_types": list(day_types)} if day_types else {}
     df = pd.read_sql(text(f"""
         SELECT route_no, stop_ars, day_type, hour, boarding_ratio
-        FROM dow_hourly_ratio
+        FROM {table}
         {day_filter}
     """), engine, params=params)
 
     return build_ratio_map(df)
+
+
+OD_TABLE = "estimated_hourly_od"
+OD_COLUMNS = ["기준일자", "노선명", "승차_정류장ars", "하차_정류장ars",
+              "hour", "estimated_passengers", "method"]
 
 
 INSERT_SQL = text("""
@@ -217,7 +226,7 @@ def select_profile(key: tuple[str, str, str], ratio_map: dict, zero_keys: set) -
 
 
 def estimate(engine, daily_od: pd.DataFrame, ratio_map: dict, zero_keys: set, holidays: set[str],
-             batch_size: int, conn=None) -> int:
+             batch_size: int, conn=None, writer=None) -> int:
     """
     Apply hourly ratios to daily OD records.
 
@@ -227,6 +236,8 @@ def estimate(engine, daily_od: pd.DataFrame, ratio_map: dict, zero_keys: set, ho
 
     Every input row produces exactly 24 output rows whose estimates sum to the
     daily passenger count, whichever profile was selected.
+
+    writer, when given, receives each batch of records instead of the upsert.
     """
     buffer = []
     total = 0
@@ -262,7 +273,10 @@ def estimate(engine, daily_od: pd.DataFrame, ratio_map: dict, zero_keys: set, ho
             })
 
         if len(buffer) >= batch_size:
-            save_estimates(engine, buffer, conn)
+            if writer is not None:
+                writer(buffer)
+            else:
+                save_estimates(engine, buffer, conn)
             total += len(buffer)
             buffer.clear()
             if total >= next_report:
@@ -270,7 +284,10 @@ def estimate(engine, daily_od: pd.DataFrame, ratio_map: dict, zero_keys: set, ho
                 next_report += 500_000
 
     if buffer:
-        save_estimates(engine, buffer, conn)
+        if writer is not None:
+            writer(buffer)
+        else:
+            save_estimates(engine, buffer, conn)
         total += len(buffer)
 
     return total
@@ -291,6 +308,10 @@ def main():
     parser.add_argument("--holiday-csv", default=str(DEFAULT_HOLIDAY_CSV))
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=5000)
+    parser.add_argument("--target", choices=["live", "next"], default=None,
+                        help="Write estimated_hourly_od itself (live) or a copy for "
+                             "publish_rebuild (next), reading ratios from the same target. "
+                             "Defaults to PIPELINE_TABLE_TARGET, else live.")
     parser.add_argument(
         "--replace",
         action="store_true",
@@ -300,6 +321,11 @@ def main():
     )
     args = parser.parse_args()
 
+    target = table_target(args.target)
+    if target == "next" and not (args.start_date and args.end_date):
+        raise SystemExit("Writing the next copy needs both --start-date and --end-date.")
+    if target == "next" and args.limit:
+        raise SystemExit("Writing the next copy cannot be combined with --limit.")
     if args.replace and not (args.start_date and args.end_date):
         raise SystemExit("--replace needs both --start-date and --end-date.")
     if args.replace and args.limit:
@@ -311,12 +337,32 @@ def main():
     daily_od = load_daily_od(engine, args.start_date, args.end_date, args.limit)
     require_holiday_coverage(holidays, {str(d)[:4] for d in daily_od["기준일자"].unique()})
     day_types = sorted({day_type_from_yyyymmdd(str(d), holidays) for d in daily_od["기준일자"].unique()})
-    ratio_map, zero_keys = load_ratio_map(engine, day_types) if day_types else ({}, set())
+    ratio_table = target_table("dow_hourly_ratio", target)
+    ratio_map, zero_keys = (load_ratio_map(engine, day_types, ratio_table) if day_types
+                            else ({}, set()))
 
     print(f"Daily OD rows: {len(daily_od):,}")
     print(f"Day types: {day_types}")
     print(f"Ratio keys usable: {len(ratio_map):,}")
     print(f"Ratio keys all zero, routed to fallback: {len(zero_keys):,}")
+    print(f"Ratios from {ratio_table}")
+
+    if target == "next":
+        # The copy starts with every row outside the date range, so dates this run
+        # does not estimate survive the swap, then receives this range.
+        with engine.begin() as conn:
+            nxt = prepare_next_table(
+                conn, OD_TABLE, keep_where="NOT (기준일자 >= :start_date AND 기준일자 <= :end_date)",
+                params={"start_date": args.start_date, "end_date": args.end_date})
+            kept = conn.execute(text(f"SELECT COUNT(*) FROM {nxt}")).scalar()
+            print(f"{nxt}: kept {kept:,} rows outside {args.start_date}-{args.end_date}")
+            total = estimate(engine, daily_od, ratio_map, zero_keys, holidays, args.batch_size,
+                             writer=lambda records: copy_frame(
+                                 conn, pd.DataFrame(records, columns=OD_COLUMNS), nxt, OD_COLUMNS))
+        with engine.begin() as conn:
+            conn.execute(text(f"ANALYZE {nxt}"))
+        print(f"Done. Inserted {nxt} rows: {total:,}")
+        return
 
     if not args.replace:
         total = estimate(engine, daily_od, ratio_map, zero_keys, holidays, args.batch_size)
