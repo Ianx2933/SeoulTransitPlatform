@@ -133,15 +133,14 @@ def dropped():
     return OperationalError("SELECT ...", {}, Exception("server closed the connection unexpectedly"))
 
 
-def fake_stream(frame, drops, drop_at):
-    """Serve route-ordered chunks from start_route on; raise at chunk drop_at while drops remain."""
-    calls = []
+def fake_stream(frame, drops=(), drop_at=None):
+    """Serve route-ordered chunks for start_route..end_route; raise at chunk drop_at while drops remain."""
+    calls, drops = [], list(drops)
 
-    def stream(engine, start_route, chunk_rows, work_mem):
-        calls.append(start_route)
-        rows = frame
-        if start_route is not None:
-            rows = frame[frame["route_no"].map(ROUTES.index) >= ROUTES.index(start_route)]
+    def stream(engine, start_route, end_route, chunk_rows, work_mem):
+        calls.append((start_route, end_route))
+        pos = frame["route_no"].map(ROUTES.index)
+        rows = frame[(pos >= ROUTES.index(start_route)) & (pos <= ROUTES.index(end_route))]
         for n, chunk in enumerate(chunked(rows.reset_index(drop=True), 10)):
             if drops and n == drop_at:
                 drops.pop()
@@ -161,10 +160,10 @@ def test_a_dropped_read_resumes_at_the_first_unwritten_batch(module, capsys):
     written, waits, engine = [], [], FakeEngine()
 
     module.run(engine, ROUTES, month_counts(), route_batch=2, min_months=3,
-               stream=stream, write=lambda e, df: written.append(df),
+               routes_per_read=100, stream=stream, write=lambda e, df: written.append(df),
                sleep=waits.append)
 
-    assert calls == [None, "102"]
+    assert calls == [("100", "106"), ("102", "106")]
     assert engine.disposed == 1 and waits == [module.RETRY_WAIT_SECONDS]
     expected = [df for _, df in per_batch_version(module, frame, 2)]
     assert len(written) == len(expected)
@@ -178,7 +177,7 @@ def test_a_dropped_read_resumes_at_the_first_unwritten_batch(module, capsys):
 def test_the_run_gives_up_after_drops_in_a_row(module):
     frame = route_ordered(hourly_rows(module))
 
-    def stream(engine, start_route, chunk_rows, work_mem):
+    def stream(engine, start_route, end_route, chunk_rows, work_mem):
         raise dropped()
         yield  # pragma: no cover
 
@@ -187,6 +186,81 @@ def test_the_run_gives_up_after_drops_in_a_row(module):
         module.run(engine, ROUTES, month_counts(), route_batch=2, min_months=3,
                    stream=stream, write=lambda e, df: None, attempts=3, sleep=lambda s: None)
     assert engine.disposed == 2
+
+
+@pytest.mark.parametrize("module", SOLVERS, ids=IDS)
+def test_a_server_limit_is_not_retried(module):
+    """temp_file_limit on 2026-11-08: waiting and repeating the same sort fails again."""
+    class LimitExceeded(Exception):
+        pgcode = "53400"
+
+    def stream(engine, start_route, end_route, chunk_rows, work_mem):
+        raise OperationalError("SELECT ...", {}, LimitExceeded("temporary file size exceeds"))
+        yield  # pragma: no cover
+
+    engine, waits = FakeEngine(), []
+    with pytest.raises(OperationalError):
+        module.run(engine, ROUTES, month_counts(), route_batch=2, min_months=3,
+                   stream=stream, write=lambda e, df: None, sleep=waits.append)
+    assert waits == [] and engine.disposed == 0
+
+
+@pytest.mark.parametrize("module", SOLVERS, ids=IDS)
+@pytest.mark.parametrize("routes_per_read, expected_reads", [
+    (3, [("100", "103"), ("104", "106")]),      # rounded up to two batches of 2
+    (2, [("100", "101"), ("102", "103"), ("104", "105"), ("106", "106")]),
+    (100, [("100", "106")]),
+])
+def test_reads_are_windows_of_whole_batches_with_the_same_results(
+        module, routes_per_read, expected_reads):
+    frame = route_ordered(hourly_rows(module))
+    stream, calls = fake_stream(frame)
+    written = []
+
+    module.run(FakeEngine(), ROUTES, month_counts(), route_batch=2, min_months=3,
+               routes_per_read=routes_per_read, stream=stream,
+               write=lambda e, df: written.append(df))
+
+    assert calls == expected_reads
+    expected = [df for _, df in per_batch_version(module, frame, 2)]
+    assert len(written) == len(expected)
+    for got, want in zip(written, expected):
+        pd.testing.assert_frame_equal(got.reset_index(drop=True), want.reset_index(drop=True),
+                                      check_exact=True)
+
+
+@pytest.mark.parametrize("module", SOLVERS, ids=IDS)
+def test_a_drop_in_a_later_window_resumes_inside_that_window(module):
+    frame = route_ordered(hourly_rows(module))
+    rows_before_104 = int(frame["route_no"].isin(ROUTES[:4]).sum())
+    rows_104_105 = int(frame["route_no"].isin(ROUTES[4:6]).sum())
+    # Second window (routes 104-106) drops after its first batch (104-105) is written.
+    stream, calls = fake_stream(frame, drops=[1], drop_at=None)
+    seen = {"n": 0}
+
+    def flaky(engine, start_route, end_route, chunk_rows, work_mem):
+        seen["n"] += 1
+        inner = stream(engine, start_route, end_route, chunk_rows, work_mem)
+        for i, chunk in enumerate(inner):
+            if seen["n"] == 2 and i == rows_104_105 // 10 + 1:
+                raise dropped()
+            yield chunk
+
+    written = []
+    module.run(FakeEngine(), ROUTES, month_counts(), route_batch=2, min_months=3,
+               routes_per_read=4, stream=flaky, write=lambda e, df: written.append(df),
+               sleep=lambda s: None)
+
+    assert rows_before_104 > 0
+    assert calls == [("100", "103"), ("104", "106"), ("106", "106")]
+    assert len(written) == len(per_batch_version(module, frame, 2))
+
+
+@pytest.mark.parametrize("module", SOLVERS, ids=IDS)
+def test_a_row_past_the_window_is_refused(module):
+    frame = route_ordered(hourly_rows(module))
+    with pytest.raises(ValueError, match="outside the routes"):
+        list(module.route_batches(chunked(frame, 9), ROUTES, 2, 0, 4))
 
 
 class RecordingConnection:

@@ -35,8 +35,9 @@ def compare(engine, module, min_months: int, batches: int, route_batch: int,
     month_counts = module.load_month_counts(engine)
 
     started = time.perf_counter()
-    chunks = module.stream_hourly_monthly(engine, None, 200_000, work_mem)
-    stream = module.route_batches(chunks, routes, route_batch)
+    end = min(batches * route_batch, len(routes))
+    chunks = module.stream_hourly_monthly(engine, routes[0], routes[end - 1], 200_000, work_mem)
+    stream = module.route_batches(chunks, routes, route_batch, 0, end)
     try:
         mark = time.perf_counter()
         for n, (start, rows) in enumerate(stream):
@@ -53,7 +54,7 @@ def compare(engine, module, min_months: int, batches: int, route_batch: int,
             pd.testing.assert_frame_equal(new.reset_index(drop=True),
                                           old.reset_index(drop=True), check_exact=True)
             label = f"routes {start + 1}-{min(start + route_batch, len(routes))}"
-            first = " (includes the sort of the whole table)" if n == 0 else ""
+            first = " (includes sorting the window)" if n == 0 else ""
             print(f"  {label}: {len(rows):,} rows, {len(new):,} solved rows identical; "
                   f"stream {streamed_s:.1f}s{first}, per-batch query {query_s:.1f}s")
             mark = time.perf_counter()

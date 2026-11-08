@@ -13,9 +13,9 @@ Groups that observed the same set of months share the same A, so they are
 solved together in one least-squares call. The result is identical to
 solving each group separately.
 
-The monthly table is read once, as one query ordered by route and streamed
-through a server-side cursor, and cut into the same route batches the previous
-version queried one at a time. Each per-batch query had to find its routes'
+The monthly table is read in a few windows of routes, each one query ordered by
+route and streamed through a server-side cursor, and cut into the same route
+batches the previous version queried one at a time. Each per-batch query had to find its routes'
 rows scattered across every month of a 30-million-row table; on Cloud SQL that
 took about seven minutes per 25 routes and 3 h 15 min for the whole run
 (2026-11-07). Results are written with COPY into a temporary table and one
@@ -93,18 +93,22 @@ def load_hourly_monthly(engine, routes: list[str] | None = None) -> pd.DataFrame
 HOURLY_COLUMNS = ["use_ym", "route_no", "stop_ars", "hour", "monthly_boarding"]
 
 
-def stream_hourly_monthly(engine, start_route: str | None = None, chunk_rows: int = 200_000,
-                          work_mem: str | None = None) -> Iterator[pd.DataFrame]:
+def stream_hourly_monthly(engine, start_route: str | None = None, end_route: str | None = None,
+                          chunk_rows: int = 200_000, work_mem: str | None = None
+                          ) -> Iterator[pd.DataFrame]:
     """
-    Read the same rows as load_hourly_monthly for every route, in one query
-    ordered by route, and yield them in chunks as they arrive.
+    Read the same rows as load_hourly_monthly for the routes from start_route
+    to end_route inclusive, in one query ordered by route, and yield them in
+    chunks as they arrive.
 
     The ordering is what lets the caller cut route batches without a query per
-    batch. start_route skips routes sorting before it, to resume after a
-    dropped connection. work_mem applies to this query only, so the sort stays
-    in memory instead of spilling to disk.
+    batch. The window keeps the sort small: sorting the whole table at once
+    needed more temporary disk than Cloud SQL allows one query (temp_file_limit,
+    about 3 GB on 2026-11-08), and the table grows every month. work_mem applies
+    to this query only.
     """
     start_filter = "AND route_no >= :start_route" if start_route is not None else ""
+    end_filter = "AND route_no <= :end_route" if end_route is not None else ""
     sql = text(f"""
         SELECT
             use_ym,
@@ -116,10 +120,15 @@ def stream_hourly_monthly(engine, start_route: str | None = None, chunk_rows: in
         WHERE stop_ars ~ '^[0-9][0-9][0-9][0-9][0-9]$'
           AND stop_ars <> '00000'
           {start_filter}
+          {end_filter}
         GROUP BY use_ym, route_no, stop_ars, hour
         ORDER BY route_no
     """)
-    params = {"start_route": start_route} if start_route is not None else {}
+    params = {}
+    if start_route is not None:
+        params["start_route"] = start_route
+    if end_route is not None:
+        params["end_route"] = end_route
     with engine.connect() as conn:
         conn = conn.execution_options(stream_results=True, max_row_buffer=chunk_rows)
         if work_mem:
@@ -128,11 +137,11 @@ def stream_hourly_monthly(engine, start_route: str | None = None, chunk_rows: in
 
 
 def route_batches(chunks: Iterable[pd.DataFrame], routes: list[str], route_batch: int,
-                  start_index: int = 0, columns: list[str] = HOURLY_COLUMNS
-                  ) -> Iterator[tuple[int, pd.DataFrame]]:
+                  start_index: int = 0, end_index: int | None = None,
+                  columns: list[str] = HOURLY_COLUMNS) -> Iterator[tuple[int, pd.DataFrame]]:
     """
     Regroup route-ordered chunks into the batches routes[s:s + route_batch]
-    for s = start_index, start_index + route_batch, ...
+    for s = start_index, start_index + route_batch, ... below end_index.
 
     Every batch is yielded, in order, including batches whose routes have no
     rows, so progress and resume points match the per-batch version. Rows must
@@ -140,7 +149,8 @@ def route_batches(chunks: Iterable[pd.DataFrame], routes: list[str], route_batch
     or from an unknown route raises instead of being put in the wrong batch.
     """
     position = pd.Series(np.arange(len(routes)), index=pd.Index(routes, dtype=object))
-    starts = list(range(start_index, len(routes), route_batch))
+    end_index = len(routes) if end_index is None else end_index
+    starts = list(range(start_index, end_index, route_batch))
     current, pending, last = 0, [], start_index
 
     def take():
@@ -159,6 +169,8 @@ def route_batches(chunks: Iterable[pd.DataFrame], routes: list[str], route_batch
         pos = pos.to_numpy(dtype=np.int64)
         if pos[0] < last or (np.diff(pos) < 0).any():
             raise ValueError("rows are not ordered by route; batches would mix routes")
+        if pos[-1] >= end_index:
+            raise ValueError("a row is outside the routes this read was for")
         last = int(pos[-1])
         batch_of = (pos - start_index) // route_batch
         for b in np.unique(batch_of):
@@ -361,6 +373,19 @@ RETRY_ATTEMPTS = 3
 RETRY_WAIT_SECONDS = 30
 
 
+def retryable(error: OperationalError) -> bool:
+    """
+    Whether a failed batch is worth repeating.
+
+    SQLAlchemy reports a dropped connection and a server limit both as
+    OperationalError. Repeating the second only fails again after the wait, so
+    PostgreSQL's resource (53xxx) and limit (54xxx) errors stop the run, as the
+    temp_file_limit error of 2026-11-08 should have.
+    """
+    code = getattr(getattr(error, "orig", None), "pgcode", None) or ""
+    return code[:2] not in ("53", "54")
+
+
 def with_retry(engine, work, label, attempts=RETRY_ATTEMPTS, wait=RETRY_WAIT_SECONDS,
                sleep=time.sleep):
     """
@@ -377,7 +402,7 @@ def with_retry(engine, work, label, attempts=RETRY_ATTEMPTS, wait=RETRY_WAIT_SEC
         try:
             return work()
         except OperationalError as error:
-            if attempt == attempts:
+            if attempt == attempts or not retryable(error):
                 raise
             first_line = str(error).strip().splitlines()[0]
             print(f"  {label}: connection lost ({first_line}); "
@@ -387,26 +412,33 @@ def with_retry(engine, work, label, attempts=RETRY_ATTEMPTS, wait=RETRY_WAIT_SEC
 
 
 def run(engine, routes: list[str], month_counts: pd.DataFrame, route_batch: int,
-        min_months: int, start_index: int = 0, chunk_rows: int = 200_000,
-        work_mem: str | None = None, stream=stream_hourly_monthly, write=write_batch,
+        min_months: int, start_index: int = 0, routes_per_read: int = 150,
+        chunk_rows: int = 200_000, work_mem: str | None = None,
+        stream=stream_hourly_monthly, write=write_batch,
         attempts: int = RETRY_ATTEMPTS, wait: int = RETRY_WAIT_SECONDS,
         sleep=time.sleep, clock=time.perf_counter) -> tuple[int, int]:
     """
     Read, solve and write every batch from start_index on.
 
-    A dropped connection restarts the read at the first batch not yet written;
-    batches already committed are not redone. The run fails after ``attempts``
-    drops in a row without a batch completing in between.
+    Routes are read in windows of routes_per_read, rounded up to whole batches,
+    so every batch is the same as in the per-batch version. A dropped connection
+    restarts the read at the first batch not yet written; batches already
+    committed are not redone. The run fails after ``attempts`` drops in a row
+    without a batch completing in between.
     """
+    window = max(1, -(-routes_per_read // route_batch)) * route_batch
     next_index, failures = start_index, 0
     total_input = total_output = 0
 
     while next_index < len(routes):
-        chunks = stream(engine, routes[next_index] if next_index > 0 else None,
-                        chunk_rows, work_mem)
+        window_start = start_index + (next_index - start_index) // window * window
+        window_end = min(window_start + window, len(routes))
+        print(f"reading routes {next_index + 1}-{window_end}")
+        chunks = stream(engine, routes[next_index], routes[window_end - 1], chunk_rows, work_mem)
         try:
             mark = clock()
-            for start, hourly in route_batches(chunks, routes, route_batch, next_index):
+            for start, hourly in route_batches(chunks, routes, route_batch, next_index,
+                                               window_end):
                 read_s = clock() - mark
                 ratio_df = solve_patterns(month_counts, hourly, min_months)
                 solved = clock()
@@ -424,7 +456,7 @@ def run(engine, routes: list[str], month_counts: pd.DataFrame, route_batch: int,
                 mark = clock()
         except OperationalError as error:
             failures += 1
-            if failures >= attempts:
+            if failures >= attempts or not retryable(error):
                 raise
             first_line = str(error).strip().splitlines()[0]
             print(f"  routes {next_index + 1}-: connection lost ({first_line}); "
@@ -460,6 +492,10 @@ def main():
     parser.add_argument("--start-route-index", type=int, default=0,
                         help="Skip the first N routes of the sorted list, to resume a run "
                              "that stopped part way. Batches already written stay as they are.")
+    parser.add_argument("--routes-per-read", type=int, default=150,
+                        help="Routes per read query, rounded up to whole batches. Each read "
+                             "sorts its rows; fewer routes keep the sort within the "
+                             "database's temporary file limit.")
     parser.add_argument("--chunk-rows", type=int, default=200_000,
                         help="Rows fetched from the server-side cursor at a time.")
     parser.add_argument("--work-mem", default="256MB",
@@ -482,7 +518,8 @@ def main():
     # rewrites every route, so mixed values are never published.
     _, total_output = run(
         engine, routes, month_counts, args.route_batch, args.min_months,
-        start_index=args.start_route_index, chunk_rows=args.chunk_rows,
+        start_index=args.start_route_index, routes_per_read=args.routes_per_read,
+        chunk_rows=args.chunk_rows,
         work_mem=args.work_mem or None,
     )
 
