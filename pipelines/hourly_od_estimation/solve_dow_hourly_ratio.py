@@ -12,13 +12,24 @@ Routes are processed in batches so memory stays bounded as months are added.
 Groups that observed the same set of months share the same A, so they are
 solved together in one least-squares call. The result is identical to
 solving each group separately.
+
+The monthly table is read once, as one query ordered by route and streamed
+through a server-side cursor, and cut into the same route batches the previous
+version queried one at a time. Each per-batch query had to find its routes'
+rows scattered across every month of a 30-million-row table; on Cloud SQL that
+took about seven minutes per 25 routes and 3 h 15 min for the whole run
+(2026-11-07). Results are written with COPY into a temporary table and one
+INSERT ... ON CONFLICT, instead of one multi-row VALUES statement per batch of
+records. Batches, solutions and stored values are the same as before.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import time
+from typing import Iterable, Iterator
 
 import numpy as np
 import pandas as pd
@@ -77,6 +88,88 @@ def load_hourly_monthly(engine, routes: list[str] | None = None) -> pd.DataFrame
     """)
     params = {"routes": list(routes)} if routes is not None else {}
     return pd.read_sql(sql, engine, params=params)
+
+
+HOURLY_COLUMNS = ["use_ym", "route_no", "stop_ars", "hour", "monthly_boarding"]
+
+
+def stream_hourly_monthly(engine, start_route: str | None = None, chunk_rows: int = 200_000,
+                          work_mem: str | None = None) -> Iterator[pd.DataFrame]:
+    """
+    Read the same rows as load_hourly_monthly for every route, in one query
+    ordered by route, and yield them in chunks as they arrive.
+
+    The ordering is what lets the caller cut route batches without a query per
+    batch. start_route skips routes sorting before it, to resume after a
+    dropped connection. work_mem applies to this query only, so the sort stays
+    in memory instead of spilling to disk.
+    """
+    start_filter = "AND route_no >= :start_route" if start_route is not None else ""
+    sql = text(f"""
+        SELECT
+            use_ym,
+            route_no,
+            stop_ars,
+            hour,
+            SUM(boarding_passengers) AS monthly_boarding
+        FROM hourly_bus_stop_passenger
+        WHERE stop_ars ~ '^[0-9][0-9][0-9][0-9][0-9]$'
+          AND stop_ars <> '00000'
+          {start_filter}
+        GROUP BY use_ym, route_no, stop_ars, hour
+        ORDER BY route_no
+    """)
+    params = {"start_route": start_route} if start_route is not None else {}
+    with engine.connect() as conn:
+        conn = conn.execution_options(stream_results=True, max_row_buffer=chunk_rows)
+        if work_mem:
+            conn.execute(text("SELECT set_config('work_mem', :value, true)"), {"value": work_mem})
+        yield from pd.read_sql(sql, conn, params=params, chunksize=chunk_rows)
+
+
+def route_batches(chunks: Iterable[pd.DataFrame], routes: list[str], route_batch: int,
+                  start_index: int = 0, columns: list[str] = HOURLY_COLUMNS
+                  ) -> Iterator[tuple[int, pd.DataFrame]]:
+    """
+    Regroup route-ordered chunks into the batches routes[s:s + route_batch]
+    for s = start_index, start_index + route_batch, ...
+
+    Every batch is yielded, in order, including batches whose routes have no
+    rows, so progress and resume points match the per-batch version. Rows must
+    arrive ordered by their route's position in ``routes``; a row out of order
+    or from an unknown route raises instead of being put in the wrong batch.
+    """
+    position = pd.Series(np.arange(len(routes)), index=pd.Index(routes, dtype=object))
+    starts = list(range(start_index, len(routes), route_batch))
+    current, pending, last = 0, [], start_index
+
+    def take():
+        frame = (pd.concat(pending, ignore_index=True) if pending
+                 else pd.DataFrame(columns=columns))
+        pending.clear()
+        return starts[current], frame
+
+    for chunk in chunks:
+        if chunk.empty:
+            continue
+        pos = chunk["route_no"].map(position)
+        if pos.isna().any():
+            unknown = chunk.loc[pos.isna(), "route_no"].iloc[0]
+            raise ValueError(f"route {unknown!r} is not in the route list")
+        pos = pos.to_numpy(dtype=np.int64)
+        if pos[0] < last or (np.diff(pos) < 0).any():
+            raise ValueError("rows are not ordered by route; batches would mix routes")
+        last = int(pos[-1])
+        batch_of = (pos - start_index) // route_batch
+        for b in np.unique(batch_of):
+            while current < b:
+                yield take()
+                current += 1
+            pending.append(chunk.loc[batch_of == b])
+
+    while current < len(starts):
+        yield take()
+        current += 1
 
 
 def nonnegative_lstsq(A: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -219,6 +312,51 @@ def save_ratios(engine, ratio_df: pd.DataFrame, batch_size: int = 50000) -> None
         upsert_ratios(conn, ratio_df, batch_size)
 
 
+RATIO_TABLE = "dow_hourly_ratio"
+RATIO_COLUMNS = ["route_no", "stop_ars", "day_type", "hour",
+                 "avg_boarding_passengers", "boarding_ratio", "method"]
+RATIO_KEY = ["route_no", "stop_ars", "day_type", "hour"]
+
+
+def copy_upsert(conn, frame: pd.DataFrame, table: str, columns: list[str],
+                key: list[str]) -> None:
+    """
+    Upsert ``frame`` through COPY into a temporary table and one INSERT.
+
+    Gives the same rows as UPSERT_SQL. Floats are written by pandas with the
+    shortest representation that reads back to the same double, so stored
+    values do not change. A key repeated within one batch fails here, where
+    row-by-row upserts would have kept the last one silently.
+    """
+    if frame.empty:
+        return
+    stage = f"_stage_{table}"
+    cols = ", ".join(columns)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns if c not in key)
+    buffer = io.StringIO()
+    frame[columns].to_csv(buffer, index=False, header=False)
+    buffer.seek(0)
+
+    conn.exec_driver_sql(
+        f"CREATE TEMP TABLE {stage} ON COMMIT DROP AS SELECT {cols} FROM {table} WITH NO DATA"
+    )
+    cursor = conn.connection.cursor()
+    try:
+        cursor.copy_expert(f"COPY {stage} ({cols}) FROM STDIN WITH (FORMAT csv)", buffer)
+    finally:
+        cursor.close()
+    conn.exec_driver_sql(
+        f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {stage} "
+        f"ON CONFLICT ({', '.join(key)}) DO UPDATE SET {updates}"
+    )
+
+
+def write_batch(engine, ratio_df: pd.DataFrame) -> None:
+    """Write one batch in its own transaction."""
+    with engine.begin() as conn:
+        copy_upsert(conn, ratio_df, RATIO_TABLE, RATIO_COLUMNS, RATIO_KEY)
+
+
 RETRY_ATTEMPTS = 3
 RETRY_WAIT_SECONDS = 30
 
@@ -248,6 +386,59 @@ def with_retry(engine, work, label, attempts=RETRY_ATTEMPTS, wait=RETRY_WAIT_SEC
             sleep(wait)
 
 
+def run(engine, routes: list[str], month_counts: pd.DataFrame, route_batch: int,
+        min_months: int, start_index: int = 0, chunk_rows: int = 200_000,
+        work_mem: str | None = None, stream=stream_hourly_monthly, write=write_batch,
+        attempts: int = RETRY_ATTEMPTS, wait: int = RETRY_WAIT_SECONDS,
+        sleep=time.sleep, clock=time.perf_counter) -> tuple[int, int]:
+    """
+    Read, solve and write every batch from start_index on.
+
+    A dropped connection restarts the read at the first batch not yet written;
+    batches already committed are not redone. The run fails after ``attempts``
+    drops in a row without a batch completing in between.
+    """
+    next_index, failures = start_index, 0
+    total_input = total_output = 0
+
+    while next_index < len(routes):
+        chunks = stream(engine, routes[next_index] if next_index > 0 else None,
+                        chunk_rows, work_mem)
+        try:
+            mark = clock()
+            for start, hourly in route_batches(chunks, routes, route_batch, next_index):
+                read_s = clock() - mark
+                ratio_df = solve_patterns(month_counts, hourly, min_months)
+                solved = clock()
+                write(engine, ratio_df)
+                written = clock()
+
+                next_index = min(start + route_batch, len(routes))
+                failures = 0
+                total_input += len(hourly)
+                total_output += len(ratio_df)
+                print(f"routes {next_index}/{len(routes)}: monthly hourly rows {total_input:,}; "
+                      f"ratio rows {total_output:,} "
+                      f"(read {read_s:.1f}s, solve {solved - mark - read_s:.1f}s, "
+                      f"write {written - solved:.1f}s)")
+                mark = clock()
+        except OperationalError as error:
+            failures += 1
+            if failures >= attempts:
+                raise
+            first_line = str(error).strip().splitlines()[0]
+            print(f"  routes {next_index + 1}-: connection lost ({first_line}); "
+                  f"retry {failures}/{attempts - 1} in {wait}s from route {next_index + 1}")
+            engine.dispose()
+            sleep(wait)
+        finally:
+            close = getattr(chunks, "close", None)
+            if close:
+                close()
+
+    return total_input, total_output
+
+
 def main():
     """
     CLI entry point for least-squares ratio estimation.
@@ -261,12 +452,19 @@ def main():
              "it from a secret instead of a visible argument.",
     )
     parser.add_argument("--min-months", type=int, default=3)
-    parser.add_argument("--batch-size", type=int, default=50000)
+    parser.add_argument("--batch-size", type=int, default=50000,
+                        help="Unused since writes go through COPY. Accepted so existing "
+                             "job arguments keep working.")
     parser.add_argument("--route-batch", type=int, default=50,
-                        help="Routes read and solved per batch. Lower it if memory is tight.")
+                        help="Routes solved and committed per batch. Lower it if memory is tight.")
     parser.add_argument("--start-route-index", type=int, default=0,
                         help="Skip the first N routes of the sorted list, to resume a run "
                              "that stopped part way. Batches already written stay as they are.")
+    parser.add_argument("--chunk-rows", type=int, default=200_000,
+                        help="Rows fetched from the server-side cursor at a time.")
+    parser.add_argument("--work-mem", default="256MB",
+                        help="work_mem for the read query, so its sort stays in memory. "
+                             "Empty to use the server default.")
     args = parser.parse_args()
 
     engine = make_engine(args.db_url)
@@ -276,31 +474,22 @@ def main():
     print(f"Loaded month count rows: {len(month_counts)}")
     print(f"Routes: {len(routes)} (batch {args.route_batch})")
 
-    total_input = 0
-    total_output = 0
-
     # Each batch commits on its own. A single transaction over all batches kept
     # the old values intact if a run stopped, but one dropped connection after
     # hours of work threw everything away, and the open transaction held WAL
     # until the end. A run that stops part way now leaves some routes with new
     # values; the next steps do not run after a failed step, and the next run
     # rewrites every route, so mixed values are never published.
-    for start in range(args.start_route_index, len(routes), args.route_batch):
-        batch = routes[start:start + args.route_batch]
-        done = min(start + args.route_batch, len(routes))
+    _, total_output = run(
+        engine, routes, month_counts, args.route_batch, args.min_months,
+        start_index=args.start_route_index, chunk_rows=args.chunk_rows,
+        work_mem=args.work_mem or None,
+    )
 
-        def work():
-            hourly = load_hourly_monthly(engine, batch)
-            ratio_df = solve_patterns(month_counts, hourly, args.min_months)
-            with engine.begin() as conn:
-                upsert_ratios(conn, ratio_df, args.batch_size)
-            return len(hourly), len(ratio_df)
-
-        rows_in, rows_out = with_retry(engine, work, f"routes {start + 1}-{done}")
-        total_input += rows_in
-        total_output += rows_out
-        print(f"routes {done}/{len(routes)}: monthly hourly rows {total_input:,}; "
-              f"ratio rows {total_output:,}")
+    # The OD estimator reads this table next; fresh statistics keep its plan
+    # from being chosen for the table as it was before the rewrite.
+    with engine.begin() as conn:
+        conn.execute(text(f"ANALYZE {RATIO_TABLE}"))
 
     print(f"Done. Generated ratio rows: {total_output:,}")
 

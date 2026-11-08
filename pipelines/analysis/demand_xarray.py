@@ -4,29 +4,30 @@ The source is already three-dimensional -- (month, hour, stop) -- so it belongs 
 xarray rather than in a flat frame. Slope becomes a non-dimension coordinate on the
 stop axis, which is what lets a terrain grouping be one call instead of a pivot.
 
-    set PGPASSWORD=...
-    python demand_xarray.py
+    python pipelines/analysis/demand_xarray.py                # PIPELINE_DB_URL, or PG* variables
+    python pipelines/analysis/demand_xarray.py --netcdf ""    # skip writing demand.nc
+
+At the end it prints the slope-band table in the form the README uses, so the
+README figures can be replaced by a run rather than by hand.
 """
 
+from __future__ import annotations
+
+import argparse
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import xarray as xr
-from sqlalchemy import create_engine
 
-PWD = os.environ.get("PGPASSWORD")
-if not PWD:
-    sys.exit("PGPASSWORD is not set.  Run:  $env:PGPASSWORD='...'")
+BAND_EDGES = [0, 4, 8, 12, np.inf]
+BAND_LABELS = ["0-4%", "4-8%", "8-12%", "12%+"]
+NO_TERRAIN = "no terrain"
+README_HOURS = [4, 5, 7, 8, 18, 22]
 
-engine = create_engine(
-    f"postgresql+psycopg2://{os.environ.get('PGUSER','postgres')}:{PWD}"
-    f"@{os.environ.get('PGHOST','localhost')}:{os.environ.get('PGPORT','5432')}"
-    f"/{os.environ.get('PGDATABASE','Seoul_Transit')}"
-)
-
-# Aggregate away route_no in SQL. The analysis is per stop, and pulling 5.58M rows
-# to sum them in memory would be the wrong side of the pipeline to do it on.
+# Aggregate away route_no in SQL. The analysis is per stop, and pulling every
+# route row to sum them in memory would be the wrong side of the pipeline to do it on.
 DEMAND_SQL = """
 SELECT use_ym,
        hour,
@@ -48,95 +49,162 @@ FROM bus_stop_location l
 JOIN bus_stop_terrain_stats t ON t.node_id = l."노드id"
 """
 
+TOTAL_SQL = "SELECT sum(boarding_passengers)::bigint AS t FROM hourly_bus_stop_passenger"
 
-def load() -> xr.Dataset:
-    df = pd.read_sql(DEMAND_SQL, engine)
-    print(f"rows from Postgres: {len(df):,}")
 
-    df["month"] = pd.to_datetime(df.use_ym + "01", format="%Y%m%d")
+def db_url_from_env() -> str:
+    """PIPELINE_DB_URL if set, otherwise the PG* variables the script used before."""
+    url = os.environ.get("PIPELINE_DB_URL")
+    if url:
+        return url
+    password = os.environ.get("PGPASSWORD")
+    if not password:
+        sys.exit("Set PIPELINE_DB_URL, or PGPASSWORD (with PGUSER/PGHOST/PGPORT/PGDATABASE).")
+    return (
+        f"postgresql+psycopg2://{os.environ.get('PGUSER', 'postgres')}:{password}"
+        f"@{os.environ.get('PGHOST', 'localhost')}:{os.environ.get('PGPORT', '5432')}"
+        f"/{os.environ.get('PGDATABASE', 'Seoul_Transit')}"
+    )
+
+
+def slope_bands(slope_pct) -> np.ndarray:
+    """
+    Band label per stop. A stop without terrain gets NO_TERRAIN, so it stays in the
+    array and in the totals but in no slope band.
+
+    The lowest band includes 0%: flat cells exist, and an open lower edge would have
+    put them in no band at all, as the first version of this script did.
+    """
+    bands = pd.cut(pd.Series(slope_pct, dtype=float), bins=BAND_EDGES, labels=BAND_LABELS,
+                   include_lowest=True)
+    return bands.astype(object).where(bands.notna(), NO_TERRAIN).to_numpy()
+
+
+def build_dataset(demand: pd.DataFrame, slope: pd.DataFrame) -> xr.Dataset:
+    """
+    Full (month, hour, stop) grid with slope, elevation and band on the stop axis.
+
+    Combinations absent from the source become NaN, which is correct: a stop with no
+    service at 03:00 is a missing observation, not a zero. Anything that sums over
+    it must use skipna.
+    """
+    df = demand.copy()
+    df["month"] = pd.to_datetime(df["use_ym"].astype(str).str.strip() + "01", format="%Y%m%d")
     df = df.drop(columns="use_ym")
-
-    # to_xarray() builds the full (month, hour, stop) grid. Combinations absent from
-    # the source become NaN, which is correct: a stop with no service at 03:00 is a
-    # missing observation, not a zero. Anything that sums over it must use skipna.
     ds = df.set_index(["month", "hour", "stop_ars"]).to_xarray()
-    print(f"grid: {dict(ds.sizes)}")
 
-    slope = pd.read_sql(SLOPE_SQL, engine).drop_duplicates("stop_ars").set_index("stop_ars")
-    aligned = slope.reindex(ds.stop_ars.values)
-    ds = ds.assign_coords(
-        slope_pct=("stop_ars", aligned.slope_pct.values),
-        elev_m=("stop_ars", aligned.elev_m.values),
+    terrain = slope.drop_duplicates("stop_ars").set_index("stop_ars").reindex(ds.stop_ars.values)
+    return ds.assign_coords(
+        slope_pct=("stop_ars", terrain["slope_pct"].to_numpy(dtype=float)),
+        elev_m=("stop_ars", terrain["elev_m"].to_numpy(dtype=float)),
+        slope_band=("stop_ars", slope_bands(terrain["slope_pct"].to_numpy(dtype=float))),
     )
-    matched = int(aligned.slope_pct.notna().sum())
-    print(f"stops with terrain: {matched:,} of {ds.sizes['stop_ars']:,}")
-    return ds
 
 
-def reconcile(ds: xr.Dataset) -> None:
-    """Same discipline as the BigQuery load: totals must match the source."""
+def reconcile(ds: xr.Dataset, expected_total: int) -> int:
+    """Same discipline as the BigQuery load: the array total must match the source."""
     total = int(ds.boardings.sum(skipna=True))
-    expected = pd.read_sql(
-        "SELECT sum(boarding_passengers)::bigint AS t FROM hourly_bus_stop_passenger",
-        engine,
-    ).t.iloc[0]
-    print(f"\nboardings  xarray {total:,}  postgres {int(expected):,}")
-    assert total == int(expected), "aggregate mismatch"
-    print("reconciled")
+    if total != int(expected_total):
+        raise ValueError(f"aggregate mismatch: xarray {total:,}, source {int(expected_total):,}")
+    return total
 
 
-def profiles(ds: xr.Dataset) -> None:
-    # Hourly profile across all stops.
+def band_profile(ds: xr.Dataset) -> xr.DataArray:
+    """
+    Mean boardings per stop-hour by slope band, dims (hour, slope_band).
+
+    Each stop-hour is first averaged over the months it was observed, then the stops
+    of a band are averaged. Means rather than sums, because the bands hold very
+    different numbers of stops and a sum would only restate how many steep stops exist.
+    """
+    per_stop_hour = ds.boardings.mean(dim="month", skipna=True)
+    by_band = per_stop_hour.groupby("slope_band").mean(skipna=True)
+    return by_band.sel(slope_band=BAND_LABELS).transpose("hour", "slope_band")
+
+
+def band_shape(profile: xr.DataArray) -> xr.DataArray:
+    """Each band's hourly profile as a share of its own daily total."""
+    return profile / profile.sum(dim="hour")
+
+
+def stops_per_band(ds: xr.Dataset) -> pd.Series:
+    counts = pd.Series(ds.slope_band.values).value_counts()
+    return counts.reindex(BAND_LABELS + [NO_TERRAIN], fill_value=0)
+
+
+def readme_table(profile: xr.DataArray, hours=README_HOURS) -> str:
+    """The README table: band means at chosen hours, and the steepest band against flat."""
+    frame = profile.to_pandas()
+    share = frame["12%+"] / frame["0-4%"]
+    lowest = share.loc[list(hours)].idxmin()
+    lines = ["| Hour | 0–4% | 4–8% | 8–12% | 12%+ | 12%+ as share of 0–4% |",
+             "| ---- | ---- | ---- | ----- | ---- | --------------------- |"]
+    for hour in hours:
+        row = frame.loc[hour]
+        pct = f"{share.loc[hour]:.0%}"
+        pct = f"**{pct}**" if hour == lowest else pct
+        lines.append(f"| {hour:02d}   | " + " | ".join(f"{row[b]:.1f}" for b in BAND_LABELS)
+                     + f" | {pct} |")
+    return "\n".join(lines)
+
+
+def report(ds: xr.Dataset, source_rows: int) -> None:
+    months = pd.to_datetime(ds.month.values)
+    print(f"months {months.min():%Y-%m} to {months.max():%Y-%m}; "
+          f"{source_rows:,} source rows -> grid {dict(ds.sizes)}")
+    print("\nstops per slope band")
+    print(stops_per_band(ds).to_string())
+
     hourly = ds.boardings.sum(dim=["stop_ars", "month"], skipna=True)
-    peak = int(hourly.idxmax())
-    print(f"\npeak hour: {peak:02d}:00  ({int(hourly.max()):,} boardings)")
+    print(f"\npeak hour: {int(hourly.idxmax()):02d}:00  ({int(hourly.max()):,} boardings)")
 
-    # Slope bands as a coordinate, so groupby does the pivot.
-    bands = xr.DataArray(
-        pd.cut(
-            ds.slope_pct.values,
-            bins=[0, 4, 8, 12, 100],
-            labels=["0-4%", "4-8%", "8-12%", "12%+"],
-        ),
-        dims="stop_ars",
-        name="slope_band",
-    )
-    ds = ds.assign_coords(slope_band=bands)
-
-    # Mean boardings per stop-hour, by terrain band. Comparing means rather than
-    # sums matters here: the bands hold very different numbers of stops, so a sum
-    # would only restate how many steep stops exist.
-    by_band = ds.boardings.mean(dim="month", skipna=True).groupby("slope_band").mean(skipna=True)
+    profile = band_profile(ds)
     print("\nmean boardings per stop-hour by slope band")
-    print(by_band.to_series().unstack("slope_band").round(1).to_string())
+    print(profile.to_pandas().round(1).to_string())
 
-    # Normalised hourly shape per band -- does demand peak at a different hour on
-    # steep ground? Normalising removes the level difference so the shapes compare.
-    shape = (
-        ds.boardings.groupby("slope_band").mean(skipna=True)
-        if "hour" not in ds.boardings.dims
-        else ds.boardings.mean(dim="month", skipna=True)
-        .groupby("slope_band")
-        .mean(skipna=True)
-    )
-    if "hour" in shape.dims:
-        norm = shape / shape.sum(dim="hour")
-        print("\npeak hour by slope band")
-        for b in norm.slope_band.values:
-            row = norm.sel(slope_band=b)
-            print(f"  {b:>6}  {int(row.idxmax()):02d}:00   share {float(row.max()):.3f}")
+    shape = band_shape(profile)
+    print("\npeak hour and share of the daily total, by slope band")
+    for band in BAND_LABELS:
+        row = shape.sel(slope_band=band)
+        print(f"  {band:>6}  {int(row.idxmax()):02d}:00   share {float(row.max()):.3f}")
+    print("  share at 18:00: " + ", ".join(
+        f"{b} {float(shape.sel(slope_band=b, hour=18)):.3f}" for b in BAND_LABELS))
 
-    # Month-over-month change, one call.
+    print("\nREADME table")
+    print(readme_table(profile))
+
     monthly = ds.boardings.sum(dim=["hour", "stop_ars"], skipna=True)
     print("\nmonthly totals and change")
-    print(monthly.to_series().apply(lambda v: f"{int(v):,}").to_string())
-    print(monthly.diff(dim="month").to_series().apply(lambda v: f"{int(v):+,}").to_string())
+    print(pd.DataFrame({
+        "boardings": monthly.to_series().map(lambda v: f"{int(v):,}"),
+        "change": monthly.diff(dim="month").to_series()
+                         .reindex(monthly.month.values).map(
+                             lambda v: "" if pd.isna(v) else f"{int(v):+,}"),
+    }).to_string())
+
+
+def main() -> None:
+    from sqlalchemy import create_engine
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--netcdf", default="demand.nc",
+                        help="Where to write the array; empty to skip.")
+    args = parser.parse_args()
+
+    engine = create_engine(db_url_from_env())
+    demand = pd.read_sql(DEMAND_SQL, engine)
+    slope = pd.read_sql(SLOPE_SQL, engine)
+    expected = pd.read_sql(TOTAL_SQL, engine)["t"].iloc[0]
+
+    ds = build_dataset(demand, slope)
+    total = reconcile(ds, expected)
+    print(f"boardings reconciled: {total:,}")
+    report(ds, len(demand))
+
+    if args.netcdf:
+        ds.to_netcdf(args.netcdf)
+        print(f"\nwrote {args.netcdf}")
 
 
 if __name__ == "__main__":
-    ds = load()
-    reconcile(ds)
-    profiles(ds)
-
-    ds.to_netcdf("demand.nc")
-    print("\nwrote demand.nc")
+    main()
