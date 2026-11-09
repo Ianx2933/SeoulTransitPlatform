@@ -46,7 +46,7 @@ contracts are still visible in the OpenAPI document.
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
 | **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
-| **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 9 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models in Cloud SQL, validates them and publishes to BigQuery; the database is scaled up only for the rebuild — [details](#weekly-cloud-pipeline) |
+| **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert — [details](#weekly-cloud-pipeline) |
 | **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass — [details](#orchestration) |
 | **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention — [details](#backups) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
@@ -71,18 +71,18 @@ against something independent of the pipeline that produced it.
   18,965 daily OD passengers on 2025-11-11 reached no hour. Profile selection now
   has three levels, and each row records which one applied.
 
-| Check after rebuild | Result |
-|---|---|
-| Re-loaded months: row counts against the loader log | 24 of 24 match |
-| Hourly ratio keys summing to exactly 1 or 0 | 283,353 of 283,353 |
-| Non-numeric or `00000` ARS codes in derived tables | 0 |
-| Duplicate OD-hour rows across estimation methods | 0 |
-| OD keys in the estimate against the source | 514,499; 0 missing, 0 extra |
-| Hours per OD key | 24 distinct, no exceptions |
-| Daily passengers conserved per OD key | 0 mismatches at 1e-07 |
-| Daily OD passengers not distributed to hours | 0 of 5,345,649 |
-| Fallback-profile rows, 2025-11-11 | 243,960 — 181,272 with no key, 62,688 fitted to zeros |
-| Estimator re-run: row count and SHA-256 over every row | identical |
+| Check after rebuild | 32 months, local (Oct 2026) | 34 months, Cloud SQL (Nov 2026) |
+|---|---|---|
+| Re-loaded months: row counts against the loader log | 24 of 24 match | — |
+| Hourly ratio keys summing to exactly 1 or 0 | 283,353 of 283,353 | 285,201 of 285,201 |
+| Non-numeric or `00000` ARS codes in derived tables | 0 | 0 |
+| Duplicate OD-hour rows across estimation methods | 0 | 0 |
+| OD keys in the estimate against the source | 514,499; 0 missing, 0 extra | 514,499; 0 missing, 0 extra |
+| Hours per OD key | 24 distinct, no exceptions | 24 distinct, no exceptions |
+| Daily passengers conserved per OD key | 0 mismatches at 1e-07 | 0 mismatches at 1e-07 |
+| Daily OD passengers not distributed to hours | 0 of 5,345,649 | 0 of 5,345,649 |
+| Fallback-profile rows, 2025-11-11 | 243,960 — 181,272 with no key, 62,688 fitted to zeros | 204,888 — 181,272 with no key, 23,616 fitted to zeros |
+| SHA-256 over every hourly OD row, across re-runs | identical | identical over the manual rebuild and three workflow runs |
 
 Totals are reconciled per OD key rather than in aggregate, so errors that cancel
 out in a 5.3-million sum are still caught. `validate_rebuild.py` runs every check
@@ -173,7 +173,7 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │                   │
                                         │   Cloud Scheduler ──> Workflows: transit-pipeline
                                         │     weekly                 ├─> Cloud Run Job: collector ──> Seoul Open API
-                                        │                            ├─> 7 rebuild + validation Jobs (new month only)
+                                        │                            ├─> 8 rebuild, validate, publish Jobs (new month only)
                                         │                            └─> Cloud Run Job: warehouse ──> BigQuery + dbt
                                         │
                                         └──ID token─────> Cloud Run: transit-prediction (private)
@@ -206,6 +206,19 @@ idles as a `db-f1-micro`. On it the ratio solver needed 7–20 minutes per batch
 `db-custom-2-7680` for the rebuild and lowers it again afterwards, including when
 a step fails. The batch tier is billed only for the hours of a rebuild, which
 happens when a new month is published.
+
+**Rebuilt tables replace the old ones instead of updating them.** The first cloud
+rebuilds upserted into the tables the API reads. That had two costs. The API
+served rebuilt figures before validation had run, so a failed check came too late.
+And PostgreSQL keeps the old row versions until vacuum frees the space for reuse,
+so each table ended up about twice its size: `estimated_hourly_stop_demand` was
+1,985 MB in Cloud SQL against 990 MB locally for the same rows, the steps that read
+it whole slowed down run after run, and the disk grew by auto-resize from 10 GB to
+37 GB, which Cloud SQL cannot shrink. Each rebuilt table is now written from empty
+to a `__next` copy, validated there, and swapped in by renaming. The database went
+from 20 GB to 16 GB on the first such run, and the disk now has a 45 GB
+auto-increase cap so that any further growth fails a run and raises an alert
+instead of going unnoticed.
 
 **Browser-facing API without a hosted basemap key.** The map originally used
 CartoDB Positron, whose CDN began returning watermark tiles for
@@ -330,12 +343,12 @@ surface-model caveat on the slope values themselves.
 | Cache | Redis (local), Caffeine (deployed) |
 | Prediction service | Python, Flask, XGBoost |
 | Frontend | React, Vite, Leaflet (OpenStreetMap basemap) |
-| Pipelines | Python, Airflow |
+| Pipelines | Python, Cloud Workflows, Airflow (local) |
 | Multidimensional analysis | xarray, dask, netCDF |
 | Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
 | Analytical warehouse | BigQuery, dbt (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
 | Local infra | Docker Compose |
-| Deployment | Cloud Run, Cloud SQL (PostgreSQL 18 + PostGIS), Artifact Registry, Secret Manager, Firebase Hosting |
+| Deployment | Cloud Run (services and jobs), Cloud SQL (PostgreSQL 18 + PostGIS), Cloud Scheduler, Cloud Monitoring, Artifact Registry, Secret Manager, Firebase Hosting |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
 
 ## Performance: district-demand
@@ -443,8 +456,8 @@ reconcile against the source and analysts exclude them on purpose.
 ### Tests
 
 `dbt build` runs the models and tests together. If a test fails, the build stops and the
-production dataset is not updated. Builds run as the last step of the `warehouse` Airflow DAG
-(below).
+production dataset is not updated. Builds run as the last step of the weekly cloud pipeline and
+of the local `warehouse` Airflow DAG (below).
 
 | Test | Fails when |
 |---|---|
@@ -456,7 +469,7 @@ production dataset is not updated. Builds run as the last step of the `warehouse
 
 The reconciliation compares totals by month and does not join to the stop table. An earlier
 validation query that joined to stops counted some rows twice and overstated boardings by
-127,070.
+127,070. At the 32-month reload of October 2026:
 
 | | PostgreSQL | BigQuery |
 |---|---|---|
@@ -519,18 +532,49 @@ mode and the missing-password case.
 | collect | Loads each newly published month and records which months it loaded |
 | decide | Ends the run if nothing was loaded, about 20 seconds in total |
 | scale up | Cloud SQL `db-f1-micro` → `db-custom-2-7680`, then waits until it accepts connections |
-| rebuild | Month-day counts, day-type hourly ratios (route and stop level), OD allocation to hours, stop demand, bus + subway integration |
-| validate | `validate_rebuild.py`; a failed check fails the run before anything is published |
+| rebuild | Month-day counts, day-type hourly ratios (route and stop level), OD allocation to hours, stop demand, bus + subway integration, each written to an empty `<table>__next` |
+| validate | `validate_rebuild.py` on the `__next` copies; a failed check stops the run with the API and BigQuery unchanged |
+| publish | Swaps all five copies in, in one transaction, and gives their indexes back the original names |
 | warehouse | Exports from Cloud SQL, replaces the BigQuery staging tables, runs `dbt build --target prod` |
 | scale down | Back to `db-f1-micro`, also when any step fails |
 
-Steps run one at a time; with two write-heavy jobs at once, both ran several times slower.
-The two ratio solvers commit each batch of routes and retry a batch when Cloud SQL drops the
-connection, so a dropped connection three hours in costs one batch rather than the run.
+A run that ends without success, and a trigger that fails to start one, each send an email
+through Cloud Monitoring (`ops/monitoring/`).
 
-A forced full rebuild on 2026-11-07 took 9 h 30 min, 7 h of it in the two ratio solvers, and
-reproduced the manual rebuild exactly: the same SHA-256 over all 12,347,976 hourly OD rows.
-Timings by step and the prerequisites are in [`ops/workflows/`](ops/workflows/README.md).
+**From 9 h 30 min to 1 h 31 min.** Every forced full rebuild produced the same SHA-256 over
+all 12,347,976 hourly OD rows, so each change below was checked against the previous output
+rather than only for speed.
+
+| Step | 2026-11-07 | Read once | Shadow tables |
+|---|---|---|---|
+| Ratio solver | 3 h 15 min | 11 min 36 s | 7 min 24 s |
+| Stop-pattern solver | 3 h 44 min | 13 min 54 s | 7 min 51 s |
+| OD allocation | 39 min | 33 min | 3 min 3 s |
+| Stop demand | 19 min | 29 min | 2 min 5 s |
+| Bus + subway integration | 23 min | 43 min | 8 min 26 s |
+| Validation | 17 min | 40 min | 16 min 51 s |
+| Publish | — | — | 45 s |
+| Warehouse | 43 min | 29 min | 24 min 53 s |
+| **Whole run** | **9 h 30 min** | **3 h 42 min** | **1 h 31 min** |
+
+*Read once.* The solvers queried the 31.7M-row hourly table once per batch of 25 routes, 29
+times a run, and each query had to find its routes' rows scattered across every month. They
+now stream the table in a few windows of 150 routes, ordered by route, and cut the same
+batches from the stream; a check on real data compared both ways batch by batch and found
+them identical. A single ordered read of the whole table failed first: its sort needed more
+temporary disk than Cloud SQL allows one query (`temp_file_limit`, about 3 GB), so the
+windows are sized to stay well under it, and a server limit error now stops the run instead
+of being retried.
+
+*Shadow tables.* Writing each rebuilt table from empty with `COPY`, instead of upserting
+into a table already holding the previous rebuild, made the write-heavy steps five to ten
+times faster, and kept the steps after them from slowing down as the tables bloated (the
+middle column).
+
+Steps run one at a time; with two write-heavy jobs at once, both ran several times slower.
+Each solver batch commits on its own, and a dropped connection restarts the read at the
+first batch not yet written. Timings by step and the prerequisites are in
+[`ops/workflows/`](ops/workflows/README.md).
 
 ## Backups
 
@@ -559,7 +603,7 @@ The database password is read from `pgpass.conf` outside the repository.
 | Terrain snapshots and stop/dong screening API | Done |
 | Hourly pipeline rebuild, 2024-01 to 2026-10 | Done, validated; rebuilt in Cloud SQL |
 | GCP deployment: serving path | Live, closed beta |
-| Weekly cloud pipeline (collect, rebuild, validate, publish) | Scheduled weekly from 2026-11-10; forced full run passed on 2026-11-07 |
+| Weekly cloud pipeline (collect, rebuild, validate, publish) | Scheduled weekly from 2026-11-10; forced full runs passed on 2026-11-07 and 2026-11-08 (1 h 31 min); failure alerts tested |
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | Weekly database backup | Running, verified before upload |
 | Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
@@ -636,6 +680,7 @@ database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
 ops/                    Local backup script, bucket lifecycle rule
 ops/workflows/          Weekly cloud pipeline (Workflows) and its deploy script
+ops/monitoring/         Alert policies for failed pipeline runs and triggers
 pipelines/              Python data pipelines by phase
 pipelines/airflow/      Airflow DAGs
 pipelines/analysis/     xarray demand profiling against terrain bands
@@ -726,22 +771,20 @@ Tracked here so they are visible rather than discovered during deployment.
 ## Next work
 
 1. Re-run the xarray terrain profile on corrected data.
-2. Make the two ratio solvers read the hourly table once instead of once per
-   route batch; they take 7 of the 9.5 hours of a rebuild.
-3. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
+2. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
    the cloud database stays read-only for pipeline writes.
-4. Extend OD analysis toward trip-chain analysis — transfer patterns and full
+3. Extend OD analysis toward trip-chain analysis — transfer patterns and full
    journey flows rather than single-leg boarding and alighting.
-5. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
+4. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
    and compare the two snapshots — the versioning scheme exists to make exactly
    that comparison possible.
-6. Extend the warehouse with a district dimension, and keep the official route
+5. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-7. Check the stops in Known gap 10 against an archived stop master from the
+6. Check the stops in Known gap 10 against an archived stop master from the
    year of each OD date.
-8. Add OD days: allocate the three other corrected dates, then one
-   representative day a month, and look for OD records that carry boarding
-   times to test the allocation against.
+7. Add OD days: allocate the three other corrected dates (allocation now takes
+   minutes), then one representative day a month, and look for OD records that
+   carry boarding times to test the allocation against.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
