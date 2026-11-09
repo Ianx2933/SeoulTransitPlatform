@@ -44,7 +44,7 @@ contracts are still visible in the OpenAPI document.
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes — [details](#performance-district-demand) |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
-| **Demand profiling** | Hourly boarding demand loaded as a labelled 3-D array and grouped by terrain band, reconciled against the SQL source |
+| **Demand profiling** | 34 months of hourly boarding read from the warehouse as a labelled 3-D array (34 × 24 × 12,850) and grouped by terrain band, reconciled to the passenger against the source copy |
 | **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
 | **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert — [details](#weekly-cloud-pipeline) |
 | **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass — [details](#orchestration) |
@@ -301,30 +301,43 @@ Treat it as a screening indicator for narrowing down where to survey.
 The boarding source is already three-dimensional — month, hour, stop — so
 `pipelines/analysis/demand_xarray.py` loads it as a labelled array rather than a
 flat frame, attaches slope as a non-dimension coordinate on the stop axis, and
-groups by terrain band. The array total is asserted against the PostgreSQL sum
-before anything is read from it.
+groups by terrain band. The array total is asserted against the source before
+anything is read from it.
 
-Building the full grid is itself informative. 1.79M source rows expand to
-6 × 24 × 12,529 cells, and the gaps are real — a stop with no service at 03:00 is
-a missing observation, not a zero. Every aggregate uses `skipna` accordingly.
+It reads from the BigQuery warehouse (`--source bigquery`): demand from
+`fct_boarding`, slope from `dim_stop`, and the reconciliation total from the
+staging copy of the source, so the check does not read the table it checks.
+Reading the serving database instead took hours on its idle tier and lost the
+connection from the workstation twice, which is the split the warehouse exists
+for. The PostgreSQL path remains, one month per query.
 
-**Result.** Mean boardings per stop-hour, 2025-01 to 2025-06, by slope band.
-These figures predate the [loader fix](#data-quality-and-validation) and will
-shift when re-run; stops visited twice per trip were the most understated.
+Building the full grid is itself informative. 10.15M source rows expand to
+34 × 24 × 12,850 cells, and the gaps are real — a stop with no service at 03:00 is
+a missing observation, not a zero. Every aggregate uses `skipna` accordingly. Of
+the 12,850 stops, 2,050 have no terrain value, nearly all of them Gyeonggi-do stops
+outside the Seoul stop master; they stay in the array and the totals but in no band.
+
+**Result.** Mean boardings per stop-hour, 2024-01 to 2026-10 (34 months, 4.81 billion
+boardings reconciled), by slope band. Stops per band: 3,072 / 3,508 / 1,955 / 2,265.
 
 | Hour | 0–4% | 4–8% | 8–12% | 12%+ | 12%+ as share of 0–4% |
 | ---- | ---- | ---- | ----- | ---- | --------------------- |
-| 04   | 85.6 | 79.1 | 66.9  | 37.2 | **43%** |
-| 05   | 178.9 | 172.5 | 164.2 | 113.8 | 64% |
-| 07   | 773.4 | 758.3 | 742.6 | 601.8 | 78% |
-| 08   | 963.7 | 951.9 | 960.2 | 756.3 | 78% |
-| 18   | 981.4 | 992.6 | 1054.4 | 796.5 | 81% |
-| 22   | 451.8 | 490.6 | 521.5 | 379.0 | 84% |
+| 04   | 90.5 | 84.6 | 71.2 | 43.0 | **48%** |
+| 05   | 191.2 | 185.4 | 178.1 | 125.8 | 66% |
+| 07   | 816.6 | 806.7 | 788.3 | 642.4 | 79% |
+| 08   | 1014.0 | 1010.1 | 1015.7 | 802.0 | 79% |
+| 18   | 1033.5 | 1055.4 | 1110.2 | 849.7 | 82% |
+| 22   | 470.6 | 514.3 | 546.7 | 403.0 | 86% |
 
-The steepest band carries roughly 78–84% of flat-ground demand through most of the
-day. Between 04:00 and 06:00 that gap roughly doubles, reaching 43% at 04:00. In
+The steepest band carries roughly 79–86% of flat-ground demand through most of the
+day. Between 04:00 and 06:00 that gap roughly doubles, reaching 48% at 04:00. In
 the evening the 8–12% band exceeds flat ground outright, and its share of the daily
 total peaks higher than any other band (0.084 against 0.080 at 18:00).
+
+The first version of this table used six months loaded before the
+[loader fix](#data-quality-and-validation) and left stops on 0% slope out of every
+band. With the corrected data and five and a half times the months, every share moved
+by one to five points and the shape did not change.
 
 **This is an observation, not a finding.** Slope is confounded with land use here:
 steep districts in Seoul are largely residential and flat ground is largely
@@ -739,16 +752,13 @@ Tracked here so they are visible rather than discovered during deployment.
    artifact names are documented in `services/prediction-service/README.md`.
 5. Terrain snapshots are published manually; there is no scheduled job to
    re-publish when the DEM or the boundary release changes.
-6. The xarray terrain profile above was computed before the loader fix and has
-   not been regenerated, so its totals are understated. The BigQuery warehouse
-   has been reloaded from the corrected data.
-7. Temporary, election and substitute holidays are not asserted against an
+6. Temporary, election and substitute holidays are not asserted against an
    external source. A one-off holiday simply absent from the CSV would still pass
    unnoticed.
-8. The deployed schema differs from the local one: `pg_dump -t` did not carry the
+7. The deployed schema differs from the local one: `pg_dump -t` did not carry the
    terrain guard functions, so the four guard triggers do not exist in Cloud SQL.
    Serving is unaffected because the API only reads those tables.
-9. Until November 2026 a key the API did not accept loaded zero rows and exited
+8. Until November 2026 a key the API did not accept loaded zero rows and exited
    successfully. The loader did check the result code, but only where a
    successful response puts it: inside the service element. Error responses
    (invalid key, no data) return `RESULT` as the document root, so the check
@@ -757,33 +767,32 @@ Tracked here so they are visible rather than discovered during deployment.
    other than `INFO-000`, except `INFO-200` (month not published yet), which
    ends a scheduled run successfully with nothing loaded. Seven tests cover
    the cases.
-10. 0.75% of boarding and alighting stops in `analysis_table_final` (101,864 stop
+9. 0.75% of boarding and alighting stops in `analysis_table_final` (101,864 stop
     rows, 473 ARS numbers) appear in neither stop table, most likely stops that
     have since closed or moved. Their standard codes came from the same
     position-based join as the sixth defect in Data quality and cannot be
     checked. Four ARS numbers outside Seoul map to two nodes and were also left
     as they were.
-11. Hourly OD exists for one day, 2025-11-11, and is an allocation of daily OD by
+10. Hourly OD exists for one day, 2025-11-11, and is an allocation of daily OD by
     stop boarding profiles (see [What the hourly OD is](#what-the-hourly-od-is)).
     The weekly pipeline refreshes the profiles with each new month but adds no OD
     days; OD records still arrive by hand through OD correction.
 
 ## Next work
 
-1. Re-run the xarray terrain profile on corrected data.
-2. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
+1. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
    the cloud database stays read-only for pipeline writes.
-3. Extend OD analysis toward trip-chain analysis — transfer patterns and full
+2. Extend OD analysis toward trip-chain analysis — transfer patterns and full
    journey flows rather than single-leg boarding and alighting.
-4. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
+3. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
    and compare the two snapshots — the versioning scheme exists to make exactly
    that comparison possible.
-5. Extend the warehouse with a district dimension, and keep the official route
+4. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-6. Check the stops in Known gap 10 against an archived stop master from the
+5. Check the stops in Known gap 9 against an archived stop master from the
    year of each OD date.
-7. Add OD days: allocate the three other corrected dates (allocation now takes
+6. Add OD days: allocate the three other corrected dates (allocation now takes
    minutes), then one representative day a month, and look for OD records that
    carry boarding times to test the allocation against.
 

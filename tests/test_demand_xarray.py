@@ -98,6 +98,74 @@ def test_readme_table_has_the_published_hours_and_marks_the_lowest_share():
     demand, slope = synthetic()
     table = dx.readme_table(dx.band_profile(dx.build_dataset(demand, slope))).splitlines()
 
-    assert table[0].startswith("| Hour | 0–4% |")
+    assert table[0].startswith("| Hour | 0-4% |")
+    assert table[0].isascii()
     assert [line.split("|")[1].strip() for line in table[2:]] == ["04", "05", "07", "08", "18", "22"]
     assert sum("**" in line for line in table[2:]) == 1
+
+
+def test_demand_is_read_one_month_at_a_time_and_totals_are_counted_separately(monkeypatch, capsys):
+    demand, _ = synthetic()
+    calls = []
+
+    def fake_read_sql(sql, engine, params=None):
+        calls.append((sql, params))
+        month = demand[demand["use_ym"] == params["use_ym"]]
+        if sql is dx.TOTAL_SQL:
+            return pd.DataFrame({"t": [int(month["boardings"].sum())]})
+        return month.reset_index(drop=True)
+
+    monkeypatch.setattr(dx.pd, "read_sql", fake_read_sql)
+    rows, expected = dx.load_demand(None, ["202401", "202402", "202403"])
+
+    assert [p["use_ym"] for _, p in calls] == ["202401", "202401", "202402", "202402", "202403", "202403"]
+    assert len(rows) == len(demand) and expected == demand["boardings"].sum()
+    assert "WHERE use_ym = %(use_ym)s" in dx.DEMAND_SQL and "WHERE use_ym" in dx.TOTAL_SQL
+
+
+def test_a_dropped_month_is_read_again_and_earlier_months_are_kept(monkeypatch, capsys):
+    from sqlalchemy.exc import OperationalError
+
+    demand, _ = synthetic()
+    drops = [1]
+
+    def flaky_read_sql(sql, engine, params=None):
+        if params["use_ym"] == "202402" and sql is dx.DEMAND_SQL and drops:
+            drops.pop()
+            raise OperationalError("SELECT ...", {}, Exception("server closed the connection"))
+        month = demand[demand["use_ym"] == params["use_ym"]]
+        if sql is dx.TOTAL_SQL:
+            return pd.DataFrame({"t": [int(month["boardings"].sum())]})
+        return month.reset_index(drop=True)
+
+    monkeypatch.setattr(dx.pd, "read_sql", flaky_read_sql)
+    waits = []
+    rows, expected = dx.load_demand(None, ["202401", "202402", "202403"], sleep=waits.append)
+
+    assert waits == [15]
+    assert len(rows) == len(demand) and expected == demand["boardings"].sum()
+    assert "202402: connection lost" in capsys.readouterr().out
+
+
+def test_bigquery_source_returns_the_same_shapes_as_postgres():
+    demand, slope = synthetic()
+    total = int(demand["boardings"].sum())
+    seen = []
+
+    def query(sql):
+        seen.append(sql)
+        if "fct_boarding" in sql:
+            frame = demand.copy()
+            frame["use_ym"] = frame["use_ym"].astype(int).astype(str)   # BigQuery casts back to STRING
+            return frame
+        if "dim_stop" in sql:
+            return slope.copy()
+        return pd.DataFrame({"t": [total]})
+
+    got_demand, got_slope, expected = dx.load_bigquery("p", query=query)
+
+    assert any("`p.transit_marts.fct_boarding`" in q for q in seen)
+    assert any("`p.transit_staging.hourly_bus_stop_passenger`" in q for q in seen)
+    assert expected == total
+    ds = dx.build_dataset(got_demand, got_slope)
+    assert dx.reconcile(ds, expected) == total
