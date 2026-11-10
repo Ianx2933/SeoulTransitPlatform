@@ -1,0 +1,31 @@
+{
+  "displayName": "transit-db-export run did not succeed",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "transit-db-export execution finished FAILED or CANCELLED",
+      "conditionThreshold": {
+        "filter": "resource.type = \"workflows.googleapis.com/Workflow\" AND resource.labels.workflow_id = \"transit-db-export\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status != \"SUCCEEDED\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA"
+          }
+        ],
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "alertStrategy": {
+    "autoClose": "604800s"
+  },
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "The weekly Cloud SQL export did not finish, or the file was under 500 MB.\n\n1. See why:\n   `gcloud workflows executions list transit-db-export --location asia-northeast3 --project seoul-transit-prod --limit 1 --format=\"value(state,error.payload)\"`\n2. Check whether another operation held the instance:\n   `gcloud sql operations list --instance transit-db --project seoul-transit-prod --limit 5`\n3. Run it again once the instance is free:\n   `gcloud workflows execute transit-db-export --location asia-northeast3 --project seoul-transit-prod`"
+  }
+}

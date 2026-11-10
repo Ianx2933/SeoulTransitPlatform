@@ -51,7 +51,7 @@ document.
 | **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS ([details](#analytical-warehouse-bigquery-and-dbt)) |
 | **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert ([details](#weekly-cloud-pipeline)) |
 | **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass ([details](#orchestration)) |
-| **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention ([details](#backups)) |
+| **Backups** | Weekly Cloud SQL export to Cloud Storage, outside the instance, with 60-day retention. The first export was restored end to end in 22 minutes and matched the warehouse copy row for row ([details](#backups)) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Data quality and validation
@@ -260,6 +260,8 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │                            └─> Cloud Run Job: warehouse ──> BigQuery + dbt
                                         │
                                         │   Cloud Run Job: od-collect (run by hand) ──> TOPIS ──> Cloud Storage
+                                        │   Cloud Scheduler ──> Workflows: transit-db-export ──> Cloud SQL export ──> Cloud Storage
+                                        │     weekly
                                         │
                                         └──ID token─────> Cloud Run: transit-prediction (private)
 ```
@@ -674,19 +676,34 @@ first batch not yet written. Timings by step and the prerequisites are in
 
 In October 2026 the local PostgreSQL data directory disappeared. The cause was not found.
 The database was restored from a single full dump that happened to exist from a few weeks
-earlier, and the warehouse reload above was taken from that restore.
+earlier, and the warehouse reload above was taken from that restore. A weekly `pg_dump` of
+the local database (`ops/backup_pg.ps1`, Windows Task Scheduler) followed.
 
-`ops/backup_pg.ps1` now runs weekly from Windows Task Scheduler:
+Once Cloud SQL became the source of record, that was the wrong database to back up: by
+November the local copy was two months behind. Cloud SQL's automated backups (daily, with
+seven days of point-in-time recovery) belong to the instance and would go with it, so a
+second copy is now kept outside it:
 
-1. `pg_dump` of the whole database in custom format.
-2. Checks before upload: `pg_restore` can read the dump, the core tables are present with
-   data, and the file is over a minimum size. A dump that fails any check is not uploaded.
-3. Upload to a private Cloud Storage bucket in `asia-northeast3`, then a size comparison
-   between the local and uploaded file.
-4. Only the newest dump is kept locally. A bucket lifecycle rule deletes objects after 60
-   days.
+1. Every Sunday a workflow (`ops/workflows/transit_db_export.yaml`) has Cloud SQL export
+   the database as a compressed SQL dump to a private Cloud Storage bucket in
+   `asia-northeast3`. The export runs on the instance rather than on a separately billed
+   offload instance. It blocks other admin operations while it runs (41 minutes on
+   `db-f1-micro`), so it is scheduled away from the Tuesday pipeline, which changes the
+   tier, and from the nightly automated backup.
+2. The run fails and sends an alert if the export fails or the file is smaller than
+   500 MB.
+3. A bucket lifecycle rule deletes objects after 60 days, which keeps about eight weekly
+   copies.
 
-The database password is read from `pgpass.conf` outside the repository.
+The first export was restored into an empty local database with
+`ops/restore_cloudsql_export.py`. The script streams the file from Cloud Storage through
+gunzip into `psql`, so neither the compressed nor the plain dump is written to disk. The
+restore took 22 minutes for 7.67 GB of SQL. Its only errors were two grants to roles that
+exist only in Cloud SQL, and the hourly table matched the BigQuery copy exactly: 31,739,712
+rows and 4,806,115,248 boardings, 2024-01 to 2026-10. The restored database replaced the
+local one, which is now a development copy refreshed the same way, and the local backup
+task is switched off. Cloud SQL exports leave out triggers and functions; the cloud
+database does not have the terrain guard functions in the first place (Known gap 7).
 
 ## Status
 
@@ -701,7 +718,7 @@ The database password is read from `pgpass.conf` outside the repository.
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; run by hand, not yet in the weekly workflow |
 | OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; `fixed` conserves passengers; not yet a cloud job |
-| Weekly database backup | Running, verified before upload |
+| Weekly database backup | Cloud SQL export every Sunday from 2026-11-15; the first export was restored and matched on 2026-11-10 |
 | Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
 
 ## Quick start
@@ -777,8 +794,8 @@ database/schema/        Schema creation scripts, run in numeric order
 database/performance/   Performance index scripts
 database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
-ops/                    Local backup script, bucket lifecycle rule
-ops/workflows/          Weekly cloud pipeline (Workflows) and its deploy script
+ops/                    Export restore script, retired local backup script, bucket lifecycle rule
+ops/workflows/          Weekly cloud pipeline and weekly database export (Workflows), deploy script
 ops/monitoring/         Alert policies for failed pipeline runs and triggers
 pipelines/              Python data pipelines by phase
 pipelines/airflow/      Airflow DAGs

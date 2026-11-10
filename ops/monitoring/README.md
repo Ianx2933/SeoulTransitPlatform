@@ -1,12 +1,14 @@
 # Pipeline alerts
 
-Two Cloud Monitoring alert policies send an email when the weekly pipeline does not run
+Cloud Monitoring alert policies send an email when one of the weekly workflows does not run
 cleanly. Without them a failed run would only be noticed by checking by hand.
 
 | Policy | Fires when |
 |---|---|
 | `pipeline_failed_policy.json` | A `transit-pipeline` execution finishes `FAILED` or `CANCELLED` (metric `workflows.googleapis.com/finished_execution_count`) |
 | `scheduler_failed_policy.json` | Cloud Scheduler logs an error starting `transit-pipeline-weekly`, so no execution exists for the first policy to see |
+| `export_failed_policy.json` | A `transit-db-export` execution (weekly Cloud SQL export) finishes `FAILED` or `CANCELLED`, including an export under 500 MB |
+| `export_scheduler_failed_policy.json` | Cloud Scheduler logs an error starting `transit-db-export-weekly` |
 
 A long-running or stuck rebuild is not covered here; the budget alert catches a database
 left on the batch tier.
@@ -17,7 +19,12 @@ left on the batch tier.
 $ch = gcloud beta monitoring channels create --project seoul-transit-prod --display-name="Pipeline alerts" --type=email --channel-labels=email_address=<address> --format="value(name)"
 gcloud alpha monitoring policies create --project seoul-transit-prod --policy-from-file=ops/monitoring/pipeline_failed_policy.json --notification-channels=$ch
 gcloud alpha monitoring policies create --project seoul-transit-prod --policy-from-file=ops/monitoring/scheduler_failed_policy.json --notification-channels=$ch
+gcloud alpha monitoring policies create --project seoul-transit-prod --policy-from-file=ops/monitoring/export_failed_policy.json --notification-channels=$ch
+gcloud alpha monitoring policies create --project seoul-transit-prod --policy-from-file=ops/monitoring/export_scheduler_failed_policy.json --notification-channels=$ch
 ```
+
+The export policies were added later on the existing channel; `$ch` can be read back with
+`gcloud beta monitoring channels list --project seoul-transit-prod --format="value(name,displayName)"`.
 
 ## Test
 
