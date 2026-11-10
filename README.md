@@ -2,24 +2,22 @@
 
 [![CI](https://github.com/Ianx2933/SeoulTransitPlatform/actions/workflows/ci.yml/badge.svg)](https://github.com/Ianx2933/SeoulTransitPlatform/actions/workflows/ci.yml)
 
-Where, when, and how heavily do people ride transit across the Seoul
-metropolitan area — and how far can the source data behind those numbers be
-trusted? This platform turns raw smart-card records into stop-, station-, and
-district-level demand analysis, with each figure traceable to its source and
-method.
+SeoulTransitPlatform analyses public transit demand in the Seoul metropolitan
+area at stop, station and district level, using the city's smart-card records.
+Each figure can be traced back to the source table and the method that produced
+it.
 
-It exists because the source data does not answer questions directly. Roughly
-10M daily transactions arrive with missing route identifiers, inconsistent stop
-codes, and incomplete origin-destination records. The platform reconstructs
-usable OD flows from that, validates them, then serves spatial demand queries on
-top.
+Most of the work is in the data. About 10M transactions a day arrive with
+missing route IDs, stop codes that disagree between tables, and incomplete
+origin–destination records. The platform rebuilds OD flows from them, checks the
+result, and serves spatial demand queries from it.
 
-**What it was used to find:** a congested segment that supports a proposal for a
-targeted short-turn bus service, a route segment whose demand pattern argues for
-splitting it into a local service, three routes carrying over half their demand
-on a single core segment, and — after joining terrain data — a dong where 27 of
-29 bus stops sit on ground at or above an 8% grade. The service changes are
-analysis-based proposals, not implemented changes. See
+**Findings so far:** a congested segment that supports a short-turn bus service,
+a route segment whose demand would justify splitting it into a local service,
+three routes that carry over half their demand on one core segment, and, once
+terrain data was joined, a dong where 27 of its 29 bus stops stand on a grade of
+8% or more. The service changes are proposals from the analysis; none has been
+implemented. See
 **[policy insights](docs/analysis/policy_insights.md)**. The OD-based findings
 are being recomputed: the OD days behind the platform's correction table turned
 out to be inflated ([seventh defect](#inflated-od-days-and-the-java-correction)),
@@ -30,38 +28,38 @@ OD.
 
 ## Live demo
 
-**[seoul-transit-prod.web.app](https://seoul-transit-prod.web.app)** — the map
-client, served from Firebase Hosting against the deployed API, currently in a
-closed beta with external users.
+**[seoul-transit-prod.web.app](https://seoul-transit-prod.web.app)**: the map
+client on Firebase Hosting, calling the deployed API. It is in a closed beta with
+external users.
 
-The backend scales to zero, so the first request after an idle period waits for
-a cold start. The OD correction endpoints are deliberately locked in the
-deployed environment: they mutate data, so they reject every request. Their
-contracts are still visible in the OpenAPI document.
+The backend scales to zero, so the first request after a quiet period waits for
+a cold start. The OD correction endpoints change data, so in the deployed
+environment they reject every request. Their contracts are still in the OpenAPI
+document.
 
 ## Highlights
 
 | | |
 |---|---|
-| **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions — [details](#data-quality-and-validation) |
-| **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance. The Java OD correction was ported to pandas and matched row for row against its own SQL on three real days (1.48M rows); the port then fixes a merge defect that added 675–1,550 passengers a day and cleared 15,000–20,000 stop codes — [details](#inflated-od-days-and-the-java-correction) |
+| **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions ([details](#data-quality-and-validation)) |
+| **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance. The Java OD correction was ported to pandas and matched row for row against its own SQL on three real days (1.48M rows); the port then fixes a merge defect that added 675–1,550 passengers a day and cleared 15,000–20,000 stop codes ([details](#inflated-od-days-and-the-java-correction)) |
 | **OD collection** | A Cloud Run Job copies TOPIS's monthly OD archives to Cloud Storage unchanged, with a SHA-256 manifest written last as the completion marker; 34 months stored |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
-| **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes — [details](#performance-district-demand) |
+| **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes ([details](#performance-district-demand)) |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | 34 months of hourly boarding read from the warehouse as a labelled 3-D array (34 × 24 × 12,850) and grouped by terrain band, reconciled to the passenger against the source copy |
-| **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS — [details](#analytical-warehouse-bigquery-and-dbt) |
-| **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert — [details](#weekly-cloud-pipeline) |
-| **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass — [details](#orchestration) |
-| **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention — [details](#backups) |
+| **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS ([details](#analytical-warehouse-bigquery-and-dbt)) |
+| **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert ([details](#weekly-cloud-pipeline)) |
+| **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass ([details](#orchestration)) |
+| **Backups** | Weekly `pg_dump` to Cloud Storage, checked for readability, required tables and size before upload, with 60-day retention ([details](#backups)) |
 | **Reproducibility** | Schema scripts + Docker Compose; automated tests use synthetic fixtures; model binaries excluded by design |
 
 ## Data quality and validation
 
 Extending the hourly boarding table from six months (2025-01 to 2025-06) to
-thirty-two (2024-01 to 2026-08) surfaced four defects that had been producing
-plausible numbers. None raised an error. Each was found by reconciling a figure
-against something independent of the pipeline that produced it.
+thirty-two (2024-01 to 2026-08) turned up four defects. All of them produced
+plausible numbers and none raised an error. Each was found by checking a figure
+against something the pipeline had not produced itself.
 
 - **Loader overwrite.** The source API returns one row per stop *visit*; a route
   passing the same stop twice collided on the table key and the upsert kept only
@@ -86,13 +84,13 @@ against something independent of the pipeline that produced it.
 | Hours per OD key | 24 distinct, no exceptions | 24 distinct, no exceptions |
 | Daily passengers conserved per OD key | 0 mismatches at 1e-07 | 0 mismatches at 1e-07 |
 | Daily OD passengers not distributed to hours | 0 of 5,345,649 | 0 of 5,345,649 |
-| Fallback-profile rows, 2025-11-11 | 243,960 — 181,272 with no key, 62,688 fitted to zeros | 204,888 — 181,272 with no key, 23,616 fitted to zeros |
+| Fallback-profile rows, 2025-11-11 | 243,960 (181,272 with no key, 62,688 fitted to zeros) | 204,888 (181,272 with no key, 23,616 fitted to zeros) |
 | SHA-256 over every hourly OD row, across re-runs | identical | identical over the manual rebuild and three workflow runs |
 
-Totals are reconciled per OD key rather than in aggregate, so errors that cancel
-out in a 5.3-million sum are still caught. `validate_rebuild.py` runs every check
-and exits non-zero, so a rebuild that printed success but left the data wrong
-fails the gate instead of the reader.
+Totals are compared per OD key as well as in aggregate, because errors in
+opposite directions can cancel out in a 5.3-million sum. `validate_rebuild.py`
+runs all the checks and exits non-zero if any of them fails, so a rebuild that
+reports success with wrong data stops there.
 
 A fifth defect was found in November 2026, in OD correction rather than the
 hourly pipeline. Missing standard stop codes were filled from the T-data stop
@@ -101,7 +99,7 @@ master. The client took the first item as the answer, so every successful
 lookup returned the same Incheon stop (`164000626`), one no Seoul route serves.
 Runs on 2023-10-17, 2024-10-19 and 2025-10-14 wrote it into 396 rows: 256
 boarding and 144 alighting codes. For later runs the stored key no longer
-matched, the API answered 404, and correction quietly fixed nothing. The rows
+matched, the API answered 404, and correction fixed nothing without reporting it. The rows
 were copied aside, cleared and refilled from the local stop master, whose node
 ID matches the source's standard ID for 10,685 of 10,686 stops. The deployed
 Cloud SQL database had been migrated from the local one with the same 396 rows,
@@ -136,9 +134,10 @@ those 10,440 codes were cleared rather than guessed, and correction now treats a
 all-zero ARS as missing. The diagnostic and fix queries for these defects are in
 [`database/data_fixes/`](database/data_fixes/).
 
-How each defect was found, ruled in, and fixed — including the virtual-stop
-filter and the change from an underdetermined to an overdetermined ratio model —
-is in **[the hourly pipeline rebuild](docs/analysis/hourly_pipeline_rebuild.md)**.
+**[The hourly pipeline rebuild](docs/analysis/hourly_pipeline_rebuild.md)**
+describes how each defect was found, confirmed and fixed, including the
+virtual-stop filter and the move from an underdetermined to an overdetermined
+ratio model.
 
 ### Inflated OD days and the Java correction
 
@@ -203,9 +202,9 @@ is configured.
 ### Regenerating the OD days
 
 TOPIS publishes one archive a month, around the 10th of the next month: route-level
-stop OD for three days, plus daily district and subway OD. The days vary — 2026-09
-has a Tuesday, Saturday and Sunday, 2024-10 a Saturday, Wednesday and Thursday — so
-day type is taken from each date. `pipelines/od_stacking/collect_topis_od.py` runs as
+stop OD for three days, plus daily district and subway OD. Which days varies:
+2026-09 has a Tuesday, a Saturday and a Sunday, 2024-10 a Saturday, a Wednesday and
+a Thursday. Day type is therefore read from each date. `pipelines/od_stacking/collect_topis_od.py` runs as
 the Cloud Run Job `transit-od-collect`. It copies every archive from 2024-01 onward
 that Cloud Storage does not hold yet, byte for byte, and writes a manifest beside it
 with the SHA-256, the member list with CRCs and the OD days found. The manifest is
@@ -221,8 +220,8 @@ with its hourly allocation, loaded into Cloud SQL for serving.
 
 ### What the hourly OD is
 
-The hourly OD tables are an allocation, not an observation. Two separate sources
-meet in them: the OD records give origin, destination and passengers for a whole
+The hourly OD tables are computed by allocation. Two separate sources meet in
+them: the OD records give origin, destination and passengers for a whole
 day with no time of travel (only 2025-11-11 is allocated so far), and the hourly
 boarding counts give, for each
 stop and hour, how many people boarded over 34 months, but not where they went.
@@ -265,7 +264,7 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         └──ID token─────> Cloud Run: transit-prediction (private)
 ```
 
-### Decisions worth explaining
+### Design decisions
 
 **No Memorystore.** The application defaults to Redis, but the deployed service
 runs Caffeine (`CACHE_TYPE=caffeine`). Memorystore's smallest instance costs
@@ -276,9 +275,8 @@ environment variable away from changing.
 
 **The prediction service is not public.** It is deployed with
 `--no-allow-unauthenticated`, and `transit-api` attaches a Google-signed ID
-token whose audience is the service URL. Model inference is the kind of
-endpoint that costs money per call, so it should not be reachable by anyone who
-finds the URL.
+token whose audience is the service URL. Every inference call costs money, so
+knowing the URL should not be enough to make one.
 
 **No CORS configuration.** Firebase Hosting rewrites `/api/**` to the Cloud Run
 service, so the browser only ever sees one origin. The frontend calls relative
@@ -347,16 +345,15 @@ first. The second aggregates by administrative dong, worst ratio first. The
 third reports which snapshot is active and how it was produced.
 
 **Result.** Of 11,480 stops, 4,536 (39.5%) sit on terrain at or above an 8%
-grade; the median is 6.51%. Per dong the range is wide — Seonghyeon-dong
-(성현동) tops the list with 27 of 29 stops (93.1%), while riverside dongs sit
+grade; the median is 6.51%. Dongs differ widely: Seonghyeon-dong (성현동)
+tops the list with 27 of 29 stops (93.1%), while riverside dongs sit
 near zero.
 
-### Versioned snapshots, not columns on the master
+### Terrain is stored as versioned snapshots
 
 Terrain values are not stored on `bus_stop_location`. That table is periodically
-reloaded from source CSV, and a derived column written there would be destroyed
-by the next reload with no error raised — the API would keep returning 200 while
-the values quietly emptied out.
+reloaded from source CSV, and the next reload would wipe a derived column
+without any error. The API would keep returning 200 with the values gone.
 
 Instead each processing run is published as an immutable snapshot
 (`terrain_dataset`, `bus_stop_terrain_stats`, `terrain_stop_dong_assignment`,
@@ -384,7 +381,7 @@ Treat it as a screening indicator for narrowing down where to survey.
 
 ### An hourly profile in xarray
 
-The boarding source is already three-dimensional — month, hour, stop — so
+The boarding source is already three-dimensional (month, hour, stop), so
 `pipelines/analysis/demand_xarray.py` loads it as a labelled array rather than a
 flat frame, attaches slope as a non-dimension coordinate on the stop axis, and
 groups by terrain band. The array total is asserted against the source before
@@ -397,9 +394,9 @@ Reading the serving database instead took hours on its idle tier and lost the
 connection from the workstation twice, which is the split the warehouse exists
 for. The PostgreSQL path remains, one month per query.
 
-Building the full grid is itself informative. 10.15M source rows expand to
-34 × 24 × 12,850 cells, and the gaps are real — a stop with no service at 03:00 is
-a missing observation, not a zero. Every aggregate uses `skipna` accordingly. Of
+10.15M source rows expand to 34 × 24 × 12,850 cells. Many cells are empty: a stop
+with no service at 03:00 has no observation, which is different from zero, so every
+aggregate uses `skipna`. Of
 the 12,850 stops, 2,050 have no terrain value, nearly all of them Gyeonggi-do stops
 outside the Seoul stop master; they stay in the array and the totals but in no band.
 
@@ -425,13 +422,12 @@ The first version of this table used six months loaded before the
 band. With the corrected data and five and a half times the months, every share moved
 by one to five points and the shape did not change.
 
-**This is an observation, not a finding.** Slope is confounded with land use here:
+**This does not show that slope reduces ridership.** Slope is confounded with land use here:
 steep districts in Seoul are largely residential and flat ground is largely
 commercial, so a residential-versus-commercial hourly profile would produce a
 similar shape with no terrain effect at all. Separating the two needs a land-use
-control the platform does not currently carry. The figure is recorded because it
-is a testable question, not because it answers one — the same standing as the
-surface-model caveat on the slope values themselves.
+control the platform does not have yet. The table is kept as a question to test
+later, with the same caveat as the slope values themselves.
 
 ## Tech stack
 
@@ -444,8 +440,8 @@ surface-model caveat on the slope values themselves.
 | Frontend | React, Vite, Leaflet (OpenStreetMap basemap) |
 | Pipelines | Python, Cloud Workflows, Airflow (local) |
 | Multidimensional analysis | xarray, dask, netCDF |
-| Raster processing | GDAL/OGR, rasterio (external — [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
-| Analytical warehouse | BigQuery, dbt (external — [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
+| Raster processing | GDAL/OGR, rasterio (in [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
+| Analytical warehouse | BigQuery, dbt (in [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
 | Local infra | Docker Compose |
 | Deployment | Cloud Run (services and jobs), Cloud SQL (PostgreSQL 18 + PostGIS), Cloud Scheduler, Cloud Monitoring, Artifact Registry, Secret Manager, Firebase Hosting |
 | Testing | pytest, JUnit 5, Testcontainers/PostGIS, Vitest, GitHub Actions |
@@ -460,24 +456,23 @@ index could serve.
 Spatial, composite, and expression indexes plus refreshed table statistics
 addressed both. After indexing, a measured call took 490 ms; with the cache
 flushed, cold calls stayed under one second, with a best observed cold call of
-about 192 ms. These are local measurements on a single development machine —
-192 ms is the best observation, not a median or p95.
+about 192 ms. These were measured locally on one development machine, and 192 ms
+is the single best call, not a median or p95.
 
 Because the database path alone became sub-second, the deployed service does
 not need a shared cache: it runs Caffeine instead of Redis (see *No
 Memorystore*). Production latency on Cloud Run has not yet been measured.
 
-A precomputed node-to-district mapping table was considered and deliberately
-not built — indexing was sufficient, and the table would have needed rebuilding
-whenever stop locations or boundaries changed.
+A precomputed node-to-district mapping table was considered and not built.
+Indexing was enough, and the table would have needed rebuilding whenever stop
+locations or boundaries changed.
 
 The terrain integration made the opposite call and precomputed its stop-to-dong
 assignment. The reason is not performance but correctness: a boundary stop
 matching two polygons inflates every aggregate, and resolving that per query
 would mean re-deriving the same tie-break on every request. Precomputation is
-acceptable there because the assignment is scoped to an immutable snapshot, so
-"needs rebuilding when boundaries change" becomes "a new snapshot is published",
-which is the intended workflow rather than a maintenance burden.
+fine there because the assignment belongs to an immutable snapshot, and a new
+boundary release means publishing a new snapshot anyway.
 
 Index SQL: `database/performance/district_demand_indexes.sql`
 Analysis: [`docs/performance/district_demand_optimization.md`](docs/performance/district_demand_optimization.md)
@@ -711,15 +706,15 @@ The database password is read from `pgpass.conf` outside the repository.
 
 ## Quick start
 
-1. **Create the schema** — the API uses `ddl-auto: validate` and will not start
+1. **Create the schema.** The API uses `ddl-auto: validate` and will not start
    against an empty database:
    ```bash
    psql -h localhost -U postgres -c "CREATE DATABASE \"Seoul_Transit\" ENCODING 'UTF8';"
    psql -h localhost -U postgres -d Seoul_Transit -f database/schema/run_all.sql
    ```
-2. **Start infrastructure** — copy `.env.example` to `.env`, fill in
+2. **Start infrastructure.** Copy `.env.example` to `.env`, fill in
    `DB_PASSWORD` and `ADMIN_API_TOKEN`, then `docker compose up -d`.
-3. **Run the API and frontend** — `mvn spring-boot:run` in
+3. **Run the API and frontend.** `mvn spring-boot:run` in
    `services/api-server`, `npm install && npm run dev` in `services/web-client`.
 
 Data loading order, Windows/PowerShell commands, the Redis-free `local-simple`
@@ -730,11 +725,11 @@ profile, and smoke tests are in the
 
 ## Tests
 
-Tests are treated as executable engineering contracts rather than a
-coverage-number exercise. The highest-value cases lock down fallback
-precedence, passenger conservation, provenance, PostGIS boundary semantics
-(a stop exactly on a district boundary is counted once), terrain publication
-guards, and API input/error contracts. The hourly-pipeline defects above are
+The tests check behaviour that must not change; coverage numbers are not the
+goal. The important ones cover fallback order, passenger conservation,
+provenance, PostGIS boundary handling (a stop exactly on a district boundary is
+counted once), the terrain publication guards, and API input and error
+contracts. The hourly-pipeline defects above are
 covered as contracts on synthetic fixtures; checks against real data live in
 `validate_rebuild.py` and run after a rebuild rather than in CI. The OD
 correction port's equivalence tests run the original Java SQL against random
@@ -812,9 +807,9 @@ firebase.json           Hosting config and the /api/** rewrite to Cloud Run
 Secrets are never committed; `.env.example` holds placeholders only. In the
 deployed environment the database credentials and the collector's Seoul Open API key come
 from Secret Manager, and each secret is readable only by the service that uses
-it. `ADMIN_API_TOKEN` is deliberately left unset in deployment, so the
-`/api/od-correction/**` endpoints — which issue UPDATE and DELETE statements —
-reject every request rather than depending on a token staying secret.
+it. `ADMIN_API_TOKEN` is left unset in deployment, so the
+`/api/od-correction/**` endpoints, which issue UPDATE and DELETE statements,
+reject every request instead of relying on a token staying secret.
 
 **Runtime identities.** The API, prediction service, pipeline jobs and the
 workflow each run as a dedicated service account with only the access they
@@ -832,7 +827,7 @@ message nor the traceback contains the key.
 
 ## Known gaps
 
-Tracked here so they are visible rather than discovered during deployment.
+Problems that are known and not fixed yet.
 
 1. `admin_dong_boundary` has no loader script. The 1,208 administrative units of
    the 2025-06-30 snapshot were imported manually with ogr2ogr and documented in
@@ -847,7 +842,7 @@ Tracked here so they are visible rather than discovered during deployment.
 5. Terrain snapshots are published manually; there is no scheduled job to
    re-publish when the DEM or the boundary release changes.
 6. Temporary, election and substitute holidays are not asserted against an
-   external source. A one-off holiday simply absent from the CSV would still pass
+   external source. A one-off holiday missing from the CSV would still pass
    unnoticed.
 7. The deployed schema differs from the local one: `pg_dump -t` did not carry the
    terrain guard functions, so the four guard triggers do not exist in Cloud SQL.
@@ -880,13 +875,12 @@ Tracked here so they are visible rather than discovered during deployment.
 
 ## Next work
 
-1. Carry the terrain guard functions into Cloud SQL, or decide deliberately that
+1. Carry the terrain guard functions into Cloud SQL, or decide that
    the cloud database stays read-only for pipeline writes.
-2. Extend OD analysis toward trip-chain analysis — transfer patterns and full
-   journey flows rather than single-leg boarding and alighting.
+2. Extend OD analysis to trip chains: transfers and whole journeys instead of
+   single boarding-to-alighting legs.
 3. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
-   and compare the two snapshots — the versioning scheme exists to make exactly
-   that comparison possible.
+   and compare the two snapshots, which is what the versioning was built for.
 4. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
