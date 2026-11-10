@@ -616,7 +616,7 @@ The database password is read from `pgpass.conf` outside the repository.
 | Terrain snapshots and stop/dong screening API | Done |
 | Hourly pipeline rebuild, 2024-01 to 2026-10 | Done, validated; rebuilt in Cloud SQL |
 | GCP deployment: serving path | Live, closed beta |
-| Weekly cloud pipeline (collect, rebuild, validate, publish) | Scheduled weekly from 2026-11-10; forced full runs passed on 2026-11-07 and 2026-11-08 (1 h 31 min); failure alerts tested |
+| Weekly cloud pipeline (collect, rebuild, validate, publish) | Running weekly since 2026-11-10; forced full runs passed on 2026-11-07 and 2026-11-08 (1 h 31 min); failure alerts tested |
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | Weekly database backup | Running, verified before upload |
 | Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
