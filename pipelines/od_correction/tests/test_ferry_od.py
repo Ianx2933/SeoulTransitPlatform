@@ -42,7 +42,7 @@ def bus_row(route="100", name="A", pax=5):
 def test_the_61_rows_get_route_and_positions_and_keep_every_passenger():
     out, report = ferry.normalize_ferry(raw_ferry())
     assert report["ferry_rows"] == 61 and report["ferry_passengers"] == 2444
-    assert (out[sc.ROUTE] == "한강버스").all()
+    assert (out[sc.ROUTE] == "한강버스01").all()
     assert out[sc.B_SEQ].notna().all() and out[sc.A_SEQ].notna().all()
     assert int(out[sc.PAX].sum()) == 2444
 
@@ -75,7 +75,7 @@ def test_fixed_correction_merges_them_without_touching_the_bus_rows():
     normalized, _ = ferry.normalize_ferry(with_bus)
     out, _, report = sc.correct(normalized, "fixed")
     assert report["passenger_diff"] == 0
-    ferry_out = out[out[sc.ROUTE] == "한강버스"]
+    ferry_out = out[out[sc.ROUTE] == "한강버스01"]
     assert len(ferry_out) == ferry_out.groupby([sc.B_NAME, sc.A_NAME]).ngroups   # one row per pier pair
     assert int(ferry_out[sc.PAX].sum()) == 2444
     assert int(out.loc[out[sc.ROUTE] == "100", sc.PAX].sum()) == 11

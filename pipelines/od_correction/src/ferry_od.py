@@ -47,7 +47,7 @@ POSITION = {name: i + 1 for i, name in enumerate(PIERS)}
 WEST = {"마곡", "망원"}
 EAST = {"압구정", "옥수", "성수", "뚝섬", "잠실"}
 SPLIT_FROM = date(2026, 3, 1)          # 마곡–여의도 and 여의도–잠실 run as separate lines
-DEFAULT_ROUTE_NAME = "한강버스"
+DEFAULT_ROUTE_NAME = "한강버스01"          # route_no in the hourly boarding data (마곡~잠실)
 CALENDAR = Path(__file__).resolve().parents[1] / "reference" / "hangang_ferry_suspensions.csv"
 
 
