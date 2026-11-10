@@ -69,7 +69,10 @@ EMPTY_NAME_CODE = "277102436"
 DEDUP_COUNT_KEY = [ROUTE, ROUTE_ID, B_SEQ, B_ARS, B_NAME, A_SEQ, A_ARS, A_NAME]
 DEDUP_GROUP_KEY = [ROUTE, ROUTE_ID, B_SEQ, B_ARS, B_NAME, A_SEQ, A_ARS, A_CODE, A_NAME]
 DEDUP_DELETE_KEY = [DATE, ROUTE, ROUTE_ID, B_SEQ, B_ARS, A_SEQ, A_ARS]
-OD_KEY = DEDUP_DELETE_KEY  # fixed mode merges on this, NULL-safe
+# fixed mode merges on this, NULL-safe. A stop is its ARS, or its name when it
+# has no ARS: rows with no route, ARS or sequence (the Han River ferry piers in
+# 2026-09) must not collapse into one row.
+OD_KEY = [DATE, ROUTE, ROUTE_ID, B_SEQ, "_b_stop", A_SEQ, "_a_stop"]
 
 MODES = ("faithful", "fixed")
 
@@ -310,7 +313,8 @@ def dedup_faithful(r: DayResult, date, label: str) -> None:
 
 def dedup_fixed(r: DayResult, date, label: str) -> None:
     """
-    Merge rows with the same OD key, NULL-safe, summing passengers.
+    Merge rows with the same OD key, NULL-safe, summing passengers. A stop
+    without an ARS is identified by its name.
 
     Name and code columns are not part of the key; when merged rows disagree on
     them the values of the row with the most passengers are kept (ties: byte
@@ -320,6 +324,8 @@ def dedup_fixed(r: DayResult, date, label: str) -> None:
     descriptive = [B_CODE, B_NAME, A_CODE, A_NAME]
     ordered = d.sort_values([PAX] + descriptive, ascending=[False] + [True] * 4,
                             na_position="last", kind="mergesort").copy()
+    ordered["_b_stop"] = ordered[B_ARS].fillna("name:" + ordered[B_NAME])
+    ordered["_a_stop"] = ordered[A_ARS].fillna("name:" + ordered[A_NAME])
     ordered["_gid"] = ordered.groupby(OD_KEY, dropna=False, sort=False).ngroup()
     sizes = ordered.groupby("_gid").size()
     merged_groups = int((sizes > 1).sum())

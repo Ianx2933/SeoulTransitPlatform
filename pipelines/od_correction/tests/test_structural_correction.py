@@ -148,6 +148,21 @@ def test_fixed_merges_on_the_key_and_keeps_every_passenger():
     assert tags == {"MERGED_GROUPS": 2, "MERGED_ROWS": 5, "CONFLICTS": 1}
 
 
+def test_fixed_keeps_stops_without_ars_apart_by_name():
+    # 2026-09-15: 61 ferry rows with no route, ARS or sequence were merged into
+    # one row of 2,444 passengers before stops without an ARS kept their names.
+    ferry = dict(route=None, rid=None, bseq=None, bars=None, bcode=None, aseq=None, aars=None, acode=None)
+    out, _, report = run([
+        row(**ferry, bname="뚝섬", aname="여의도", pax=204),
+        row(**ferry, bname="뚝섬", aname="잠실", pax=107),
+        row(**ferry, bname="마곡", aname="여의도", pax=107),
+        row(**ferry, bname="마곡", aname="여의도", pax=3),
+    ], "fixed")
+    pairs = sorted(zip(out[sc.B_NAME], out[sc.A_NAME], out[sc.PAX]))
+    assert pairs == sorted([("마곡", "여의도", 110), ("뚝섬", "여의도", 204), ("뚝섬", "잠실", 107)])
+    assert report["passenger_diff"] == 0
+
+
 def test_fixed_mode_fails_when_passengers_are_lost(monkeypatch):
     def lose_one(r, date):
         r.frame = r.frame.iloc[1:]
