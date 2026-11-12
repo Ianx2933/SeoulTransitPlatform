@@ -156,7 +156,7 @@ class ODCorrectionPipeline:
             self.config.raw_path,
             sep=self.config.raw_delimiter,
             encoding=self.config.raw_encoding,
-            dtype={"노선명": str},
+            dtype={"기준일자": str, "노선명": str},
             low_memory=False,
         )
 
@@ -164,7 +164,7 @@ class ODCorrectionPipeline:
             self.config.reference_path,
             sep=self.config.reference_delimiter,
             encoding=self.config.reference_encoding,
-            dtype={"노선명": str, "전환_노선ID": str},
+            dtype={"기준일자": str, "노선명": str, "전환_노선ID": str},
             low_memory=False,
         )
 
@@ -193,7 +193,20 @@ class ODCorrectionPipeline:
 
     @staticmethod
     def normalize_date(series: pd.Series) -> pd.Series:
-        parsed = pd.to_datetime(series, format="%y/%m/%d", errors="coerce")
+        """Return YYMMDD. TOPIS files are not consistent across months: besides
+        23/10/17 there are 2023-10-17, 2023/10/17 and plain 20231017 (read as a
+        number unless dtype=str). Only YY/MM/DD used to be parsed, so the other
+        months came out with an empty 기준일자 (found in BigQuery 2026-11-12).
+        A date that still cannot be parsed stops the run instead of going blank."""
+        text = series.astype("string").str.strip().str.replace(r"\.0$", "", regex=True)
+        parts = text.str.extract(r"^(\d{4}|\d{2})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T].*)?$")
+        compact = text.str.extract(r"^(\d{4}|\d{2})(\d{2})(\d{2})$")
+        parts = parts.fillna(compact)
+        year = parts[0].where(parts[0].str.len() == 4, "20" + parts[0])
+        parsed = pd.to_datetime(year + "-" + parts[1] + "-" + parts[2], format="%Y-%m-%d", errors="coerce")
+        bad = text.notna() & (text != "") & parsed.isna()
+        if bad.any():
+            raise ValueError(f"기준일자 values that are not dates: {sorted(text[bad].unique())[:5]}")
         return parsed.dt.strftime("%y%m%d")
 
     def normalize_route_name(self, series: pd.Series) -> pd.Series:
