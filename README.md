@@ -43,7 +43,7 @@ document.
 |---|---|
 | **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions ([details](#data-quality-and-validation)) |
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance. The Java OD correction was ported to pandas and matched row for row against its own SQL on three real days (1.48M rows); the port then fixes a merge defect that added 675–1,550 passengers a day and cleared 15,000–20,000 stop codes ([details](#inflated-od-days-and-the-java-correction)) |
-| **OD collection** | A Cloud Run Job copies TOPIS's monthly OD archives to Cloud Storage unchanged, with a SHA-256 manifest written last as the completion marker; 34 months stored |
+| **OD collection** | A Cloud Run Job copies TOPIS's monthly OD archives to Cloud Storage unchanged, with a SHA-256 manifest written last as the completion marker; 34 months stored. A second Job corrects every stored day (102) and the warehouse loads them into BigQuery, checked against each day's report |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes ([details](#performance-district-demand)) |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
@@ -144,12 +144,15 @@ ratio model.
 A seventh defect was in the OD days themselves. Three of the four corrected days
 in `analysis_table_final` hold several times the passengers a day can have:
 
-| Date | Rows | Distinct OD keys | Passengers | Typical day |
+| Date | Rows | Distinct OD keys | Passengers | Regenerated from TOPIS |
 |---|---|---|---|---|
-| 2023-10-17 (Tue) | 2,392,432 | 489,818 | 73,958,020 | about 5.3M |
-| 2024-10-19 (Sat) | 1,930,124 | 479,007 | 16,764,916 | about 4.5M |
-| 2025-10-14 (Tue) | 1,979,512 | 494,863 | 21,266,216 | about 5.3M |
-| 2025-11-11 (Tue) | 516,678 | 516,667 | 5,351,327 | about 5.3M |
+| 2023-10-17 (Tue) | 2,392,432 | 489,818 | 73,958,020 | 5,055,834 |
+| 2024-10-19 (Sat) | 1,930,124 | 479,007 | 16,764,916 | 4,119,456 |
+| 2025-10-14 (Tue) | 1,979,512 | 494,863 | 21,266,216 | 5,316,816 |
+| 2025-11-11 (Tue) | 516,678 | 516,667 | 5,351,327 | 5,351,327 |
+
+The last column is the same day corrected again from the TOPIS original with the
+`fixed` port (below).
 
 There are about four rows per key on all three days (4.0, 4.0 and 4.9), and the
 repeats are identical rows, which points to the corrected file being loaded more
@@ -194,8 +197,8 @@ anomaly table on any route. On the three days of the September 2026 archive:
 | Boarding standard codes empty, before → `fixed` | 1,892 → 1,794 | 1,663 → 1,565 | 1,519 → 1,429 |
 | `fixed`: passengers out + anomaly − in | 0 | 0 | 0 |
 
-So even a day loaded once, such as 2025-11-11, probably carries a small excess
-of this order from correction; it will be regenerated with the rest. 150 random tables
+A day loaded once, such as 2025-11-11, could have carried a small excess of this
+order. Regenerated, it has the same daily total as the table, 5,351,327. 150 random tables
 are also run through both paths in the test suite whenever a PostgreSQL server
 is configured.
 
@@ -213,9 +216,23 @@ interrupted upload and fetched again. Keeping the originals means a correction
 defect can be fixed and re-run without asking the source again. 2024-01 to 2026-09
 and 2023-10, which holds 2023-10-17, are stored.
 
-The plan from there: standard codes (`od_correction_pipeline.py`), then structural
-correction (`fixed`) for every stored day, stacked by date in BigQuery; day-type
-representative OD computed there from twelve months or more; and only that result,
+The Cloud Run Job `transit-od-correct` then corrects each stored day: standard codes
+(`od_correction_pipeline.py`), the Han River ferry rules (`ferry_od.py`), and
+structural correction (`fixed`), which stops the day if passengers out plus the
+anomaly table differ from passengers in. It writes the result, the anomaly rows and a
+report to Cloud Storage, the report last. All 102 stored days have been corrected.
+The warehouse loads each day into its own BigQuery partition and checks rows,
+passengers and the date in every row against the report; dbt builds `fct_od_stop`
+from there, with a day type per date and a seed of days that must not count as
+ordinary (the bus strike of 2026-01-13, Seollal, ferry suspensions).
+
+That date check found one more defect. Correction parsed `기준일자` only in the
+`YY/MM/DD` form, and some months of the archive use another one, so 21 days came
+out with the date empty and the right totals. The parser now reads every form found
+and stops on a value it cannot read; the days were corrected again.
+
+Still to do: day-type representative OD computed in BigQuery from twelve months or
+more, its accuracy measured by leaving each day out in turn, and only that result,
 with its hourly allocation, loaded into Cloud SQL for serving.
 
 ### What the hourly OD is
@@ -259,7 +276,8 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │                            ├─> 8 rebuild, validate, publish Jobs (new month only)
                                         │                            └─> Cloud Run Job: warehouse ──> BigQuery + dbt
                                         │
-                                        │   Cloud Run Job: od-collect (run by hand) ──> TOPIS ──> Cloud Storage
+                                        │   Cloud Run Jobs: od-collect (daily check) ──> TOPIS ──> Cloud Storage
+                                        │                   od-correct (by hand) ──> Cloud Storage ──> BigQuery (warehouse)
                                         │   Cloud Scheduler ──> Workflows: transit-db-export ──> Cloud SQL export ──> Cloud Storage
                                         │     weekly
                                         │
@@ -716,8 +734,9 @@ database does not have the terrain guard functions in the first place (Known gap
 | GCP deployment: serving path | Live, closed beta |
 | Weekly cloud pipeline (collect, rebuild, validate, publish) | Running weekly since 2026-11-10; forced full runs passed on 2026-11-07 and 2026-11-08 (1 h 31 min); failure alerts tested |
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
-| TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; run by hand, not yet in the weekly workflow |
-| OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; `fixed` conserves passengers; not yet a cloud job |
+| TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; checked for new months daily, not yet in the weekly workflow |
+| OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; runs as a cloud job, 102 days corrected with passengers conserved; loaded into BigQuery (`fct_od_stop`) |
+| Day-type representative OD | Not started; Cloud SQL still serves the old OD days |
 | Weekly database backup | Cloud SQL export every Sunday from 2026-11-15; the first export was restored and matched on 2026-11-10 |
 | Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
 
@@ -882,9 +901,9 @@ Problems that are known and not fixed yet.
 10. Hourly OD exists for one day, 2025-11-11, and is an allocation of daily OD by
     stop boarding profiles (see [What the hourly OD is](#what-the-hourly-od-is)).
     The weekly pipeline refreshes the profiles with each new month but adds no OD
-    days. OD archives are now collected (see
-    [Regenerating the OD days](#regenerating-the-od-days)); correcting and loading
-    them is not automated yet.
+    days. 102 OD days are now collected, corrected and in BigQuery (see
+    [Regenerating the OD days](#regenerating-the-od-days)), but correction is started
+    by hand and no representative OD has been built from them yet.
 11. `analysis_table_final` still holds the three inflated OD days in both databases
     until they are regenerated, and the curated OD endpoints still return them.
     The Java correction endpoints that produced them are still in the API server,
@@ -903,9 +922,9 @@ Problems that are known and not fixed yet.
    the number-based `route_type` rules against it.
 5. Check the stops in Known gap 9 against an archived stop master from the
    year of each OD date.
-6. Add OD days: run the ported correction on every collected day as a cloud job,
-   stack the results in BigQuery, replace the inflated days in Cloud SQL with
-   day-type representative OD, and recompute the OD-based policy insights. Then
-   look for OD records that carry boarding times to test the allocation against.
+6. Build day-type representative OD from the corrected days in BigQuery and measure
+   how well it predicts a day left out, replace the inflated days in Cloud SQL with
+   it, and recompute the OD-based policy insights. Then look for OD records that
+   carry boarding times to test the allocation against.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
