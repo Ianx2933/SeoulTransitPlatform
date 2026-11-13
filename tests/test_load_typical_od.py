@@ -91,3 +91,11 @@ def test_a_repeated_key_stops_the_load():
 def test_unknown_day_type_argument_is_refused():
     with pytest.raises(SystemExit):
         app.main(["--day-types", "holiday", "--dry-run"])
+
+
+def test_the_packaged_schema_matches_database_schema():
+    # The job image has pipelines/ only, so it runs the packaged copy.
+    from pathlib import Path
+    repo = Path(app.__file__).resolve().parents[2]
+    assert app.SCHEMA_SQL.read_text(encoding="utf-8") == \
+        (repo / "database" / "schema" / "09_od_typical_route_stop.sql").read_text(encoding="utf-8")

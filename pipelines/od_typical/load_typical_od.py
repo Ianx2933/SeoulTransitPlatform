@@ -11,7 +11,9 @@ rows and passengers per day type against the manifest, writes
 od_typical_route_stop__next with COPY, checks it again in the database, and swaps
 it in with publish_rebuild.publish: the API never sees a half-loaded table.
 
-The schema is database/schema/09_od_typical_route_stop.sql; the table is created
+The schema is database/schema/09_od_typical_route_stop.sql. The pipeline image
+holds only pipelines/, so a copy sits next to this file and is what the job runs;
+tests/test_load_typical_od.py checks the two are identical. The table is created
 from it on the first run.
 
     python -m pipelines.od_typical.load_typical_od --day-types weekday
@@ -37,7 +39,7 @@ from pipelines.hourly_od_estimation.publish_rebuild import publish
 
 TABLE = "od_typical_route_stop"
 DEFAULT_URI = os.environ.get("OD_TYPICAL_URI", "gs://seoul-transit-prod-pipeline/od-typical")
-SCHEMA_SQL = Path(__file__).resolve().parents[2] / "database" / "schema" / "09_od_typical_route_stop.sql"
+SCHEMA_SQL = Path(__file__).resolve().with_name("od_typical_route_stop.sql")
 DAY_TYPES = ("weekday", "saturday", "sunday_holiday")
 FOLDER = re.compile(r"^(\d{8})/manifest\.json$")
 RENAME = {
