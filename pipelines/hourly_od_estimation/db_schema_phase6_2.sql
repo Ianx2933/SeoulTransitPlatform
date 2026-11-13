@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS dow_hourly_ratio (
 );
 
 CREATE TABLE IF NOT EXISTS estimated_hourly_od (
-    기준일자 VARCHAR(8),
+    기준일자 VARCHAR(32),
     노선명 VARCHAR(50),
     승차_정류장ars VARCHAR(5),
     하차_정류장ars VARCHAR(5),
