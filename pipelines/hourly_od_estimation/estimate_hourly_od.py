@@ -43,6 +43,90 @@ METHOD_FALLBACK_NO_KEY = "default_static_ratio"
 METHOD_FALLBACK_ZERO_FIT = "default_static_ratio_zero_fit"
 
 
+# Typical days (2026-11). od_typical_route_stop holds the mean OD of a day type
+# over the last twelve months, built in BigQuery from every corrected TOPIS OD
+# day. Its 기준일자 is a label, so the hourly table keys a typical day the way it
+# keyed a date. The ratio model has seven day types, so a typical weekday takes
+# the mean of the fitted Monday-to-Friday profiles of its route and stop.
+TYPICAL_PREFIX = "typical_"
+TYPICAL_DAY_TYPES = ("saturday", "sunday_holiday", "weekday")   # label order
+TYPICAL_RATIO_DAY_TYPE = {"weekday": "weekday", "saturday": "sat", "sunday_holiday": "sun_holiday"}
+WEEKDAY_RATIO_DAY_TYPES = ("mon", "tue", "wed", "thu", "fri")
+TYPICAL_SOURCE_TABLE = "od_typical_route_stop"
+
+
+def typical_labels(day_types: list[str]) -> tuple[str, str]:
+    """
+    (first, last) label for a set of typical day types, used as a 기준일자 range.
+
+    The range must cover exactly the chosen labels, so the set has to be
+    contiguous in label order (saturday < sunday_holiday < weekday): weekday,
+    weekday+sunday_holiday or all three, but not saturday+weekday alone.
+    """
+    unknown = [d for d in day_types if d not in TYPICAL_DAY_TYPES]
+    chosen = sorted(set(day_types) - set(unknown), key=TYPICAL_DAY_TYPES.index)
+    if unknown or not chosen:
+        raise SystemExit(f"--day-types must be some of {', '.join(TYPICAL_DAY_TYPES)}, got {day_types}")
+    first, last = TYPICAL_DAY_TYPES.index(chosen[0]), TYPICAL_DAY_TYPES.index(chosen[-1])
+    if list(TYPICAL_DAY_TYPES[first:last + 1]) != chosen:
+        raise SystemExit(f"--day-types {chosen} leave a gap in label order {list(TYPICAL_DAY_TYPES)}; "
+                         "add the day type in between")
+    return TYPICAL_PREFIX + chosen[0], TYPICAL_PREFIX + chosen[-1]
+
+
+def ratio_day_type(label_or_date: str, holidays: set[str]) -> str:
+    """Ratio-model day type for a YYYYMMDD date or a typical_<day type> label."""
+    if label_or_date.startswith(TYPICAL_PREFIX):
+        return TYPICAL_RATIO_DAY_TYPE[label_or_date[len(TYPICAL_PREFIX):]]
+    return day_type_from_yyyymmdd(label_or_date, holidays)
+
+
+def add_weekday_mean(ratio_map: dict, zero_keys: set) -> int:
+    """
+    Add (route, stop, 'weekday') profiles: the mean of that key's fitted
+    Monday-to-Friday profiles. Each sums to one, so the mean does too. A key with
+    no fitted weekday profile but a collapsed one goes to zero_keys, keeping the
+    fallback methods distinct as select_profile documents. Returns profiles added.
+    """
+    groups: dict[tuple[str, str], list[list[float]]] = {}
+    collapsed: set[tuple[str, str]] = set()
+    for (route_no, stop_ars, day_type), ratios in ratio_map.items():
+        if day_type in WEEKDAY_RATIO_DAY_TYPES:
+            groups.setdefault((route_no, stop_ars), []).append(ratios)
+    for route_no, stop_ars, day_type in zero_keys:
+        if day_type in WEEKDAY_RATIO_DAY_TYPES:
+            collapsed.add((route_no, stop_ars))
+    for (route_no, stop_ars), profiles in groups.items():
+        ratio_map[(route_no, stop_ars, "weekday")] = np.mean(np.array(profiles), axis=0).tolist()
+    for route_no, stop_ars in collapsed - set(groups):
+        zero_keys.add((route_no, stop_ars, "weekday"))
+    return len(groups)
+
+
+def load_typical_od(engine, first_label: str, last_label: str, limit: int | None) -> pd.DataFrame:
+    """
+    Load typical-day OD in the shape load_daily_od returns. Stops without an ARS
+    (keyed 'name:<stop>', the Han River ferry and a few virtual stops) are left
+    out like '00000' is: the ratio model has no stop-level profile for them.
+    """
+    limit_clause = f" LIMIT {int(limit)}" if limit else ""
+    sql = text(f"""
+        SELECT
+            기준일자,
+            노선명,
+            승차_정류장ars,
+            하차_정류장ars,
+            SUM(승객수) AS daily_passengers
+        FROM {TYPICAL_SOURCE_TABLE}
+        WHERE 승차_정류장ars != '00000' AND 하차_정류장ars != '00000'
+          AND 승차_정류장ars NOT LIKE 'name:%%' AND 하차_정류장ars NOT LIKE 'name:%%'
+          AND 기준일자 >= :start_date AND 기준일자 <= :end_date
+        GROUP BY 기준일자, 노선명, 승차_정류장ars, 하차_정류장ars
+        {limit_clause}
+    """)
+    return pd.read_sql(sql, engine, params={"start_date": first_label, "end_date": last_label})
+
+
 def load_daily_od(engine, start_date: str | None, end_date: str | None, limit: int | None) -> pd.DataFrame:
     """
     Load daily OD records from analysis_table_final.
@@ -255,7 +339,7 @@ def estimate(engine, daily_od: pd.DataFrame, ratio_map: dict, zero_keys: set, ho
         destination_ars = normalize_ars(raw_destination)
         day_type = day_type_cache.get(date)
         if day_type is None:
-            day_type = day_type_from_yyyymmdd(date, holidays)
+            day_type = ratio_day_type(date, holidays)
             day_type_cache[date] = day_type
         daily_passengers = float(raw_passengers)
 
@@ -303,6 +387,12 @@ def main():
         help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL, so a scheduler can pass "
              "it from a secret instead of a visible argument.",
     )
+    parser.add_argument("--source", choices=["dated", "typical"], default="dated",
+                        help="dated: days of analysis_table_final between --start-date and "
+                             "--end-date. typical: the typical days of od_typical_route_stop "
+                             "named by --day-types; the hourly table then holds typical days only.")
+    parser.add_argument("--day-types", default="weekday",
+                        help="With --source typical: comma list of " + ", ".join(TYPICAL_DAY_TYPES))
     parser.add_argument("--start-date", required=False, help="YYYYMMDD")
     parser.add_argument("--end-date", required=False, help="YYYYMMDD")
     parser.add_argument("--holiday-csv", default=str(DEFAULT_HOLIDAY_CSV))
@@ -322,6 +412,12 @@ def main():
     args = parser.parse_args()
 
     target = table_target(args.target)
+    typical = args.source == "typical"
+    if typical:
+        if args.start_date or args.end_date:
+            raise SystemExit("--source typical takes --day-types, not dates.")
+        args.start_date, args.end_date = typical_labels(
+            [d.strip() for d in args.day_types.split(",") if d.strip()])
     if target == "next" and not (args.start_date and args.end_date):
         raise SystemExit("Writing the next copy needs both --start-date and --end-date.")
     if target == "next" and args.limit:
@@ -334,12 +430,23 @@ def main():
     engine = make_engine(args.db_url)
     holidays = load_holidays(args.holiday_csv)
 
-    daily_od = load_daily_od(engine, args.start_date, args.end_date, args.limit)
-    require_holiday_coverage(holidays, {str(d)[:4] for d in daily_od["기준일자"].unique()})
-    day_types = sorted({day_type_from_yyyymmdd(str(d), holidays) for d in daily_od["기준일자"].unique()})
+    if typical:
+        daily_od = load_typical_od(engine, args.start_date, args.end_date, args.limit)
+        if daily_od.empty:
+            raise SystemExit(f"{TYPICAL_SOURCE_TABLE} has no rows {args.start_date}..{args.end_date}")
+        day_types = sorted({ratio_day_type(str(d), holidays) for d in daily_od["기준일자"].unique()})
+        load_types = sorted({t for t in day_types if t != "weekday"} |
+                            (set(WEEKDAY_RATIO_DAY_TYPES) if "weekday" in day_types else set()))
+    else:
+        daily_od = load_daily_od(engine, args.start_date, args.end_date, args.limit)
+        require_holiday_coverage(holidays, {str(d)[:4] for d in daily_od["기준일자"].unique()})
+        day_types = sorted({day_type_from_yyyymmdd(str(d), holidays) for d in daily_od["기준일자"].unique()})
+        load_types = day_types
     ratio_table = target_table("dow_hourly_ratio", target)
-    ratio_map, zero_keys = (load_ratio_map(engine, day_types, ratio_table) if day_types
+    ratio_map, zero_keys = (load_ratio_map(engine, load_types, ratio_table) if load_types
                             else ({}, set()))
+    if typical and "weekday" in day_types:
+        print(f"Weekday profiles averaged from Monday-Friday: {add_weekday_mean(ratio_map, zero_keys):,}")
 
     print(f"Daily OD rows: {len(daily_od):,}")
     print(f"Day types: {day_types}")
@@ -347,12 +454,17 @@ def main():
     print(f"Ratio keys all zero, routed to fallback: {len(zero_keys):,}")
     print(f"Ratios from {ratio_table}")
 
+    # Rows this run does not replace survive it: other dates for a dated run, other
+    # typical days for a typical run. A typical run drops every dated row, so the
+    # hourly table never mixes one real day with typical ones.
+    keep_where = "NOT (기준일자 >= :start_date AND 기준일자 <= :end_date)"
+    if typical:
+        keep_where = f"LEFT(기준일자, {len(TYPICAL_PREFIX)}) = '{TYPICAL_PREFIX}' AND " + keep_where
+
     if target == "next":
-        # The copy starts with every row outside the date range, so dates this run
-        # does not estimate survive the swap, then receives this range.
         with engine.begin() as conn:
             nxt = prepare_next_table(
-                conn, OD_TABLE, keep_where="NOT (기준일자 >= :start_date AND 기준일자 <= :end_date)",
+                conn, OD_TABLE, keep_where=keep_where,
                 params={"start_date": args.start_date, "end_date": args.end_date})
             kept = conn.execute(text(f"SELECT COUNT(*) FROM {nxt}")).scalar()
             print(f"{nxt}: kept {kept:,} rows outside {args.start_date}-{args.end_date}")
@@ -371,7 +483,7 @@ def main():
 
     with engine.begin() as conn:
         deleted = conn.execute(
-            text("DELETE FROM estimated_hourly_od WHERE 기준일자 >= :start_date AND 기준일자 <= :end_date"),
+            text(f"DELETE FROM estimated_hourly_od WHERE NOT ({keep_where})"),
             {"start_date": args.start_date, "end_date": args.end_date},
         ).rowcount
         print(f"Deleted existing rows in range: {deleted:,}")

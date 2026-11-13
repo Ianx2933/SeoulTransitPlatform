@@ -171,19 +171,36 @@ def od_total_matches(source: float, estimated: float) -> bool:
                              abs_tol=OD_ABS_TOLERANCE))
 
 
+# Where the OD the estimator distributed comes from: analysis_table_final for
+# dated runs, od_typical_route_stop for typical days (--source typical). The
+# typical source keys stops without an ARS as 'name:<stop>'; the estimator
+# leaves those out, so the check does too.
+OD_SOURCE_TABLE = "analysis_table_final"
+OD_SOURCE_EXTRA_FILTER = ""
+OD_SOURCE_PASSENGERS = "CAST(승객수 AS DOUBLE PRECISION)"
+
+
+def use_typical_source() -> None:
+    global OD_SOURCE_TABLE, OD_SOURCE_EXTRA_FILTER
+    OD_SOURCE_TABLE = "od_typical_route_stop"
+    OD_SOURCE_EXTRA_FILTER = ("AND 승차_정류장ars NOT LIKE 'name:%%' "
+                              "AND 하차_정류장ars NOT LIKE 'name:%%'")
+
+
 def check_od_totals(conn, report: Report, start_date: str, end_date: str) -> None:
     # Mirror estimator key normalization before grouping the source. NULL or
     # malformed source keys are checked separately rather than silently ignored.
-    row = conn.execute(sql_text("""
+    row = conn.execute(sql_text(f"""
         WITH source AS (
             SELECT 기준일자, BTRIM(노선명) AS 노선명,
                    LPAD(BTRIM(승차_정류장ars), 5, '0') AS 승차_정류장ars,
                    LPAD(BTRIM(하차_정류장ars), 5, '0') AS 하차_정류장ars,
-                   SUM(CAST(승객수 AS DOUBLE PRECISION)) AS passengers,
+                   SUM({OD_SOURCE_PASSENGERS}) AS passengers,
                    TRUE AS present
-            FROM analysis_table_final
+            FROM {OD_SOURCE_TABLE}
             WHERE 승차_정류장ars <> '00000' AND 하차_정류장ars <> '00000'
               AND 기준일자 >= :start_date AND 기준일자 <= :end_date
+              {OD_SOURCE_EXTRA_FILTER}
             GROUP BY 1, 2, 3, 4
         ), estimated AS (
             SELECT 기준일자, 노선명, 승차_정류장ars, 하차_정류장ars,
@@ -336,20 +353,34 @@ def main() -> int:
         help="SQLAlchemy URL. Defaults to PIPELINE_DB_URL, so a scheduler can pass "
              "it from a secret instead of a visible argument.",
     )
-    parser.add_argument("--start-date", required=True, help="YYYYMMDD")
-    parser.add_argument("--end-date", required=True, help="YYYYMMDD")
+    parser.add_argument("--source", choices=["dated", "typical"], default="dated",
+                        help="Which OD the estimates are checked against; see estimate_hourly_od.")
+    parser.add_argument("--day-types", default="weekday",
+                        help="With --source typical: comma list of saturday, sunday_holiday, weekday")
+    parser.add_argument("--start-date", required=False, help="YYYYMMDD")
+    parser.add_argument("--end-date", required=False, help="YYYYMMDD")
     parser.add_argument("--target", choices=["live", "next"], default=None,
                         help="Check the tables themselves (live) or the __next copies a "
                              "rebuild wrote (next). Defaults to PIPELINE_TABLE_TARGET, else live.")
     args = parser.parse_args()
 
-    try:
-        start = dt.datetime.strptime(args.start_date, "%Y%m%d")
-        end = dt.datetime.strptime(args.end_date, "%Y%m%d")
-        if len(args.start_date) != 8 or len(args.end_date) != 8 or start > end:
-            raise ValueError("invalid date range")
-    except ValueError:
-        parser.error("dates must be YYYYMMDD and start-date <= end-date")
+    if args.source == "typical":
+        from .estimate_hourly_od import typical_labels
+        if args.start_date or args.end_date:
+            parser.error("--source typical takes --day-types, not dates")
+        args.start_date, args.end_date = typical_labels(
+            [d.strip() for d in args.day_types.split(",") if d.strip()])
+        use_typical_source()
+    else:
+        try:
+            if not (args.start_date and args.end_date):
+                raise ValueError("missing dates")
+            start = dt.datetime.strptime(args.start_date, "%Y%m%d")
+            end = dt.datetime.strptime(args.end_date, "%Y%m%d")
+            if len(args.start_date) != 8 or len(args.end_date) != 8 or start > end:
+                raise ValueError("invalid date range")
+        except ValueError:
+            parser.error("dates must be YYYYMMDD and start-date <= end-date")
     engine = make_engine(args.db_url)
     target = table_target(args.target)
     use_target(target)
