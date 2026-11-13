@@ -70,3 +70,28 @@ def test_validation_reads_the_typical_source_when_asked(monkeypatch):
         validate.check_od_totals(Conn(), validate.Report(), "typical_weekday", "typical_weekday")
     assert "FROM od_typical_route_stop" in seen[0]
     assert "NOT LIKE 'name:" in seen[0]
+
+
+class _Conn:
+    def __init__(self, width):
+        self.width, self.ddl = width, []
+
+    def execute(self, statement, params=None):
+        width = self.width
+
+        class R:
+            def scalar(self):
+                return width
+        return R()
+
+    def exec_driver_sql(self, statement):
+        self.ddl.append(statement)
+
+
+def test_label_column_is_widened_once():
+    narrow = _Conn(8)
+    assert od.widen_label_column(narrow) is True
+    assert narrow.ddl == ["ALTER TABLE estimated_hourly_od ALTER COLUMN 기준일자 TYPE VARCHAR(32)"]
+    wide = _Conn(32)
+    assert od.widen_label_column(wide) is False and wide.ddl == []
+    assert max(len(od.TYPICAL_PREFIX + d) for d in od.TYPICAL_DAY_TYPES) <= od.LABEL_WIDTH

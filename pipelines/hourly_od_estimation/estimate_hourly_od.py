@@ -103,6 +103,26 @@ def add_weekday_mean(ratio_map: dict, zero_keys: set) -> int:
     return len(groups)
 
 
+LABEL_WIDTH = 32
+
+
+def widen_label_column(conn) -> bool:
+    """
+    estimated_hourly_od.기준일자 was VARCHAR(8), sized for YYYYMMDD; a label such
+    as typical_sunday_holiday needs 22. Widening a VARCHAR does not rewrite the
+    table or its key index in PostgreSQL, so it is quick. Does nothing when the
+    column is already wide enough. Returns True when it changed the column.
+    """
+    width = conn.execute(text("""
+        SELECT character_maximum_length FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = :t AND column_name = '기준일자'
+    """), {"t": OD_TABLE}).scalar()
+    if width is None or width >= LABEL_WIDTH:
+        return False
+    conn.exec_driver_sql(f"ALTER TABLE {OD_TABLE} ALTER COLUMN 기준일자 TYPE VARCHAR({LABEL_WIDTH})")
+    return True
+
+
 def load_typical_od(engine, first_label: str, last_label: str, limit: int | None) -> pd.DataFrame:
     """
     Load typical-day OD in the shape load_daily_od returns. Stops without an ARS
@@ -429,6 +449,10 @@ def main():
 
     engine = make_engine(args.db_url)
     holidays = load_holidays(args.holiday_csv)
+    if typical:
+        with engine.begin() as conn:
+            if widen_label_column(conn):
+                print(f"Widened {OD_TABLE}.기준일자 to VARCHAR({LABEL_WIDTH}) for typical-day labels")
 
     if typical:
         daily_od = load_typical_od(engine, args.start_date, args.end_date, args.limit)
