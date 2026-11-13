@@ -344,6 +344,17 @@ def print_fingerprint(conn, start_date: str, end_date: str) -> None:
     print(f"fingerprint {start_date}-{end_date}: rows={count:,} sha256={digest}")
 
 
+def timed(name: str, check, *args) -> None:
+    """Run one check and print when it started and how long it took, as it
+    happens: a run killed by its time limit then still shows which check hung
+    (2026-11-13: the first typical-day run stopped at 3600 s with no output)."""
+    start = dt.datetime.now(dt.timezone.utc)
+    print(f"[{start:%H:%M:%S}Z] {name} ...", flush=True)
+    check(*args)
+    seconds = (dt.datetime.now(dt.timezone.utc) - start).total_seconds()
+    print(f"[{dt.datetime.now(dt.timezone.utc):%H:%M:%S}Z] {name} done in {seconds:,.0f} s", flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -388,14 +399,15 @@ def main() -> int:
     report = Report()
 
     with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
-        check_tables_not_empty(conn, report)
-        check_ratio_sums(conn, report)
-        check_ars_codes(conn, report)
-        check_od_totals(conn, report, args.start_date, args.end_date)
-        check_method_breakdown(conn, report, args.start_date, args.end_date)
-        check_no_duplicate_methods(conn, report, args.start_date, args.end_date)
+        timed("tables not empty", check_tables_not_empty, conn, report)
+        timed("ratio sums", check_ratio_sums, conn, report)
+        timed("ARS codes", check_ars_codes, conn, report)
+        timed("OD totals", check_od_totals, conn, report, args.start_date, args.end_date)
+        timed("method breakdown", check_method_breakdown, conn, report, args.start_date, args.end_date)
+        timed("one method per OD-hour", check_no_duplicate_methods, conn, report,
+              args.start_date, args.end_date)
         report.print()
-        print_fingerprint(conn, args.start_date, args.end_date)
+        timed("fingerprint", print_fingerprint, conn, args.start_date, args.end_date)
 
     return 1 if report.failed else 0
 
