@@ -1,4 +1,4 @@
-﻿FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 # Container logs are only useful if they arrive while the job runs. Python
