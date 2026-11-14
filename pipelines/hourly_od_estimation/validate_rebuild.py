@@ -275,7 +275,10 @@ def check_no_duplicate_methods(conn, report: Report, start_date: str, end_date: 
             FROM estimated_hourly_od
             WHERE 기준일자 >= :start_date AND 기준일자 <= :end_date
             GROUP BY 기준일자, 노선명, 승차_정류장ars, 하차_정류장ars, hour
-            HAVING COUNT(DISTINCT method) > 1
+            -- method is part of the primary key, so two rows for one OD-hour are
+            -- two methods. COUNT(*) lets PostgreSQL hash instead of sorting:
+            -- COUNT(DISTINCT method) took 27 minutes on 17.4M rows (2026-11-13).
+            HAVING COUNT(*) > 1
         ) t
     """, start_date=start_date, end_date=end_date)
     report.add(

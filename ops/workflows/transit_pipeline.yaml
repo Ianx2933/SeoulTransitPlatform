@@ -93,7 +93,7 @@ main:
                 args: {project: '${project}', region: '${region}', job: "transit-integrated-light", env: '${rebuild_env}', timeout: 7200}
             - validate:
                 call: run_job
-                args: {project: '${project}', region: '${region}', job: "transit-validate", env: '${rebuild_env}', timeout: 3600}
+                args: {project: '${project}', region: '${region}', job: "transit-validate", env: '${rebuild_env}', timeout: 10800}
             - publish:
                 call: run_job
                 args: {project: '${project}', region: '${region}', job: "transit-publish", env: [], timeout: 1800}
