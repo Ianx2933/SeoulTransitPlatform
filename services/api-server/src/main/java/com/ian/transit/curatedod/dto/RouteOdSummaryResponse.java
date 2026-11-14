@@ -11,4 +11,7 @@ public record RouteOdSummaryResponse(
     String 노선명,
     Double totalPassengers
 ) {
+    public RouteOdSummaryResponse {
+        totalPassengers = com.ian.transit.common.TypicalDay.round(totalPassengers);
+    }
 }

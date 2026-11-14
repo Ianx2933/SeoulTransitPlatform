@@ -23,4 +23,7 @@ public record CuratedOdResponse(
     Integer nDays,
     Integer daysSeen
 ) {
+    public CuratedOdResponse {
+        승객수 = com.ian.transit.common.TypicalDay.round(승객수);
+    }
 }

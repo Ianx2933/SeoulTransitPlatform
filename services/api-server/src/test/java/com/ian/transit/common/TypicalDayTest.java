@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.web.server.ResponseStatusException;
 
 class TypicalDayTest {
 
@@ -24,9 +23,16 @@ class TypicalDayTest {
     @Test
     void aDatedDayIsRefusedNotAnsweredEmpty() {
         assertThatThrownBy(() -> TypicalDay.label("20251111"))
-                .isInstanceOf(ResponseStatusException.class)
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("weekday");
         assertThatThrownBy(() -> TypicalDay.label("typical_holiday"))
-                .isInstanceOf(ResponseStatusException.class);
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void passengerFiguresAreRoundedToTwoDecimals() {
+        assertThat(TypicalDay.round(40050.70000000004)).isEqualTo(40050.7);
+        assertThat(TypicalDay.round(1.0 / 12)).isEqualTo(0.08);
+        assertThat(TypicalDay.round(null)).isNull();
     }
 }

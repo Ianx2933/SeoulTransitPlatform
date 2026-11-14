@@ -15,4 +15,7 @@ public record StopOdMatrixResponse(
     String 하차정류장ARS,
     Double passengers
 ) {
+    public StopOdMatrixResponse {
+        passengers = com.ian.transit.common.TypicalDay.round(passengers);
+    }
 }

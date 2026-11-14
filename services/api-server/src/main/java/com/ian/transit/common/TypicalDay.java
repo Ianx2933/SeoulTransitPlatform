@@ -1,8 +1,6 @@
 package com.ian.transit.common;
 
 import java.util.List;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 /**
  * The typical days the OD endpoints serve.
@@ -13,7 +11,8 @@ import org.springframework.web.server.ResponseStatusException;
  * typical_sunday_holiday. The endpoints keep their {@code date} parameter and
  * take that label, or the day type alone, and default to the typical weekday.
  * A YYYYMMDD date is refused with the allowed values rather than answered with
- * an empty list.
+ * an empty list: IllegalArgumentException, which GlobalExceptionHandler turns
+ * into 400 with the message.
  */
 public final class TypicalDay {
 
@@ -34,8 +33,16 @@ public final class TypicalDay {
         if (DAY_TYPES.contains(dayType)) {
             return PREFIX + dayType;
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+        throw new IllegalArgumentException(
                 "date must be one of " + DAY_TYPES + " (or with the typical_ prefix); "
                 + "OD is served as typical days, not dated days, got '" + value + "'");
+    }
+
+    /**
+     * Passenger figures are means over many days, so sums carry binary noise
+     * (40050.70000000004). Responses round them to two decimals.
+     */
+    public static Double round(Double passengers) {
+        return passengers == null ? null : Math.round(passengers * 100.0) / 100.0;
     }
 }
