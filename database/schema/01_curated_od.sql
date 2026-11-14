@@ -2,7 +2,9 @@
 -- Curated OD table and holiday reference.
 --
 -- IMPORTANT:
--- analysis_table_final is the ONLY table mapped by a JPA @Entity
+-- analysis_table_final_legacy (named analysis_table_final until 2026-11, see
+-- 10_rename_analysis_table_final.sql) is mapped by a JPA @Entity, as is
+-- od_typical_route_stop (09_...), which the API now serves
 -- (com.ian.transit.curatedod.infrastructure.CuratedOdRecord).
 -- Because application.yaml uses `ddl-auto: validate`, the API server will
 -- FAIL TO START if this table or any of its columns is missing.
@@ -49,7 +51,7 @@
 -- Hibernate `validate` checks tables and columns only, not keys or
 -- constraints, so omitting the key costs nothing at startup.
 
-CREATE TABLE IF NOT EXISTS public.analysis_table_final (
+CREATE TABLE IF NOT EXISTS public.analysis_table_final_legacy (
     기준일자                VARCHAR(255),
     노선명                  VARCHAR(255),
     전환_노선id             BIGINT,
@@ -65,15 +67,15 @@ CREATE TABLE IF NOT EXISTS public.analysis_table_final (
 );
 
 -- Lookup index for date + route filtering used by congestion and OD APIs.
-CREATE INDEX IF NOT EXISTS idx_analysis_table_final_date_route
-ON public.analysis_table_final (기준일자, 노선명);
+CREATE INDEX IF NOT EXISTS idx_analysis_table_final_legacy_date_route
+ON public.analysis_table_final_legacy (기준일자, 노선명);
 
 -- Boarding-stop sequence lookup used by the OD correction pipeline.
-CREATE INDEX IF NOT EXISTS idx_analysis_table_final_route_seq
-ON public.analysis_table_final (노선명, 승차_정류장순번);
+CREATE INDEX IF NOT EXISTS idx_analysis_table_final_legacy_route_seq
+ON public.analysis_table_final_legacy (노선명, 승차_정류장순번);
 
 -- Quarantine table for rows removed during OD correction.
--- Column order must match analysis_table_final because the pipeline uses
+-- Column order must match analysis_table_final_legacy because the pipeline uses
 -- INSERT INTO anomaly_data SELECT a.* ... with no explicit column list.
 CREATE TABLE IF NOT EXISTS public.anomaly_data (
     기준일자                VARCHAR(255),

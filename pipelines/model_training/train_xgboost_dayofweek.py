@@ -2,7 +2,7 @@
 Train XGBoost model with an improved day-of-week feature schema.
 
 Data source:
-- analysis_table_final
+- analysis_table_final_legacy
 
 Target:
 - log1p(passenger_count)
@@ -53,7 +53,7 @@ def load_daily_data(db_url: str) -> pd.DataFrame:
     """
     Load route-stop daily boarding counts.
 
-    analysis_table_final is OD-level data, so this query aggregates it into
+    analysis_table_final_legacy is OD-level data, so this query aggregates it into
     route-stop-date training rows for congestion prediction.
     """
     sql = """
@@ -62,7 +62,7 @@ def load_daily_data(db_url: str) -> pd.DataFrame:
             노선명 AS 노선번호,
             승차_정류장ars AS 버스정류장ars번호,
             SUM(CAST(승객수 AS INT)) AS passenger_count
-        FROM analysis_table_final
+        FROM analysis_table_final_legacy
         WHERE 승차_정류장ars IS NOT NULL
           AND 승차_정류장ars != '00000'
         GROUP BY 기준일자, 노선명, 승차_정류장ars

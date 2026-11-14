@@ -49,7 +49,7 @@ public class PredictionFeatureService {
     }
 
     /**
-     * Reads lag features from analysis_table_final.
+     * Reads lag features from analysis_table_final_legacy.
      *
      * UPDATE: Uses corrected OD table instead of legacy daily_od_data.
      */
@@ -61,7 +61,7 @@ public class PredictionFeatureService {
 
         String sql = """
                 SELECT COALESCE(SUM(CAST(승객수 AS DOUBLE PRECISION)), 0)
-                FROM analysis_table_final
+                FROM analysis_table_final_legacy
                 WHERE 노선명 = ?
                   AND (승차_정류장ars = ? OR 승차_정류장ars = ?)
                   AND 기준일자 = ?

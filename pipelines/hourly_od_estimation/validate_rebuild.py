@@ -171,11 +171,11 @@ def od_total_matches(source: float, estimated: float) -> bool:
                              abs_tol=OD_ABS_TOLERANCE))
 
 
-# Where the OD the estimator distributed comes from: analysis_table_final for
+# Where the OD the estimator distributed comes from: analysis_table_final_legacy for
 # dated runs, od_typical_route_stop for typical days (--source typical). The
 # typical source keys stops without an ARS as 'name:<stop>'; the estimator
 # leaves those out, so the check does too.
-OD_SOURCE_TABLE = "analysis_table_final"
+OD_SOURCE_TABLE = "analysis_table_final_legacy"
 OD_SOURCE_EXTRA_FILTER = ""
 OD_SOURCE_PASSENGERS = "CAST(승객수 AS DOUBLE PRECISION)"
 

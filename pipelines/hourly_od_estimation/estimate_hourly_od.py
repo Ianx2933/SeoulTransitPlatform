@@ -149,7 +149,7 @@ def load_typical_od(engine, first_label: str, last_label: str, limit: int | None
 
 def load_daily_od(engine, start_date: str | None, end_date: str | None, limit: int | None) -> pd.DataFrame:
     """
-    Load daily OD records from analysis_table_final.
+    Load daily OD records from analysis_table_final_legacy.
 
     The source table contains origin-destination but no hour.
     This function aggregates duplicate OD rows before hourly decomposition.
@@ -175,7 +175,7 @@ def load_daily_od(engine, start_date: str | None, end_date: str | None, limit: i
             승차_정류장ars,
             하차_정류장ars,
             SUM(CAST(승객수 AS DOUBLE PRECISION)) AS daily_passengers
-        FROM analysis_table_final
+        FROM analysis_table_final_legacy
         WHERE {where_clause}
         GROUP BY 기준일자, 노선명, 승차_정류장ars, 하차_정류장ars
         {limit_clause}
@@ -408,7 +408,7 @@ def main():
              "it from a secret instead of a visible argument.",
     )
     parser.add_argument("--source", choices=["dated", "typical"], default="dated",
-                        help="dated: days of analysis_table_final between --start-date and "
+                        help="dated: days of analysis_table_final_legacy between --start-date and "
                              "--end-date. typical: the typical days of od_typical_route_stop "
                              "named by --day-types; the hourly table then holds typical days only.")
     parser.add_argument("--day-types", default="weekday",

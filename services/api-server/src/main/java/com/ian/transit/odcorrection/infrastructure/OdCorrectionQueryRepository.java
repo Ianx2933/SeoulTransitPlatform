@@ -56,7 +56,7 @@ public interface OdCorrectionQueryRepository extends JpaRepository<CuratedOdReco
     int countUnfixedVirtualAlightingArs(@Param("기준일자") String 기준일자);
 
     @Query(value =
-           "SELECT COUNT(*) FROM analysis_table_final " +
+           "SELECT COUNT(*) FROM analysis_table_final_legacy " +
            "WHERE 기준일자 = :기준일자 " +
            "AND 승차_정류장ars = '00000' " +
            "AND 승차_정류장순번 IS NULL",

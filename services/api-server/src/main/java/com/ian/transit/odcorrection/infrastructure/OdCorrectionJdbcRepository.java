@@ -40,7 +40,7 @@ public class OdCorrectionJdbcRepository {
         Integer duplicateCount = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM (" +
             "    SELECT 노선명, 전환_노선id, 승차_정류장순번, 승차_정류장ars, 승차_정류장명, 하차_정류장순번, 하차_정류장ars, 하차_정류장명 " +
-            "    FROM analysis_table_final WHERE 기준일자 = ? " +
+            "    FROM analysis_table_final_legacy WHERE 기준일자 = ? " +
             "    GROUP BY 노선명, 전환_노선id, 승차_정류장순번, 승차_정류장ars, 승차_정류장명, 하차_정류장순번, 하차_정류장ars, 하차_정류장명 " +
             "    HAVING COUNT(*) > 1" +
             ") t",
@@ -60,7 +60,7 @@ public class OdCorrectionJdbcRepository {
         jdbcTemplate.execute(
             "CREATE TEMP TABLE 중복합산임시 AS " +
             "SELECT " + DEDUP_SELECT_LIST + " " +
-            "FROM analysis_table_final WHERE false " +
+            "FROM analysis_table_final_legacy WHERE false " +
             "GROUP BY " + DEDUP_GROUP_COLUMNS
         );
 
@@ -69,14 +69,14 @@ public class OdCorrectionJdbcRepository {
         jdbcTemplate.update(
             "INSERT INTO 중복합산임시 " +
             "SELECT " + DEDUP_SELECT_LIST + " " +
-            "FROM analysis_table_final WHERE 기준일자 = ? " +
+            "FROM analysis_table_final_legacy WHERE 기준일자 = ? " +
             "GROUP BY " + DEDUP_GROUP_COLUMNS + " " +
             "HAVING COUNT(*) > 1",
             기준일자
         );
 
         jdbcTemplate.update(
-            "DELETE FROM analysis_table_final a USING 중복합산임시 b " +
+            "DELETE FROM analysis_table_final_legacy a USING 중복합산임시 b " +
             "WHERE a.기준일자 = b.기준일자 " +
             "AND a.노선명 = b.노선명 " +
             "AND a.전환_노선id = b.전환_노선id " +
@@ -87,7 +87,7 @@ public class OdCorrectionJdbcRepository {
         );
 
         jdbcTemplate.update(
-            "INSERT INTO analysis_table_final " +
+            "INSERT INTO analysis_table_final_legacy " +
             "(기준일자, 노선명, 전환_노선id, 승차_정류장순번, 승차_정류장ars, 승차_정류장명, 하차_정류장순번, 하차_정류장ars, 하차_정류장표준코드, 하차_정류장명, 승객수) " +
             "SELECT 기준일자, 노선명, 전환_노선id, 승차_정류장순번, 승차_정류장ars, 승차_정류장명, 하차_정류장순번, 하차_정류장ars, 하차_정류장표준코드, 하차_정류장명, 승객수 FROM 중복합산임시"
         );
@@ -99,10 +99,10 @@ public class OdCorrectionJdbcRepository {
 
     public int fixAlightingSequenceByArs(String 기준일자) {
         return jdbcTemplate.update(
-            "UPDATE analysis_table_final a " +
+            "UPDATE analysis_table_final_legacy a " +
             "SET 하차_정류장순번 = b.최소하차순번 " +
             "FROM (SELECT 노선명, 승차_정류장순번, 승차_정류장ars, 하차_정류장ars, MIN(하차_정류장순번) AS 최소하차순번 " +
-            "FROM analysis_table_final WHERE 승차_정류장ars <> '00000' AND 하차_정류장ars <> '00000' AND 기준일자 = ? " +
+            "FROM analysis_table_final_legacy WHERE 승차_정류장ars <> '00000' AND 하차_정류장ars <> '00000' AND 기준일자 = ? " +
             "GROUP BY 노선명, 승차_정류장순번, 승차_정류장ars, 하차_정류장ars " +
             "HAVING COUNT(DISTINCT 하차_정류장순번) > 1 AND MAX(하차_정류장순번) - MIN(하차_정류장순번) <= 2) b " +
             "WHERE a.노선명 = b.노선명 AND a.승차_정류장순번 = b.승차_정류장순번 AND a.승차_정류장ars = b.승차_정류장ars AND a.하차_정류장ars = b.하차_정류장ars AND a.하차_정류장순번 <> b.최소하차순번 AND a.기준일자 = ?",
@@ -113,9 +113,9 @@ public class OdCorrectionJdbcRepository {
 
     public int fixSameStopODByArs(String 기준일자) {
         return jdbcTemplate.update(
-            "UPDATE analysis_table_final a " +
+            "UPDATE analysis_table_final_legacy a " +
             "SET 하차_정류장순번 = a.승차_정류장순번 + 1, 하차_정류장ars = b.승차_정류장ars, 하차_정류장표준코드 = b.승차_정류장표준코드, 하차_정류장명 = b.승차_정류장명 " +
-            "FROM analysis_table_final b " +
+            "FROM analysis_table_final_legacy b " +
             "WHERE a.노선명 = b.노선명 AND a.기준일자 = b.기준일자 AND b.승차_정류장순번 = a.승차_정류장순번 + 1 AND a.승차_정류장ars = a.하차_정류장ars AND a.기준일자 = ?",
             기준일자
         );

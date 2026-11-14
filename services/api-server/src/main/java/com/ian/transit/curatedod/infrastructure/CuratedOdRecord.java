@@ -9,7 +9,11 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * Curated OD read model mapped directly to analysis_table_final.
+ * Curated OD read model mapped directly to analysis_table_final_legacy.
+ *
+ * Renamed from analysis_table_final in 2026-11: the dated OD days it holds
+ * (three of them inflated) are kept for the locked odcorrection endpoints only.
+ * The API serves typical days from {@link TypicalOdRecord}.
  * 
  * This entity is intentionally used as a read model because the table is already corrected,
  * normalised, and optimised for API serving.
@@ -18,7 +22,7 @@ import lombok.NoArgsConstructor;
  */
 
 @Entity
-@Table(name = "analysis_table_final")
+@Table(name = "analysis_table_final_legacy")
 @Getter
 @NoArgsConstructor
 @IdClass(CuratedOdRecordId.class)
