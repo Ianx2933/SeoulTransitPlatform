@@ -1,10 +1,24 @@
-# Weekly pipeline: collect new months, and only when one arrived rebuild the
-# hourly estimates in Cloud SQL and publish them to BigQuery.
+# Weekly pipeline: collect new hourly months and new TOPIS OD months, and only
+# when either arrived rebuild the hourly estimates in Cloud SQL and publish them
+# to BigQuery.
 #
-#   collect -> new month?  no  -> end
-#                          yes -> scale DB up -> rebuild into <table>__next copies
-#                                 -> validate the copies -> publish (swap them in)
-#                                 -> warehouse (BigQuery + dbt) -> scale DB down
+#   collect (hourly boarding) -> od_collect (TOPIS archives)
+#   -> new OD month? yes -> od_correct (days without a report only)
+#   -> anything new?  no -> end
+#   -> scale DB up
+#   -> new OD month? yes -> warehouse od-refresh (OD loads, dbt, typical OD export)
+#                           -> od_typical_load (representative OD into Cloud SQL)
+#   -> rebuild into <table>__next copies -> validate -> publish (swap them in)
+#   -> warehouse (BigQuery + dbt) -> scale DB down
+#
+# The hourly allocation reads the representative OD, so a new OD month alone is
+# enough to rebuild. The full rebuild runs either way: estimate, validate and
+# publish work on all five __next copies together.
+#
+# TOPIS publishes around the 10th, the hourly data around the 3rd, so the two
+# usually arrive in different weeks. A failed OD correction stops the run before
+# the database is touched; after fixing it, {"force": true} runs the OD steps
+# and the rebuild again (correction skips days that already have a report).
 #
 # The rebuild steps run with PIPELINE_TABLE_TARGET=next, so the API keeps reading
 # the previous tables until validation has passed and publish swaps all five in
@@ -14,7 +28,8 @@
 # steps run one at a time: running two at once made both several times slower
 # on a two-vCPU instance (2026-11-06).
 #
-# Argument (optional): {"force": true} runs the rebuild even without a new month.
+# Argument (optional): {"force": true} runs the OD steps and the rebuild even
+# without a new month.
 
 main:
   params: [input]
@@ -28,6 +43,7 @@ main:
           - idle_tier: "db-f1-micro"
           - state_bucket: "seoul-transit-prod-pipeline"
           - state_object: ${"state/" + sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + ".json"}
+          - od_state_object: ${"state/" + sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + "-od.json"}
           - force: false
           - rebuild_env:
               - name: "PIPELINE_TABLE_TARGET"
@@ -59,10 +75,45 @@ main:
         call: sys.log
         args:
           text: '${"collector - before " + default(state.latest_before, "none") + ", loaded " + json.encode_to_string(state.loaded_months)}'
+
+    - od_collect:
+        call: run_job
+        args:
+          project: ${project}
+          region: ${region}
+          job: "transit-od-collect"
+          env:
+            - name: "PIPELINE_STATE_URI"
+              value: ${"gs://" + state_bucket + "/" + od_state_object}
+          timeout: 3600
+    - read_od_state:
+        call: googleapis.storage.v1.objects.get
+        args:
+          bucket: ${state_bucket}
+          object: ${text.url_encode(od_state_object)}
+          alt: "media"
+        result: od_state
+    - log_od_state:
+        call: sys.log
+        args:
+          text: '${"od-collect - latest stored " + default(od_state.latest_stored, "none") + ", collected " + json.encode_to_string(od_state.collected_months)}'
+    - od_flags:
+        assign:
+          - new_hourly: ${len(state.loaded_months) > 0}
+          - new_od: ${len(od_state.collected_months) > 0}
+          - run_od: ${new_od or force}
+    - od_correct:
+        switch:
+          - condition: ${run_od}
+            steps:
+              - correct:
+                  call: run_job
+                  args: {project: '${project}', region: '${region}', job: "transit-od-correct", env: [], timeout: 3600}
+
     - decide:
         switch:
-          - condition: ${len(state.loaded_months) == 0 and not force}
-            return: ${"No new month (latest " + default(state.latest_after, "none") + "). Nothing rebuilt."}
+          - condition: ${not new_hourly and not new_od and not force}
+            return: ${"No new month (hourly latest " + default(state.latest_after, "none") + ", OD latest " + default(od_state.latest_stored, "none") + "). Nothing rebuilt."}
 
     - rebuild:
         try:
@@ -73,6 +124,23 @@ main:
                   project: ${project}
                   instance: ${instance}
                   tier: ${batch_tier}
+            - od_refresh:
+                switch:
+                  - condition: ${run_od}
+                    steps:
+                      - warehouse_od:
+                          call: run_job
+                          args:
+                            project: ${project}
+                            region: ${region}
+                            job: "transit-warehouse"
+                            env:
+                              - name: "WAREHOUSE_STEPS"
+                                value: "od-refresh"
+                            timeout: 7200
+                      - od_typical_load:
+                          call: run_job
+                          args: {project: '${project}', region: '${region}', job: "transit-od-typical-load", env: [], timeout: 3600}
             - month_day_count:
                 call: run_job
                 args: {project: '${project}', region: '${region}', job: "transit-month-day-count", env: [], timeout: 1800}
@@ -119,7 +187,7 @@ main:
           instance: ${instance}
           tier: ${idle_tier}
     - done:
-        return: ${"Rebuilt and published. Loaded " + json.encode_to_string(state.loaded_months)}
+        return: ${"Rebuilt and published. Hourly months " + json.encode_to_string(state.loaded_months) + ", OD months " + json.encode_to_string(od_state.collected_months)}
 
 
 # Run a Cloud Run Job and wait for it to finish. A failed execution raises.
