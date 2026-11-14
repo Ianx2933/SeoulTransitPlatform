@@ -18,11 +18,15 @@ three routes that carry over half their demand on one core segment, and, once
 terrain data was joined, a dong where 27 of its 29 bus stops stand on a grade of
 8% or more. The service changes are proposals from the analysis; none has been
 implemented. See
-**[policy insights](docs/analysis/policy_insights.md)**. The OD-based findings
-are being recomputed: the OD days behind the platform's correction table turned
-out to be inflated ([seventh defect](#inflated-od-days-and-the-java-correction)),
-and the date the insights used is not recorded. The terrain finding does not use
-OD.
+**[policy insights](docs/analysis/policy_insights.md)**. The OD days behind the
+original analysis turned out to be inflated
+([seventh defect](#inflated-od-days-and-the-java-correction)), so the OD-based
+findings were recomputed on the representative weekday: the route 302 stop
+pattern and the core-segment shares reproduce to within about two points (one
+segment of route 4425 does not), while the route 143 segment is not the busiest
+one on daily totals and waits for a peak-hour check. The recomputation adds how
+much demand crosses each candidate truncation point and how far each stop's
+riders travel. The terrain finding does not use OD.
 
 ![Route 143 congestion analysis](docs/analysis/images/route_143_congestion.png)
 
@@ -43,6 +47,7 @@ document.
 |---|---|
 | **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions ([details](#data-quality-and-validation)) |
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance. The Java OD correction was ported to pandas and matched row for row against its own SQL on three real days (1.48M rows); the port then fixes a merge defect that added 675–1,550 passengers a day and cleared 15,000–20,000 stop codes ([details](#inflated-od-days-and-the-java-correction)) |
+| **Representative OD** | Twelve months of corrected days averaged per day type in BigQuery and scored by leaving each day out: on weekdays the error is 5.6% by stop, 3.3% by route and 25.6% by OD pair. The weekday result is loaded into Cloud SQL, serves the congestion and curated OD endpoints, and is the input of the hourly allocation ([details](#representative-od)) |
 | **OD collection** | A Cloud Run Job copies TOPIS's monthly OD archives to Cloud Storage unchanged, with a SHA-256 manifest written last as the completion marker; 34 months stored. A second Job corrects every stored day (102) and the warehouse loads them into BigQuery, checked against each day's report |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes ([details](#performance-district-demand)) |
@@ -160,8 +165,9 @@ than once. That accounts for roughly 4× on two days but not 14× on 2023-10-17.
 The BigQuery warehouse, the xarray profile and the hourly OD allocation (which
 uses 2025-11-11) do not read the three days, and the map client does not call
 the curated OD endpoints, but those endpoints are public and return these rows.
-The rows are not being patched in place: the days are being regenerated from the
-TOPIS originals (below), and the table will be replaced as a whole.
+The rows were not patched in place: the days were regenerated from the TOPIS
+originals (below), the endpoints now read the representative OD, and the old
+table is kept as `analysis_table_final_legacy`.
 
 Porting the Java OD correction (`services/api-server/.../odcorrection`) to
 pandas found a second source of inflation, in the correction itself. Each of its
@@ -231,15 +237,43 @@ That date check found one more defect. Correction parsed `기준일자` only in 
 out with the date empty and the right totals. The parser now reads every form found
 and stops on a value it cannot read; the days were corrected again.
 
-Still to do: day-type representative OD computed in BigQuery from twelve months or
-more, its accuracy measured by leaving each day out in turn, and only that result,
-with its hourly allocation, loaded into Cloud SQL for serving.
+### Representative OD
+
+One TOPIS day is a sample, and a day type averages out what a single day cannot.
+dbt builds `fct_od_typical` from the last twelve months of corrected days, by day
+type (weekday, Saturday, Sunday and public holiday), mode, route and stop pair,
+with a pair absent on a day counted as zero. Special days stay out: the bus strike,
+Seollal and Chuseok, ferry suspensions.
+
+`od_typical_accuracy` scores it by predicting each day from the other days of its
+type and comparing with what happened (WAPE, also after scaling the prediction to
+that day's total):
+
+| Level | Weekday | Saturday | Sunday / holiday |
+|---|---|---|---|
+| Stop | 5.6% | 7.6% | 7.9% |
+| Route | 3.3% | 4.2% | 4.2% |
+| OD pair | 25.6% | — | — |
+
+Six months scored about the same as twelve, and twenty-four months scored worse
+(weekday route 4.4%), so the window stays at twelve. OD pairs stay noisy because
+most pairs carry a few passengers a day.
+
+The serving copy (`od_typical_route_stop_serving`) is exported from BigQuery to
+Cloud Storage with a manifest written last. The Cloud Run Job
+`transit-od-typical-load` checks the manifest, copies the rows into
+`od_typical_route_stop__next`, checks rows and passengers in the database and
+swaps the table in. The weekday holds 728,176 rows and 5,415,129 passengers a day.
+The hourly allocation then runs on it (`--source typical`) and the full
+validation passed: 726,099 OD keys, 5,409,012.5 passengers conserved, 17.42M
+hourly rows. `analysis_table_final`, with the inflated days, was renamed
+`analysis_table_final_legacy` once nothing serving read it.
 
 ### What the hourly OD is
 
 The hourly OD tables are computed by allocation. Two separate sources meet in
 them: the OD records give origin, destination and passengers for a whole
-day with no time of travel (only 2025-11-11 is allocated so far), and the hourly
+day with no time of travel (the representative weekday), and the hourly
 boarding counts give, for each
 stop and hour, how many people boarded over 34 months, but not where they went.
 Each daily OD pair is spread over 24 hours in proportion to the day-type hourly
@@ -278,6 +312,7 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │
                                         │   Cloud Run Jobs: od-collect (daily check) ──> TOPIS ──> Cloud Storage
                                         │                   od-correct (by hand) ──> Cloud Storage ──> BigQuery (warehouse)
+                                        │                   od-typical-load (by hand) <── Cloud Storage <── BigQuery (representative OD)
                                         │   Cloud Scheduler ──> Workflows: transit-db-export ──> Cloud SQL export ──> Cloud Storage
                                         │     weekly
                                         │
@@ -736,7 +771,8 @@ database does not have the terrain guard functions in the first place (Known gap
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; checked for new months daily, not yet in the weekly workflow |
 | OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; runs as a cloud job, 102 days corrected with passengers conserved; loaded into BigQuery (`fct_od_stop`) |
-| Day-type representative OD | Not started; Cloud SQL still serves the old OD days |
+| Day-type representative OD | Weekday, Saturday and Sunday/holiday built in BigQuery from 12 months and scored by leaving each day out. Weekday loaded into Cloud SQL, served by the congestion and curated OD endpoints and allocated to hours; Saturday and Sunday/holiday not loaded yet |
+| Policy insights | Recomputed on the representative weekday (`pipelines/analysis/policy_insights_typical.py`); route 143 needs a peak-hour check |
 | Weekly database backup | Cloud SQL export every Sunday from 2026-11-15; the first export was restored and matched on 2026-11-10 |
 | Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
 
@@ -820,7 +856,8 @@ pipelines/              Python data pipelines by phase
 pipelines/airflow/      Airflow DAGs
 pipelines/od_stacking/  TOPIS monthly OD archive collector (Cloud Run Job)
 pipelines/od_correction/  Standard-code correction, the Java correction port and its SQL baseline
-pipelines/analysis/     xarray demand profiling against terrain bands
+pipelines/analysis/     xarray demand profiling against terrain bands; policy insights on the representative OD
+pipelines/od_typical/   Representative OD load into Cloud SQL (Cloud Run Job)
 pipelines/terrain/      Terrain snapshot publisher and its tests
 tests/                  pytest contracts for matching and OD correction
 scripts/db/             Data loading helper scripts
@@ -898,16 +935,21 @@ Problems that are known and not fixed yet.
     position-based join as the sixth defect in Data quality and cannot be
     checked. Four ARS numbers outside Seoul map to two nodes and were also left
     as they were.
-10. Hourly OD exists for one day, 2025-11-11, and is an allocation of daily OD by
-    stop boarding profiles (see [What the hourly OD is](#what-the-hourly-od-is)).
-    The weekly pipeline refreshes the profiles with each new month but adds no OD
-    days. 102 OD days are now collected, corrected and in BigQuery (see
-    [Regenerating the OD days](#regenerating-the-od-days)), but correction is started
-    by hand and no representative OD has been built from them yet.
-11. `analysis_table_final` still holds the three inflated OD days in both databases
-    until they are regenerated, and the curated OD endpoints still return them.
-    The Java correction endpoints that produced them are still in the API server,
-    locked in deployment.
+10. Hourly OD is an allocation of the representative weekday OD by stop boarding
+    profiles (see [What the hourly OD is](#what-the-hourly-od-is)); Saturday and
+    Sunday/holiday are built in BigQuery but not loaded or allocated. OD
+    correction and the representative OD load are started by hand: the weekly
+    pipeline does not yet run them, so a new TOPIS month reaches Cloud SQL only
+    when they are run.
+11. `analysis_table_final_legacy` keeps the three inflated OD days in both
+    databases for reference. Only the locked Java correction endpoints and the
+    switched-off prediction features still point at it.
+12. The XGBoost day-of-week model was trained on the four days of
+    `analysis_table_final`, three of them inflated, and its 7- and 30-day lag
+    features are almost always zero because OD days are months apart. It has no
+    evidential basis; the prediction endpoint is switched off, and the model is
+    to be rebuilt from the TOPIS daily district OD series and judged against the
+    representative OD scaled to each day's total.
 
 ## Next work
 
@@ -922,9 +964,11 @@ Problems that are known and not fixed yet.
    the number-based `route_type` rules against it.
 5. Check the stops in Known gap 9 against an archived stop master from the
    year of each OD date.
-6. Build day-type representative OD from the corrected days in BigQuery and measure
-   how well it predicts a day left out, replace the inflated days in Cloud SQL with
-   it, and recompute the OD-based policy insights. Then look for OD records that
-   carry boarding times to test the allocation against.
+6. Run OD collection, correction, the warehouse and the representative OD load in
+   the weekly pipeline, and load Saturday and Sunday/holiday. Then look for OD
+   records that carry boarding times to test the allocation against.
+7. Rebuild the prediction model (Known gap 12).
+8. A route analysis view in the map client: per-stop boardings and alightings,
+   load along the route, and demand within and across a chosen segment.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
