@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 import DemandControlPanel from "./components/DemandControlPanel.jsx";
+import RouteAnalysisPanel from "./components/RouteAnalysisPanel.jsx";
 import TransitDemandMap from "./components/TransitDemandMap.jsx";
 
 /**
@@ -233,6 +234,7 @@ export default function App() {
         showCatchmentMarkers={showCatchmentMarkers}
         onShowCatchmentMarkersChange={setShowCatchmentMarkers}
       />
+      <RouteAnalysisPanel busLines={busLines} />
     </main>
   );
 }

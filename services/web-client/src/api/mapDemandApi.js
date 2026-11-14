@@ -163,7 +163,7 @@ function appendOptionalValueParam(params, key, value) {
  * surfaced in the thrown Error message, because raw server responses
  * (including stack traces from 500 errors) should never reach end users.
  */
-async function fetchJson(url, {
+export async function fetchJson(url, {
   defaultMessage,
   notFoundMessage = "Requested resource was not found."
 }) {
