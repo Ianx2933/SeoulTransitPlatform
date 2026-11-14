@@ -17,15 +17,15 @@ import java.util.List;
  * 
  * Curated OD queries are read-only because correction is handled by a separate operational module.
  */
-public interface CuratedOdQueryRepository extends JpaRepository<CuratedOdRecord, CuratedOdRecordId> {
+public interface CuratedOdQueryRepository extends JpaRepository<TypicalOdRecord, CuratedOdRecordId> {
 
-    List<CuratedOdRecord> findBy기준일자(String 기준일자, Pageable pageable);
+    List<TypicalOdRecord> findBy기준일자(String 기준일자, Pageable pageable);
 
-    List<CuratedOdRecord> findBy기준일자And노선명(String 기준일자, String 노선명, Pageable pageable);
+    List<TypicalOdRecord> findBy기준일자And노선명(String 기준일자, String 노선명, Pageable pageable);
 
     @Query("SELECT new com.ian.transit.curatedod.dto.RouteOdSummaryResponse(" +
            "b.기준일자, b.노선명, SUM(b.승객수)) " +
-           "FROM CuratedOdRecord b " +
+           "FROM TypicalOdRecord b " +
            "WHERE b.기준일자 = :기준일자 " +
            "GROUP BY b.기준일자, b.노선명 " +
            "ORDER BY SUM(b.승객수) DESC")
@@ -34,7 +34,7 @@ public interface CuratedOdQueryRepository extends JpaRepository<CuratedOdRecord,
     @Query("SELECT new com.ian.transit.curatedod.dto.StopOdMatrixResponse(" +
            "b.기준일자, b.노선명, b.승차정류장명, b.승차정류장ARS, " +
            "b.하차정류장명, b.하차정류장ARS, SUM(b.승객수)) " +
-           "FROM CuratedOdRecord b " +
+           "FROM TypicalOdRecord b " +
            "WHERE b.기준일자 = :기준일자 " +
            "AND b.노선명 = :노선명 " +
            "GROUP BY b.기준일자, b.노선명, b.승차정류장명, b.승차정류장ARS, b.하차정류장명, b.하차정류장ARS " +

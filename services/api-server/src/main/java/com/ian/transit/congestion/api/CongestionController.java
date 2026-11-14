@@ -3,6 +3,7 @@ package com.ian.transit.congestion.api;
 import com.ian.transit.congestion.application.CongestionQueryService;
 import com.ian.transit.congestion.dto.CongestionResponse;
 import com.ian.transit.congestion.dto.SectionCongestionResponse;
+import com.ian.transit.common.TypicalDay;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -27,10 +28,10 @@ public class CongestionController {
     @GetMapping("/{routeName}")
     public ResponseEntity<List<CongestionResponse>> getRouteCongestion(
             @PathVariable String routeName,
-            @RequestParam String date
+            @RequestParam(required = false) String date
     ) {
         return ResponseEntity.ok(
-                congestionQueryService.getRouteCongestion(routeName, date)
+                congestionQueryService.getRouteCongestion(routeName, TypicalDay.label(date))
         );
     }
 
@@ -41,10 +42,10 @@ public class CongestionController {
     @GetMapping
     public ResponseEntity<List<CongestionResponse>> getRoutesCongestion(
             @RequestParam List<String> routes,
-            @RequestParam String date
+            @RequestParam(required = false) String date
     ) {
         return ResponseEntity.ok(
-                congestionQueryService.getRoutesCongestion(routes, date)
+                congestionQueryService.getRoutesCongestion(routes, TypicalDay.label(date))
         );
     }
 
@@ -56,10 +57,10 @@ public class CongestionController {
     @GetMapping("/stops")
     public ResponseEntity<List<String>> getStopsByRoute(
             @RequestParam String route,
-            @RequestParam String date
+            @RequestParam(required = false) String date
     ) {
         return ResponseEntity.ok(
-                congestionQueryService.getStopsByRoute(route, date)
+                congestionQueryService.getStopsByRoute(route, TypicalDay.label(date))
         );
     }
 
@@ -72,10 +73,10 @@ public class CongestionController {
             @RequestParam String route,
             @RequestParam String from,
             @RequestParam String to,
-            @RequestParam String date
+            @RequestParam(required = false) String date
     ) {
         return ResponseEntity.ok(
-                congestionQueryService.getSectionCongestion(route, from, to, date)
+                congestionQueryService.getSectionCongestion(route, from, to, TypicalDay.label(date))
         );
     }
 }

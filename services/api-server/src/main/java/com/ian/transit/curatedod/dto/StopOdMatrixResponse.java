@@ -13,6 +13,6 @@ public record StopOdMatrixResponse(
     String 승차정류장ARS,
     String 하차정류장명,
     String 하차정류장ARS,
-    Long passengers
+    Double passengers
 ) {
 }

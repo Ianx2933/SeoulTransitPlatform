@@ -4,7 +4,7 @@ import com.ian.transit.curatedod.dto.CuratedOdResponse;
 import com.ian.transit.curatedod.dto.RouteOdSummaryResponse;
 import com.ian.transit.curatedod.dto.StopOdMatrixResponse;
 import com.ian.transit.curatedod.infrastructure.CuratedOdQueryRepository;
-import com.ian.transit.curatedod.infrastructure.CuratedOdRecord;
+import com.ian.transit.curatedod.infrastructure.TypicalOdRecord;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -56,7 +56,7 @@ public class CuratedOdQueryService {
         return queryRepository.findStopOdMatrix(기준일자, 노선명, PageRequest.of(0, safeLimit));
     }
 
-    private CuratedOdResponse toResponse(CuratedOdRecord record) {
+    private CuratedOdResponse toResponse(TypicalOdRecord record) {
         return new CuratedOdResponse(
             record.get기준일자(),
             record.get노선명(),
@@ -69,7 +69,10 @@ public class CuratedOdQueryService {
             record.get하차정류장ARS(),
             record.get하차정류장표준코드(),
             record.get하차정류장명(),
-            record.get승객수()
+            record.get승객수(),
+            record.getDayType(),
+            record.getNDays(),
+            record.getDaysSeen()
         );
     }
 

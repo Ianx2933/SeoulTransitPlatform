@@ -18,6 +18,9 @@ public record CuratedOdResponse(
     String 하차정류장ARS,
     String 하차정류장표준코드,
     String 하차정류장명,
-    Integer 승객수
+    Double 승객수,
+    String dayType,
+    Integer nDays,
+    Integer daysSeen
 ) {
 }

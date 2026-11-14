@@ -30,6 +30,13 @@ public class CongestionQueryRepository {
      * 
      * Negative occupancy can occutr because OD reconstruction and stop sequence correction are imperfect.
      */
+    /*
+     * Reads od_typical_route_stop (2026-11): date is a typical-day label such as
+     * typical_weekday, and 승객수 is a mean over many days, so a pair often has
+     * less than one passenger. Passengers are summed as real numbers and rounded
+     * only at the end; casting each row to INT, as this did for the dated table,
+     * would drop every pair under one passenger.
+     */
     public List<CongestionRow> findRouteCongestion(String routeName, String date) {
         String sql = """
                 WITH net_passenger AS (
@@ -39,8 +46,8 @@ public class CongestionQueryRepository {
                         CAST(승차_정류장순번 AS INT) AS sequence,
                         승차_정류장ars AS ars,
                         승차_정류장명 AS stop_name,
-                        SUM(CAST(승객수 AS INT)) AS net_passengers
-                    FROM analysis_table_final
+                        SUM(승객수) AS net_passengers
+                    FROM od_typical_route_stop
                     WHERE 노선명 = ?
                       AND 기준일자 = ?
                       AND 승차_정류장ars != '00000'
@@ -54,8 +61,8 @@ public class CongestionQueryRepository {
                         CAST(하차_정류장순번 AS INT) AS sequence,
                         하차_정류장ars AS ars,
                         하차_정류장명 AS stop_name,
-                        -SUM(CAST(승객수 AS INT)) AS net_passengers
-                    FROM analysis_table_final
+                        -SUM(승객수) AS net_passengers
+                    FROM od_typical_route_stop
                     WHERE 노선명 = ?
                       AND 기준일자 = ?
                       AND 하차_정류장ars != '00000'
@@ -109,8 +116,8 @@ public class CongestionQueryRepository {
                         SELECT
                             노선명,
                             승차_정류장ars AS ars,
-                            SUM(CAST(승객수 AS INT)) AS total_passengers
-                        FROM analysis_table_final
+                            SUM(승객수) AS total_passengers
+                        FROM od_typical_route_stop
                         WHERE 노선명 = ?
                           AND 기준일자 = ?
                           AND 승차_정류장ars != '00000'
@@ -121,8 +128,8 @@ public class CongestionQueryRepository {
                         SELECT
                             노선명,
                             하차_정류장ars AS ars,
-                            SUM(CAST(승객수 AS INT)) AS total_passengers
-                        FROM analysis_table_final
+                            SUM(승객수) AS total_passengers
+                        FROM od_typical_route_stop
                         WHERE 노선명 = ?
                           AND 기준일자 = ?
                           AND 하차_정류장ars != '00000'
@@ -152,7 +159,7 @@ public class CongestionQueryRepository {
                     CAST(MAX(o.occupancy) OVER (PARTITION BY o.노선명) AS INT) AS max_occupancy,
                     l.latitude,
                     l.longitude,
-                    COALESCE(p.total_passengers, 0)::INT AS total_passengers
+                    ROUND(COALESCE(p.total_passengers, 0))::INT AS total_passengers
                 FROM normalized_occupancy o
                 LEFT JOIN stop_location l
                     ON l.ars = o.ars
@@ -185,7 +192,7 @@ public class CongestionQueryRepository {
     public List<String> findStopsByRoute(String routeName, String date) {
         String sql = """
                 SELECT 승차_정류장명 AS stop_name
-                FROM analysis_table_final
+                FROM od_typical_route_stop
                 WHERE 노선명 = ?
                   AND 기준일자 = ?
                   AND 승차_정류장ars != '00000'

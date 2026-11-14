@@ -4,6 +4,7 @@ import com.ian.transit.curatedod.application.CuratedOdQueryService;
 import com.ian.transit.curatedod.dto.CuratedOdResponse;
 import com.ian.transit.curatedod.dto.RouteOdSummaryResponse;
 import com.ian.transit.curatedod.dto.StopOdMatrixResponse;
+import com.ian.transit.common.TypicalDay;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,35 +26,35 @@ public class CuratedOdController {
 
     @GetMapping
     public ResponseEntity<List<CuratedOdResponse>> findByDate(
-        @RequestParam("date") String 기준일자,
+        @RequestParam(value = "date", required = false) String 기준일자,
         @RequestParam(value = "limit", required = false) Integer limit
     ) {
-        return ResponseEntity.ok(queryService.findByDate(기준일자, limit));
+        return ResponseEntity.ok(queryService.findByDate(TypicalDay.label(기준일자), limit));
     }
 
     @GetMapping("/routes/{routeName}")
     public ResponseEntity<List<CuratedOdResponse>> findByDateAndRoute(
-        @RequestParam("date") String 기준일자,
+        @RequestParam(value = "date", required = false) String 기준일자,
         @PathVariable("routeName") String 노선명,
         @RequestParam(value = "limit", required = false) Integer limit
     ) {
-        return ResponseEntity.ok(queryService.findByDateAndRoute(기준일자, 노선명, limit));
+        return ResponseEntity.ok(queryService.findByDateAndRoute(TypicalDay.label(기준일자), 노선명, limit));
     }
 
     @GetMapping("/summary/routes")
     public ResponseEntity<List<RouteOdSummaryResponse>> summarizeByRoute(
-        @RequestParam("date") String 기준일자,
+        @RequestParam(value = "date", required = false) String 기준일자,
         @RequestParam(value = "limit", required = false) Integer limit
     ) {
-        return ResponseEntity.ok(queryService.summarizeByRoute(기준일자, limit));
+        return ResponseEntity.ok(queryService.summarizeByRoute(TypicalDay.label(기준일자), limit));
     }
 
     @GetMapping("/routes/{routeName}/matrix")
     public ResponseEntity<List<StopOdMatrixResponse>> findStopOdMatrix(
-        @RequestParam("date") String 기준일자,
+        @RequestParam(value = "date", required = false) String 기준일자,
         @PathVariable("routeName") String 노선명,
         @RequestParam(value = "limit", required = false) Integer limit
     ) {
-        return ResponseEntity.ok(queryService.findStopOdMatrix(기준일자, 노선명, limit));
+        return ResponseEntity.ok(queryService.findStopOdMatrix(TypicalDay.label(기준일자), 노선명, limit));
     }
 }
