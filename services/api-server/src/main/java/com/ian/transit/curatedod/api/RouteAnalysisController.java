@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * Route analysis on the typical-day OD: every figure is aggregated on the
  * server from all of the route's OD pairs, so the client never needs the raw
@@ -21,6 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
  *   GET /api/curated-od/routes/{route}/stops?date=weekday
  *   GET /api/curated-od/routes/{route}/stops/{seq}?date=weekday
  *   GET /api/curated-od/routes/{route}/segment?from=5&to=22&date=weekday
+ *
+ * Every endpoint takes an optional hour (0-23): the riders who boarded in that
+ * hour of the typical day, from estimated_hourly_od (weekdays only). The stop
+ * endpoint takes optional reach levels, e.g. reach=30 or reach=30,80; without
+ * them it reports 25, 50, 100 and 200.
  */
 @RestController
 @RequestMapping("/api/curated-od/routes/{routeName}")
@@ -32,18 +39,21 @@ public class RouteAnalysisController {
     @GetMapping("/stops")
     public ResponseEntity<RouteStopsResponse> stops(
         @PathVariable("routeName") String 노선명,
-        @RequestParam(value = "date", required = false) String 기준일자
+        @RequestParam(value = "date", required = false) String 기준일자,
+        @RequestParam(value = "hour", required = false) Integer hour
     ) {
-        return ResponseEntity.ok(service.stops(TypicalDay.label(기준일자), 노선명));
+        return ResponseEntity.ok(service.stops(TypicalDay.label(기준일자), 노선명, hour));
     }
 
     @GetMapping("/stops/{seq}")
     public ResponseEntity<RouteStopDetailResponse> stop(
         @PathVariable("routeName") String 노선명,
         @PathVariable("seq") int seq,
-        @RequestParam(value = "date", required = false) String 기준일자
+        @RequestParam(value = "date", required = false) String 기준일자,
+        @RequestParam(value = "hour", required = false) Integer hour,
+        @RequestParam(value = "reach", required = false) List<Double> reach
     ) {
-        return ResponseEntity.ok(service.stop(TypicalDay.label(기준일자), 노선명, seq));
+        return ResponseEntity.ok(service.stop(TypicalDay.label(기준일자), 노선명, hour, seq, reach));
     }
 
     @GetMapping("/segment")
@@ -51,8 +61,9 @@ public class RouteAnalysisController {
         @PathVariable("routeName") String 노선명,
         @RequestParam("from") int from,
         @RequestParam("to") int to,
-        @RequestParam(value = "date", required = false) String 기준일자
+        @RequestParam(value = "date", required = false) String 기준일자,
+        @RequestParam(value = "hour", required = false) Integer hour
     ) {
-        return ResponseEntity.ok(service.segment(TypicalDay.label(기준일자), 노선명, from, to));
+        return ResponseEntity.ok(service.segment(TypicalDay.label(기준일자), 노선명, hour, from, to));
     }
 }

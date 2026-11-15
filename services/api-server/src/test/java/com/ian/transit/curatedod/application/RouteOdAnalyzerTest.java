@@ -6,6 +6,7 @@ import com.ian.transit.curatedod.dto.RouteStopsResponse;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,5 +61,30 @@ class RouteOdAnalyzerTest {
     void rejectsUnknownStopsAndReversedSegments() {
         assertThatThrownBy(() -> analyzer.stop(9)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> analyzer.segment(3, 2)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void reachTakesTheCallersLevelsSortedOnce() {
+        // Leaving stop 2: 75 on board, then 70 after 3, 40 after 4, 0 after 5.
+        RouteStopDetailResponse stop = analyzer.stop(2, List.of(50.0, 10.0, 50.0, 80.0));
+        // 10, 50, 80 in that order: more than 10 stay to 4, more than 50 to 3, never more than 80.
+        assertThat(stop.reach()).extracting("untilSeq").containsExactly(4, 3, null);
+    }
+
+    @Test
+    void rejectsBadReachLevels() {
+        assertThatThrownBy(() -> analyzer.stop(2, List.of(0.0))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> analyzer.stop(2, List.of(-5.0))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> analyzer.stop(2, List.of(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void withPassengersKeepsSequencesAndDropsPairsWithoutRiders() {
+        List<RouteOdAnalyzer.Leg> typical = List.of(leg(1, 2, 10), leg(1, 4, 30), leg(2, 5, 40));
+        List<RouteOdAnalyzer.Leg> hour = RouteOdAnalyzer.withPassengers(typical, Map.of(
+                RouteOdAnalyzer.pairKey("ars1", "ars4"), 3.0,
+                RouteOdAnalyzer.pairKey("ars2", "ars5"), 0.0));
+        assertThat(hour).containsExactly(leg(1, 4, 3.0));
     }
 }

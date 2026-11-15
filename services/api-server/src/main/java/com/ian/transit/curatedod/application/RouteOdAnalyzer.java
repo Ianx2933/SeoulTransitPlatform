@@ -39,6 +39,8 @@ public final class RouteOdAnalyzer {
 
     public static final int TOP = 10;
     public static final List<Double> REACH_LEVELS = List.of(25.0, 50.0, 100.0, 200.0);
+    /** At most this many reach levels in one request. */
+    public static final int MAX_REACH_LEVELS = 10;
 
     private final String label;
     private final String route;
@@ -148,7 +150,16 @@ public final class RouteOdAnalyzer {
      * which more than that many of them are still on board.
      */
     public RouteStopDetailResponse stop(int seq) {
+        return stop(seq, REACH_LEVELS);
+    }
+
+    /**
+     * {@link #stop(int)} with the caller's reach levels: each must be a positive
+     * number of riders. The levels are reported in ascending order, once each.
+     */
+    public RouteStopDetailResponse stop(int seq, List<Double> levels) {
         requireStop(seq);
+        List<Double> reachLevels = reachLevels(levels);
         Map<Integer, Double> destinations = new HashMap<>();
         Map<Integer, Double> origins = new HashMap<>();
         double boardings = 0, alightings = 0, onBoard = 0;
@@ -169,7 +180,7 @@ public final class RouteOdAnalyzer {
             }
         }
         List<StopReach> reach = new ArrayList<>();
-        for (double level : REACH_LEVELS) {
+        for (double level : reachLevels) {
             // Walk forward: riders still on board after stop j are the cohort
             // minus those who alighted at or before j.
             Stop until = null;
@@ -192,6 +203,48 @@ public final class RouteOdAnalyzer {
         Stop stop = stops.get(seq);
         return new RouteStopDetailResponse(label, route, seq, stop.ars(), stop.name(), boardings,
                 alightings, onBoard, top(destinations), top(origins), reach);
+    }
+
+    /**
+     * Validated reach levels: the defaults when none are given, otherwise the
+     * given levels sorted, without duplicates, at most {@link #MAX_REACH_LEVELS}.
+     */
+    static List<Double> reachLevels(List<Double> levels) {
+        if (levels == null || levels.isEmpty()) {
+            return REACH_LEVELS;
+        }
+        if (levels.size() > MAX_REACH_LEVELS) {
+            throw new IllegalArgumentException("at most " + MAX_REACH_LEVELS + " reach levels, got " + levels.size());
+        }
+        for (Double level : levels) {
+            if (level == null || level.isNaN() || level.isInfinite() || level <= 0) {
+                throw new IllegalArgumentException("reach levels must be positive numbers, got " + level);
+            }
+        }
+        return levels.stream().distinct().sorted().toList();
+    }
+
+    /** Key of an OD pair by its boarding and alighting ARS. */
+    public static String pairKey(String boardArs, String alightArs) {
+        return boardArs + "|" + alightArs;
+    }
+
+    /**
+     * The same legs with their passengers replaced from {@code byPair} (keyed by
+     * {@link #pairKey}), keeping each leg's sequences and names. Legs with no
+     * passengers in {@code byPair} are dropped. Used to analyze one hour of the
+     * typical day: the hourly table has the OD pairs but not their sequences.
+     */
+    public static List<Leg> withPassengers(List<Leg> legs, Map<String, Double> byPair) {
+        List<Leg> out = new ArrayList<>();
+        for (Leg leg : legs) {
+            Double p = byPair.get(pairKey(leg.boardArs(), leg.alightArs()));
+            if (p != null && p > 0) {
+                out.add(new Leg(leg.boardSeq(), leg.boardArs(), leg.boardName(),
+                        leg.alightSeq(), leg.alightArs(), leg.alightName(), p));
+            }
+        }
+        return out;
     }
 
     private List<StopFlow> top(Map<Integer, Double> bySeq) {
