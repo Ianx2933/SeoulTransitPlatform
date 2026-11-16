@@ -61,11 +61,16 @@ public class StopDistrictQueryRepository {
             ) d ON true
             """;
 
+    /**
+     * admin_dong_boundary stores a district as several rows (3,624 rows for
+     * 1,208 codes in the 2025-06-30 set), so the parts are unioned per code.
+     */
     private static final String BOUNDARY_SQL = """
             SELECT adm_cd,
-                   ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, :tolerance), 6) AS geometry
+                   ST_AsGeoJSON(ST_SimplifyPreserveTopology(ST_Union(geom), :tolerance), 6) AS geometry
             FROM public.admin_dong_boundary
             WHERE adm_cd IN (:codes)
+            GROUP BY adm_cd
             """;
 
     private final NamedParameterJdbcTemplate jdbc;

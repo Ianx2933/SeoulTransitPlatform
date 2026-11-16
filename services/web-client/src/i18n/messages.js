@@ -61,7 +61,7 @@ export const messages = {
       enterRoute: "버스 노선 번호를 입력하세요. 예: 302, 452",
       notFound: "{route}번 노선의 이 요일 OD가 없습니다.",
       notFoundHour: "{route}번 노선의 이 시간대 OD가 없습니다. 시간대별 값은 평일만 있습니다.",
-      summary: "하루 {total}명 · 정류소 {stops}곳 · {days}일 평균",
+      summary: "하루 {total}명 · 정류소 {stops}곳 · 대표일 {days}일 평균",
       summaryHour: "{hour} 승차 {total}명 · 정류소 {stops}곳",
       unordered: "노선 위에 놓을 수 없는 승객 {value}명",
       empty: "노선 번호를 입력하면 정류소마다 버스 안에 몇 명이 타고 있는지 보여 줍니다.",
@@ -149,7 +149,7 @@ export const messages = {
         onBoard: "떠날 때 재차"
       },
       source:
-        "서울시 TOPIS 승하차 OD를 보정해 계산했습니다. 최근 12개월에서 같은 요일 유형의 날을 평균한 값이고, 특수일은 뺐습니다."
+        "서울시 TOPIS 승하차 OD를 보정해 계산했습니다. TOPIS는 달마다 사흘치 OD를 공개합니다. 최근 12개월에 공개된 날 가운데 같은 요일 유형의 날을 평균했고(평일은 보통 10일), 특수일은 뺐습니다."
     },
     method: {
       title: "방법론",
@@ -215,7 +215,7 @@ export const messages = {
       enterRoute: "Enter a bus route number, for example 302 or 452.",
       notFound: "No OD for route {route} on this day type.",
       notFoundHour: "No OD for route {route} in this hour. Hourly values exist for weekdays only.",
-      summary: "{total} riders a day · {stops} stops · mean of {days} days",
+      summary: "{total} riders a day · {stops} stops · mean of {days} sample days",
       summaryHour: "{total} riders boarding {hour} · {stops} stops",
       unordered: "{value} riders could not be placed on the route",
       empty: "Enter a route number to see how many riders are on board as the bus leaves each stop.",
@@ -303,7 +303,7 @@ export const messages = {
         onBoard: "On board leaving"
       },
       source:
-        "Calculated from corrected Seoul TOPIS boarding and alighting OD. Each value is the mean over the days of this type in the last twelve months, special days left out."
+        "Calculated from corrected Seoul TOPIS boarding and alighting OD. TOPIS publishes three days of OD a month; each value is the mean over the published days of this type in the last twelve months (usually 10 for weekdays), special days left out."
     },
     method: {
       title: "Methodology",
