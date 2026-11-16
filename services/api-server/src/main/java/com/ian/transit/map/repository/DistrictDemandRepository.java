@@ -166,8 +166,107 @@ public class DistrictDemandRepository {
                         geom
                     FROM public.admin_dong_boundary
                     WHERE adm_cd IN (%s)
-                ), base_rows AS (
+                ),
+                -- Stops and stations inside the chosen districts, found first
+                -- (usually a few dozen) so the demand table is read only for
+                -- them. Checking ST_Covers on every demand row instead made a
+                -- single district take 25-30 s on db-f1-micro (2026-11-16).
+                -- EXISTS keeps a node on a shared boundary of two chosen
+                -- districts once. Only the CTEs of the chosen modes are added:
+                -- PostgreSQL still checks the tables of an unused CTE.
                 """.formatted(districtPlaceholders));
+
+        if (modes.contains("subway")) {
+            sql.append("""
+                district_subway_stations AS MATERIALIZED (
+                    SELECT s.line_name, s.station_key, s.lat, s.lng
+                    FROM (
+                        SELECT DISTINCT ON (
+                            line_name,
+                            regexp_replace(station_name, '\\([^)]*\\)', '', 'g')
+                        )
+                            line_name,
+                            regexp_replace(station_name, '\\([^)]*\\)', '', 'g') AS station_key,
+                            lat,
+                            lng
+                        FROM subway_station_location
+                        ORDER BY
+                            line_name,
+                            regexp_replace(station_name, '\\([^)]*\\)', '', 'g'),
+                            lat,
+                            lng
+                    ) s
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM district_scope ds
+                        WHERE ST_Covers(ds.geom, ST_SetSRID(ST_MakePoint(s.lng, s.lat), 4326))
+                    )
+                ),
+                """);
+        }
+        if (modes.contains("bus")) {
+            sql.append("""
+                district_bus_stops AS MATERIALIZED (
+                    SELECT b.stop_key, b.node_name, b.lat, b.lng
+                    FROM (
+                        SELECT DISTINCT ON (LPAD("정류장번호"::text, 5, '0'))
+                            LPAD("정류장번호"::text, 5, '0') AS stop_key,
+                            "정류장명" AS node_name,
+                            "위도" AS lat,
+                            "경도" AS lng,
+                            COALESCE(
+                                geom,
+                                ST_SetSRID(ST_MakePoint("경도", "위도"), 4326)
+                            ) AS point_geom
+                        FROM bus_stop_location
+                        ORDER BY LPAD("정류장번호"::text, 5, '0'), "정류장명"
+                    ) b
+                    WHERE b.stop_key <> '00000'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM district_scope ds
+                          WHERE ST_Covers(ds.geom, b.point_geom)
+                      )
+                ),
+                district_integrated_stops AS MATERIALIZED (
+                    SELECT m.service_id, m.demand_node_key, b.stop_name, b.lat, b.lng
+                    FROM (
+                        SELECT DISTINCT ON (
+                            service_id,
+                            LPAD(demand_node_id::text, 5, '0')
+                        )
+                            service_id,
+                            LPAD(demand_node_id::text, 5, '0') AS demand_node_key,
+                            canonical_node_id
+                        FROM bus_stop_demand_node_mapping
+                        ORDER BY
+                            service_id,
+                            LPAD(demand_node_id::text, 5, '0'),
+                            canonical_node_id
+                    ) m
+                    JOIN integrated_bus_stop_location b
+                      ON m.canonical_node_id = b.canonical_node_id
+                    WHERE m.demand_node_key <> '00000'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM bus_stop_location existing
+                          WHERE LPAD(existing."정류장번호"::text, 5, '0') = m.demand_node_key
+                            AND LPAD(existing."정류장번호"::text, 5, '0') <> '00000'
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM district_scope ds
+                          WHERE ST_Covers(
+                              ds.geom,
+                              COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326))
+                          )
+                      )
+                ),
+                """);
+        }
+        sql.append("""
+                base_rows AS (
+                """);
 
         sql.append(String.join("\nUNION ALL\n", branches));
         sql.append("""
@@ -204,13 +303,8 @@ public class DistrictDemandRepository {
     }
 
     /**
-     * Builds the subway branch using station coordinates.
-     *
-     * The station-location side is deduplicated with DISTINCT ON per
-     * (line, cleaned station name) so duplicate coordinate rows can never fan
-     * out demand rows. The district filter uses EXISTS instead of JOIN so a
-     * node lying exactly on a shared boundary of two selected districts is
-     * counted once.
+     * Subway demand for the stations in district_subway_stations, matched by
+     * line and station name with parenthesised parts removed.
      */
     private String buildSubwayBranch(
             List<Object> params,
@@ -228,33 +322,10 @@ public class DistrictDemandRepository {
                         CAST(d.boarding AS BIGINT) AS boarding,
                         CAST(d.alighting AS BIGINT) AS alighting
                     FROM integrated_hourly_transit_demand_light d
-                    JOIN (
-                        SELECT DISTINCT ON (
-                            line_name,
-                            regexp_replace(station_name, '\\([^)]*\\)', '', 'g')
-                        )
-                            line_name,
-                            regexp_replace(station_name, '\\([^)]*\\)', '', 'g') AS station_key,
-                            lat,
-                            lng
-                        FROM subway_station_location
-                        ORDER BY
-                            line_name,
-                            regexp_replace(station_name, '\\([^)]*\\)', '', 'g'),
-                            lat,
-                            lng
-                    ) s
+                    JOIN district_subway_stations s
                       ON d.service_id = s.line_name
                      AND regexp_replace(d.node_name, '\\([^)]*\\)', '', 'g') = s.station_key
                     WHERE d.mode = 'subway'
-                      AND EXISTS (
-                          SELECT 1
-                          FROM district_scope ds
-                          WHERE ST_Covers(
-                              ds.geom,
-                              ST_SetSRID(ST_MakePoint(s.lng, s.lat), 4326)
-                          )
-                      )
                 """);
 
         DemandSqlSupport.appendInClause(sql, params, "d.day_type", dayTypes);
@@ -263,11 +334,9 @@ public class DistrictDemandRepository {
     }
 
     /**
-     * Builds the direct bus-stop branch.
-     *
-     * bus_stop_location is deduplicated per normalized stop number so duplicate
-     * source rows cannot multiply demand. District filtering uses EXISTS for
-     * the same shared-boundary reason as the subway branch.
+     * Bus demand for the stops in district_bus_stops. The IN list lets the
+     * partial index idx_ihtdl_bus_norm_node_id (LPAD(node_id) where mode = bus)
+     * find the rows directly.
      */
     private String buildPrimaryBusBranch(
             List<Object> params,
@@ -285,27 +354,10 @@ public class DistrictDemandRepository {
                         CAST(d.boarding AS BIGINT) AS boarding,
                         CAST(d.alighting AS BIGINT) AS alighting
                     FROM integrated_hourly_transit_demand_light d
-                    JOIN (
-                        SELECT DISTINCT ON (LPAD("정류장번호"::text, 5, '0'))
-                            LPAD("정류장번호"::text, 5, '0') AS stop_key,
-                            "정류장명" AS node_name,
-                            "위도" AS lat,
-                            "경도" AS lng,
-                            COALESCE(
-                                geom,
-                                ST_SetSRID(ST_MakePoint("경도", "위도"), 4326)
-                            ) AS point_geom
-                        FROM bus_stop_location
-                        ORDER BY LPAD("정류장번호"::text, 5, '0'), "정류장명"
-                    ) b
+                    JOIN district_bus_stops b
                       ON LPAD(d.node_id::text, 5, '0') = b.stop_key
                     WHERE d.mode = 'bus'
-                      AND LPAD(d.node_id::text, 5, '0') <> '00000'
-                      AND EXISTS (
-                          SELECT 1
-                          FROM district_scope ds
-                          WHERE ST_Covers(ds.geom, b.point_geom)
-                      )
+                      AND LPAD(d.node_id::text, 5, '0') IN (SELECT stop_key FROM district_bus_stops)
                 """);
 
         DemandSqlSupport.appendInClause(sql, params, "d.day_type", dayTypes);
@@ -314,10 +366,8 @@ public class DistrictDemandRepository {
     }
 
     /**
-     * Builds the integrated bus-stop branch for missing direct coordinates.
-     *
-     * The mapping table is deduplicated per (service_id, normalized demand
-     * node id) so multi-mapped rows cannot fan out demand.
+     * Bus demand for outer-area stops (district_integrated_stops), which have
+     * no row in bus_stop_location, matched by route and demand node ID.
      */
     private String buildIntegratedBusBranch(
             List<Object> params,
@@ -329,50 +379,17 @@ public class DistrictDemandRepository {
                         d.mode,
                         d.service_id,
                         LPAD(d.node_id::text, 5, '0') AS node_id,
-                        b.stop_name AS node_name,
-                        b.lat,
-                        b.lng,
+                        m.stop_name AS node_name,
+                        m.lat,
+                        m.lng,
                         CAST(d.boarding AS BIGINT) AS boarding,
                         CAST(d.alighting AS BIGINT) AS alighting
                     FROM integrated_hourly_transit_demand_light d
-                    JOIN (
-                        SELECT DISTINCT ON (
-                            service_id,
-                            LPAD(demand_node_id::text, 5, '0')
-                        )
-                            service_id,
-                            LPAD(demand_node_id::text, 5, '0') AS demand_node_key,
-                            canonical_node_id
-                        FROM bus_stop_demand_node_mapping
-                        ORDER BY
-                            service_id,
-                            LPAD(demand_node_id::text, 5, '0'),
-                            canonical_node_id
-                    ) m
+                    JOIN district_integrated_stops m
                       ON d.service_id = m.service_id
                      AND LPAD(d.node_id::text, 5, '0') = m.demand_node_key
-                    JOIN integrated_bus_stop_location b
-                      ON m.canonical_node_id = b.canonical_node_id
                     WHERE d.mode = 'bus'
-                      AND LPAD(d.node_id::text, 5, '0') <> '00000'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM bus_stop_location existing
-                          WHERE LPAD(d.node_id::text, 5, '0')
-                              = LPAD(existing."정류장번호"::text, 5, '0')
-                            AND LPAD(existing."정류장번호"::text, 5, '0') <> '00000'
-                      )
-                      AND EXISTS (
-                          SELECT 1
-                          FROM district_scope ds
-                          WHERE ST_Covers(
-                              ds.geom,
-                              COALESCE(
-                                  b.geom,
-                                  ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)
-                              )
-                          )
-                      )
+                      AND LPAD(d.node_id::text, 5, '0') IN (SELECT demand_node_key FROM district_integrated_stops)
                 """);
 
         DemandSqlSupport.appendInClause(sql, params, "d.day_type", dayTypes);
