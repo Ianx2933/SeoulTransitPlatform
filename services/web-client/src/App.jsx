@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
+import AppShell from "./components/AppShell.jsx";
 import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 import DemandControlPanel from "./components/DemandControlPanel.jsx";
-import RouteAnalysisPanel from "./components/RouteAnalysisPanel.jsx";
+import MethodologyPanel from "./components/MethodologyPanel.jsx";
+import RouteAnalysisView from "./components/RouteAnalysisView.jsx";
 import TransitDemandMap from "./components/TransitDemandMap.jsx";
+import { useHashView } from "./hooks/useHashView.js";
 
 /**
  * Root application component.
@@ -19,6 +22,7 @@ import TransitDemandMap from "./components/TransitDemandMap.jsx";
  *     hour / day type they belong to.
  */
 export default function App() {
+  const [view, setView] = useHashView();
   const [selectedSubwayLines, setSelectedSubwayLines] = useState([]);
   const [selectedBusLines, setSelectedBusLines] = useState([]);
   const [dayTypePreset, setDayTypePreset] = useState("mon");
@@ -34,6 +38,7 @@ export default function App() {
   const [busLineLoading, setBusLineLoading] = useState(false);
   const [subwayLineError, setSubwayLineError] = useState("");
   const [busLineError, setBusLineError] = useState("");
+  // Message key under map.error, translated by the control panel.
   const [filterError, setFilterError] = useState("");
 
   const [appliedFilters, setAppliedFilters] = useState(null);
@@ -102,13 +107,11 @@ export default function App() {
    */
   const handleLoadDemand = () => {
     if (selectedSubwayLines.length === 0 && selectedBusLines.length === 0) {
-      setFilterError(
-        "Please select at least one subway or bus route before loading demand."
-      );
+      setFilterError("selectRoute");
       return;
     }
     if (selectedDayTypes.length === 0) {
-      setFilterError("Please select at least one day type before loading demand.");
+      setFilterError("selectDay");
       return;
     }
     setFilterError("");
@@ -135,9 +138,7 @@ export default function App() {
   const handleSelectSearchNode = (node) => {
     if (!appliedFilters) {
       if (selectedDayTypes.length === 0) {
-        setFilterError(
-          "Please select at least one day type before opening node analysis."
-        );
+        setFilterError("selectDayNode");
         return;
       }
       setFilterError("");
@@ -188,53 +189,60 @@ export default function App() {
   };
 
   return (
-    <main className="app-shell">
-      <DemandControlPanel
-        dayTypePreset={dayTypePreset}
-        setDayTypePreset={setDayTypePreset}
-        selectedDayTypes={selectedDayTypes}
-        setSelectedDayTypes={setSelectedDayTypes}
-        dayAggregation={dayAggregation}
-        setDayAggregation={setDayAggregation}
-        startHour={startHour}
-        setStartHour={setStartHour}
-        endHour={endHour}
-        setEndHour={setEndHour}
-        selectedSubwayLines={selectedSubwayLines}
-        setSelectedSubwayLines={setSelectedSubwayLines}
-        selectedBusLines={selectedBusLines}
-        setSelectedBusLines={setSelectedBusLines}
-        metric={metric}
-        setMetric={setMetric}
-        subwayLines={subwayLines}
-        busLines={busLines}
-        subwayLineLoading={subwayLineLoading}
-        busLineLoading={busLineLoading}
-        subwayLineError={subwayLineError}
-        busLineError={busLineError}
-        filterError={filterError}
-        onLoadDemand={handleLoadDemand}
-        hasAppliedFilters={Boolean(appliedFilters)}
-        showAdminBoundary={showAdminBoundary}
-        setShowAdminBoundary={setShowAdminBoundary}
-        selectedTileLayer={selectedTileLayer}
-        setSelectedTileLayer={setSelectedTileLayer}
-        onSelectSearchNode={handleSelectSearchNode}
-      />
-      <DataCoverageNotice />
-      <TransitDemandMap
-        filters={appliedFilters}
-        showAdminBoundary={showAdminBoundary}
-        selectedTileLayer={selectedTileLayer}
-        selectedSearchNode={selectedSearchNode}
-        onClearSearchNode={handleClearSearchNode}
-        selectedSubwayLines={selectedSubwayLines}
-        selectedBusLines={selectedBusLines}
-        onAddRouteFromNode={handleAddRouteFromNode}
-        showCatchmentMarkers={showCatchmentMarkers}
-        onShowCatchmentMarkersChange={setShowCatchmentMarkers}
-      />
-      <RouteAnalysisPanel busLines={busLines} />
-    </main>
+    <AppShell view={view} onNavigate={setView}>
+      {view === "map" && (
+        <div className="map-view">
+          <DemandControlPanel
+            dayTypePreset={dayTypePreset}
+            setDayTypePreset={setDayTypePreset}
+            selectedDayTypes={selectedDayTypes}
+            setSelectedDayTypes={setSelectedDayTypes}
+            dayAggregation={dayAggregation}
+            setDayAggregation={setDayAggregation}
+            startHour={startHour}
+            setStartHour={setStartHour}
+            endHour={endHour}
+            setEndHour={setEndHour}
+            selectedSubwayLines={selectedSubwayLines}
+            setSelectedSubwayLines={setSelectedSubwayLines}
+            selectedBusLines={selectedBusLines}
+            setSelectedBusLines={setSelectedBusLines}
+            metric={metric}
+            setMetric={setMetric}
+            subwayLines={subwayLines}
+            busLines={busLines}
+            subwayLineLoading={subwayLineLoading}
+            busLineLoading={busLineLoading}
+            subwayLineError={subwayLineError}
+            busLineError={busLineError}
+            filterError={filterError}
+            onLoadDemand={handleLoadDemand}
+            hasAppliedFilters={Boolean(appliedFilters)}
+            showAdminBoundary={showAdminBoundary}
+            setShowAdminBoundary={setShowAdminBoundary}
+            onSelectSearchNode={handleSelectSearchNode}
+          />
+          <DataCoverageNotice />
+          <TransitDemandMap
+            filters={appliedFilters}
+            showAdminBoundary={showAdminBoundary}
+            selectedTileLayer={selectedTileLayer}
+            selectedSearchNode={selectedSearchNode}
+            onClearSearchNode={handleClearSearchNode}
+            selectedSubwayLines={selectedSubwayLines}
+            selectedBusLines={selectedBusLines}
+            onAddRouteFromNode={handleAddRouteFromNode}
+            showCatchmentMarkers={showCatchmentMarkers}
+            onShowCatchmentMarkersChange={setShowCatchmentMarkers}
+          />
+        </div>
+      )}
+      {view === "route" && <RouteAnalysisView busLines={busLines} />}
+      {view === "method" && (
+        <div className="page">
+          <MethodologyPanel asPage />
+        </div>
+      )}
+    </AppShell>
   );
 }

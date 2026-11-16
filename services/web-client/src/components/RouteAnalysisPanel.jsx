@@ -1,50 +1,77 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchRouteSegment,
   fetchRouteStop,
   fetchRouteStops
 } from "../api/routeAnalysisApi.js";
+import { useI18n } from "../i18n/I18nProvider.jsx";
+import { busRouteStyle, busRouteType } from "../utils/busRouteType.js";
 import { buildBarChart, findTurnaround, percent } from "../utils/routeLoadChart.js";
 
-const DAY_TYPES = [
-  { value: "weekday", label: "Weekday" },
-  { value: "saturday", label: "Saturday" },
-  { value: "sunday_holiday", label: "Sunday / holiday" }
-];
+const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const CHART = { width: 440, height: 200 };
+const DEFAULT_REACH = "100";
+const REACH_DELAY_MS = 400;
 
-const CHART = { width: 960, height: 260 };
-
-const fmt = (value) =>
-  value === null || value === undefined
-    ? "-"
-    : Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 });
+const pad2 = (h) => String(h).padStart(2, "0");
 
 /**
  * Route analysis on the typical-day OD.
  *
- * Pick a route and a day type to see riders on board along the route and each
- * stop's boardings and alightings. Click a stop for where its riders go and
- * come from and how far its load carries; pick two stops for the demand
- * inside the segment and crossing its ends. Every figure is a mean daily
- * passenger count over the days of that type in the last twelve months.
+ * Pick a route and a day type (and, on weekdays, an hour) to see riders on
+ * board along the route. Click a stop for where its riders go and come from
+ * and how far its load carries past a threshold you type; pick two stops for
+ * the demand inside the section and crossing its ends.
  */
-export default function RouteAnalysisPanel({ busLines = [] }) {
+export default function RouteAnalysisPanel({
+  busLines = [],
+  stopSeq,
+  onStopSeqChange,
+  onRouteData,
+  onReach,
+  onTurnaround,
+  onSegment
+}) {
+  const { t, lang } = useI18n();
+  const fmt = (value) =>
+    value === null || value === undefined
+      ? "-"
+      : Number(value).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });
+
   const [route, setRoute] = useState("");
   const [dayType, setDayType] = useState("weekday");
+  const [hour, setHour] = useState(null);
   const [routeData, setRouteData] = useState(null);
+  const setStopSeq = onStopSeqChange;
   const [stopDetail, setStopDetail] = useState(null);
+  const [reachText, setReachText] = useState(DEFAULT_REACH);
   const [segment, setSegment] = useState(null);
   const [fromSeq, setFromSeq] = useState("");
   const [toSeq, setToSeq] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const chart = useMemo(
-    () => buildBarChart(routeData?.stops || [], CHART),
-    [routeData]
-  );
+  const hourOk = dayType === "weekday";
+  const activeHour = hourOk ? hour : null;
+  const reachValue = Number(reachText);
+  const reachValid = reachText.trim() !== "" && Number.isFinite(reachValue) && reachValue >= 1;
+
+  const messagesFor = (name) => ({
+    defaultMessage: t("route.failed"),
+    notFoundMessage: activeHour !== null ? t("route.notFoundHour", { route: name }) : t("route.notFound", { route: name })
+  });
+
+  const chart = useMemo(() => buildBarChart(routeData?.stops || [], CHART), [routeData]);
   const turnaround = useMemo(() => findTurnaround(routeData?.stops), [routeData]);
+
+  // Tell the map what to draw.
+  useEffect(() => {
+    onRouteData?.(routeData);
+    onTurnaround?.(turnaround);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeData, turnaround]);
 
   const run = async (task) => {
     setLoading(true);
@@ -58,28 +85,62 @@ export default function RouteAnalysisPanel({ busLines = [] }) {
     }
   };
 
-  const loadRoute = (event) => {
-    event?.preventDefault();
-    const name = route.trim();
-    if (!name) {
-      setError("Enter a bus route, for example 302 or 452.");
-      return;
-    }
+  const loadRoute = (name, keepStop) =>
     run(async () => {
-      const data = await fetchRouteStops({ route: name, dayType });
+      const data = await fetchRouteStops({ route: name, dayType, hour: activeHour, messages: messagesFor(name) });
       setRouteData(data);
-      setStopDetail(null);
       setSegment(null);
       const seqs = data.stops.map((s) => s.seq);
-      setFromSeq(String(seqs[0]));
-      setToSeq(String(seqs[Math.min(seqs.length - 1, 10)]));
+      if (!keepStop || !seqs.includes(stopSeq)) {
+        setStopSeq(null);
+        setStopDetail(null);
+        setFromSeq(String(seqs[0]));
+        setToSeq(String(seqs[Math.min(seqs.length - 1, 10)]));
+      }
     });
+
+  const onSubmit = (event) => {
+    event.preventDefault();
+    const name = route.trim();
+    if (!name) {
+      setError(t("route.enterRoute"));
+      return;
+    }
+    loadRoute(name, false);
   };
 
-  const openStop = (seq) =>
-    run(async () => {
-      setStopDetail(await fetchRouteStop({ route: routeData.노선명, dayType, seq }));
-    });
+  // Day type or hour changed: reload the route already on screen.
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
+    if (routeData) loadRoute(routeData.노선명, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayType, activeHour]);
+
+  // Stop detail follows the chosen stop, the time of day and the threshold,
+  // with a short delay while the threshold is being typed.
+  useEffect(() => {
+    if (!routeData || stopSeq === null || !reachValid) return undefined;
+    const timer = setTimeout(() => {
+      run(async () => {
+        setStopDetail(
+          await fetchRouteStop({
+            route: routeData.노선명,
+            dayType,
+            hour: activeHour,
+            seq: stopSeq,
+            reach: [reachValue],
+            messages: messagesFor(routeData.노선명)
+          })
+        );
+      });
+    }, REACH_DELAY_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeData, stopSeq, reachValue, reachValid]);
 
   const loadSegment = () =>
     run(async () => {
@@ -87,37 +148,47 @@ export default function RouteAnalysisPanel({ busLines = [] }) {
         await fetchRouteSegment({
           route: routeData.노선명,
           dayType,
+          hour: activeHour,
           from: Number(fromSeq),
-          to: Number(toSeq)
+          to: Number(toSeq),
+          messages: messagesFor(routeData.노선명)
         })
       );
     });
 
-  const highlighted = new Set([
-    ...(stopDetail ? [stopDetail.seq] : []),
-    ...(segment ? segment.stops.map((s) => s.seq) : [])
-  ]);
+  const segmentSeqs = new Set(segment ? segment.stops.map((s) => s.seq) : []);
+  const reach = stopDetail && stopDetail.seq === stopSeq && reachValid ? stopDetail.reach?.[0] : null;
+  const reachSeq = reach?.untilSeq ?? null;
+
+  useEffect(() => {
+    onReach?.(reachSeq);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reachSeq]);
+  useEffect(() => {
+    onSegment?.(segment ? [segment.fromSeq, segment.toSeq] : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment]);
+  const bandBars =
+    stopSeq !== null && reachSeq !== null
+      ? chart.bars.filter((b) => b.seq >= stopSeq && b.seq <= reachSeq)
+      : [];
 
   return (
-    <section className="route-analysis-panel" style={panelStyle}>
-      <div>
-        <strong>Route analysis (typical-day OD)</strong>
-        <p style={mutedStyle}>
-          Mean daily passengers over the days of the chosen type in the last
-          twelve months, from corrected TOPIS route OD. Hourly detail is not
-          part of this view.
-        </p>
-      </div>
+    <section className="route-panel" aria-labelledby="route-title">
+      <header className="route-panel__head">
+        {routeData ? <RouteSign name={routeData.노선명} /> : null}
+        <h1 id="route-title" className="route-panel__title">{t("route.title")}</h1>
+      </header>
 
-      <form onSubmit={loadRoute} style={rowStyle}>
-        <label style={labelStyle}>
-          Route
+      <form onSubmit={onSubmit} className="route-search">
+        <label className="field">
+          <span>{t("route.searchLabel")}</span>
           <input
             list="route-analysis-bus-lines"
             value={route}
             onChange={(e) => setRoute(e.target.value)}
-            placeholder="302"
-            style={inputStyle}
+            placeholder={t("route.searchPlaceholder")}
+            inputMode="search"
           />
           <datalist id="route-analysis-bus-lines">
             {busLines.slice(0, 2000).map((line) => (
@@ -125,156 +196,296 @@ export default function RouteAnalysisPanel({ busLines = [] }) {
             ))}
           </datalist>
         </label>
-        <label style={labelStyle}>
-          Day type
-          <select value={dayType} onChange={(e) => setDayType(e.target.value)} style={inputStyle}>
-            {DAY_TYPES.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" disabled={loading}>
-          {loading ? "Loading…" : "Analyse route"}
+        <button type="submit" className="button button--primary" disabled={loading}>
+          {loading ? t("route.loading") : t("route.submit")}
         </button>
       </form>
 
-      {error && <div className="error-box">{error}</div>}
+      <div role="group" aria-label={t("dayType.label")} className="segmented segmented--fill">
+        {DAY_TYPES.map((d) => (
+          <button key={d} type="button" aria-pressed={dayType === d} onClick={() => setDayType(d)}>
+            {t(`dayType.${d}`)}
+          </button>
+        ))}
+      </div>
+
+      <div className="hour-picker">
+        <div className="hour-picker__head">
+          <span className="label-strong">{t("route.hour.label")}</span>
+          <span className="num">
+            {activeHour === null ? t("route.hour.allDay") : t("route.hour.range", { from: pad2(activeHour), to: pad2(activeHour + 1) })}
+          </span>
+        </div>
+        <div className="hour-picker__row">
+          <button
+            type="button"
+            className="chip"
+            aria-pressed={activeHour === null}
+            onClick={() => setHour(null)}
+          >
+            {t("route.hour.allDay")}
+          </button>
+          <div role="group" aria-label={t("route.hour.pick")} className="hour-grid">
+            {HOURS.map((h) => (
+              <button
+                key={h}
+                type="button"
+                disabled={!hourOk}
+                aria-pressed={activeHour === h}
+                onClick={() => setHour(activeHour === h ? null : h)}
+                className="hour-cell num"
+              >
+                {pad2(h)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="note">{hourOk ? t("route.hour.meaning") : t("route.hour.weekdayOnly")}</p>
+      </div>
+
+      {error && <div className="error-box" role="alert">{error}</div>}
+
+      {!routeData && !error && <p className="note">{t("route.empty")}</p>}
 
       {routeData && (
         <>
-          <p style={{ margin: 0 }}>
-            <strong>{routeData.노선명}</strong> · {fmt(routeData.totalPassengers)} passengers a day ·{" "}
-            {routeData.stops.length} stops · mean of {routeData.nDays ?? "-"} days
-            {routeData.unorderedPassengers > 0 &&
-              ` · ${fmt(routeData.unorderedPassengers)} not placeable on the route`}
+          <p className="route-summary num">
+            {activeHour === null
+              ? t("route.summary", { total: fmt(routeData.totalPassengers), stops: routeData.stops.length, days: routeData.nDays ?? "-" })
+              : t("route.summaryHour", {
+                  total: fmt(routeData.totalPassengers),
+                  stops: routeData.stops.length,
+                  hour: t("route.hour.range", { from: pad2(activeHour), to: pad2(activeHour + 1) })
+                })}
+            {routeData.unorderedPassengers > 0 && (
+              <span className="note"> · {t("route.unordered", { value: fmt(routeData.unorderedPassengers) })}</span>
+            )}
           </p>
 
-          <svg
-            viewBox={`0 0 ${CHART.width} ${CHART.height}`}
-            style={{ width: "100%", height: "auto", background: "#f8fafc", borderRadius: 8 }}
-            role="img"
-            aria-label="Riders on board after each stop"
-          >
-            <text x={8} y={18} fontSize="12" fill="#475569">
-              On board after each stop (max {fmt(chart.maxLoad)} a day) — click a bar for stop detail
-            </text>
-            <line x1={40} x2={CHART.width - 12} y1={chart.baseY} y2={chart.baseY} stroke="#94a3b8" />
-            {chart.bars.map((b, index) => {
-              const afterTurn = turnaround != null && b.seq > turnaround;
-              const fill = highlighted.has(b.seq)
-                ? "#dc2626"
-                : afterTurn
-                  ? "#14b8a6"
-                  : "#3b82f6";
-              const showLabel =
-                index % chart.labelEvery === 0 ||
-                index === chart.bars.length - 1 ||
-                b.seq === turnaround;
-              return (
-                <g key={b.seq} onClick={() => openStop(b.seq)} style={{ cursor: "pointer" }}>
-                  <rect x={b.x} y={b.y} width={b.w} height={Math.max(b.h, 0.5)} fill={fill}>
-                    <title>
-                      {`${b.seq} ${b.stop.name}: ${fmt(b.stop.onBoardAfter)} on board, ` +
-                        `${fmt(b.stop.boardings)} on, ${fmt(b.stop.alightings)} off`}
-                    </title>
-                  </rect>
-                  {showLabel && (
-                    <text
-                      x={b.cx}
-                      y={chart.baseY + 14}
-                      fontSize="10"
-                      textAnchor="middle"
-                      fill={b.seq === turnaround ? "#b45309" : "#475569"}
-                      fontWeight={b.seq === turnaround ? 700 : 400}
-                    >
-                      {b.seq}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-            {turnaround != null &&
-              chart.bars
-                .filter((b) => b.seq === turnaround)
-                .map((b) => (
-                  <g key="turnaround">
-                    <line
-                      x1={b.cx}
-                      x2={b.cx}
-                      y1={28}
-                      y2={chart.baseY + 18}
-                      stroke="#b45309"
-                      strokeDasharray="4 3"
-                    />
-                    <text x={b.cx + 4} y={40} fontSize="11" fill="#b45309" fontWeight="700">
-                      {`Turnaround (est.) ${b.seq} ${b.stop.name}`}
-                    </text>
+          <div className="chart-block">
+            <h2 className="section-title">{t("route.chart.title")}</h2>
+            <div className="legend">
+              <span><i className="swatch swatch--up" />{t("route.chart.up")}</span>
+              {turnaround != null && <span><i className="swatch swatch--down" />{t("route.chart.down")}</span>}
+              <span className="note num">{t("route.chart.max", { value: fmt(chart.maxLoad) })}</span>
+            </div>
+            <svg
+              viewBox={`0 0 ${CHART.width} ${CHART.height}`}
+              className="load-chart"
+              role="img"
+              aria-label={t("route.chart.aria")}
+            >
+              <defs>
+                <linearGradient id="grad-up" x1="0" y1="1" x2="0" y2="0">
+                  <stop offset="0" stopColor="var(--route-up-light)" />
+                  <stop offset="1" stopColor="var(--route-up)" />
+                </linearGradient>
+                <linearGradient id="grad-down" x1="0" y1="1" x2="0" y2="0">
+                  <stop offset="0" stopColor="var(--route-down-light)" />
+                  <stop offset="1" stopColor="var(--route-down)" />
+                </linearGradient>
+              </defs>
+              <line x1={40} x2={CHART.width - 12} y1={chart.baseY} y2={chart.baseY} stroke="var(--rule)" />
+              {bandBars.length > 0 && (
+                <rect
+                  x={bandBars[0].x}
+                  y={chart.baseY + 2}
+                  width={bandBars[bandBars.length - 1].x + bandBars[bandBars.length - 1].w - bandBars[0].x}
+                  height={6}
+                  rx={3}
+                  fill="var(--selected)"
+                />
+              )}
+              {chart.bars.map((b, index) => {
+                const down = turnaround != null && b.seq > turnaround;
+                const fill =
+                  b.seq === stopSeq
+                    ? "var(--selected)"
+                    : segmentSeqs.has(b.seq)
+                      ? "var(--selected-light)"
+                      : down
+                        ? "url(#grad-down)"
+                        : "url(#grad-up)";
+                const showLabel =
+                  index % chart.labelEvery === 0 || index === chart.bars.length - 1 || b.seq === turnaround;
+                return (
+                  <g key={b.seq} onClick={() => setStopSeq(b.seq)} className="bar">
+                    <rect x={b.x} y={b.y} width={b.w} height={Math.max(b.h, 0.5)} fill={fill} rx={1}>
+                      <title>
+                        {t("route.chart.bar", {
+                          seq: b.seq,
+                          name: b.stop.name,
+                          onBoard: fmt(b.stop.onBoardAfter),
+                          on: fmt(b.stop.boardings),
+                          off: fmt(b.stop.alightings)
+                        })}
+                      </title>
+                    </rect>
+                    {showLabel && (
+                      <text x={b.cx} y={chart.baseY + 20} fontSize="10" textAnchor="middle" className="axis-label">
+                        {b.seq}
+                      </text>
+                    )}
                   </g>
-                ))}
-            <text x={CHART.width / 2} y={CHART.height - 6} fontSize="11" textAnchor="middle" fill="#64748b">
-              Stop sequence {turnaround != null ? "— blue: outbound, teal: return" : ""}
-            </text>
-          </svg>
-
-          <div style={rowStyle}>
-            <label style={labelStyle}>
-              Segment from
-              <StopSelect stops={routeData.stops} value={fromSeq} onChange={setFromSeq} />
-            </label>
-            <label style={labelStyle}>
-              to
-              <StopSelect stops={routeData.stops} value={toSeq} onChange={setToSeq} />
-            </label>
-            <button type="button" onClick={loadSegment} disabled={loading}>
-              Analyse segment
-            </button>
+                );
+              })}
+              {turnaround != null &&
+                chart.bars
+                  .filter((b) => b.seq === turnaround)
+                  .map((b) => (
+                    <g key="turnaround">
+                      <line x1={b.cx} x2={b.cx} y1={16} y2={chart.baseY} stroke="var(--ink)" strokeDasharray="4 3" />
+                      <text x={b.cx + 4} y={14} fontSize="11" className="axis-label axis-label--strong">
+                        {t("route.chart.turnaround", { seq: b.seq })}
+                      </text>
+                    </g>
+                  ))}
+            </svg>
+            <p className="note">{t("route.chart.hint")}</p>
           </div>
 
-          {segment && <SegmentView segment={segment} />}
-          {stopDetail && <StopView detail={stopDetail} />}
+          {stopSeq !== null && (
+            <StopCard
+              detail={stopDetail && stopDetail.seq === stopSeq ? stopDetail : null}
+              seq={stopSeq}
+              reachText={reachText}
+              setReachText={setReachText}
+              reachValid={reachValid}
+              fmt={fmt}
+            />
+          )}
 
-          <details>
-            <summary>Stop table ({routeData.stops.length} stops)</summary>
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <th>Seq</th>
-                  <th>Stop</th>
-                  <th>ARS</th>
-                  <th>Boardings</th>
-                  <th>Alightings</th>
-                  <th>On board after</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routeData.stops.map((s) => (
-                  <tr
-                    key={s.seq}
-                    onClick={() => openStop(s.seq)}
-                    style={{ cursor: "pointer", background: highlighted.has(s.seq) ? "#fef3c7" : undefined }}
-                  >
-                    <td>{s.seq}</td>
-                    <td>{s.name}</td>
-                    <td>{s.ars}</td>
-                    <td style={numStyle}>{fmt(s.boardings)}</td>
-                    <td style={numStyle}>{fmt(s.alightings)}</td>
-                    <td style={numStyle}>{fmt(s.onBoardAfter)}</td>
+          <div className="card">
+            <h2 className="section-title">{t("route.segment.heading")}</h2>
+            <div className="route-search">
+              <label className="field">
+                <span>{t("route.segment.from")}</span>
+                <StopSelect stops={routeData.stops} value={fromSeq} onChange={setFromSeq} />
+              </label>
+              <label className="field">
+                <span>{t("route.segment.to")}</span>
+                <StopSelect stops={routeData.stops} value={toSeq} onChange={setToSeq} />
+              </label>
+              <button type="button" className="button" onClick={loadSegment} disabled={loading}>
+                {t("route.segment.submit")}
+              </button>
+            </div>
+            {segment && <SegmentView segment={segment} fmt={fmt} />}
+          </div>
+
+          <details className="card">
+            <summary>{t("route.table.summary", { count: routeData.stops.length })}</summary>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{t("route.table.seq")}</th>
+                    <th scope="col">{t("route.table.name")}</th>
+                    <th scope="col">{t("route.table.ars")}</th>
+                    <th scope="col" className="num">{t("route.table.on")}</th>
+                    <th scope="col" className="num">{t("route.table.off")}</th>
+                    <th scope="col" className="num">{t("route.table.onBoard")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {routeData.stops.map((s) => (
+                    <tr
+                      key={s.seq}
+                      onClick={() => setStopSeq(s.seq)}
+                      className={s.seq === stopSeq ? "is-selected" : undefined}
+                    >
+                      <td className="num">{s.seq}</td>
+                      <td>{s.name}</td>
+                      <td className="num">{s.ars}</td>
+                      <td className="num">{fmt(s.boardings)}</td>
+                      <td className="num">{fmt(s.alightings)}</td>
+                      <td className="num">{fmt(s.onBoardAfter)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </details>
+
+          <p className="note">{t("route.source")}</p>
         </>
       )}
     </section>
   );
 }
 
+function RouteSign({ name }) {
+  const { t } = useI18n();
+  const style = busRouteStyle(name);
+  return (
+    <span className="route-sign" style={{ background: style.background, color: style.text }}>
+      <span className="visually-hidden">{t(`busType.${style.type}`)} </span>
+      {name}
+    </span>
+  );
+}
+
+function StopCard({ detail, seq, reachText, setReachText, reachValid, fmt }) {
+  const { t } = useI18n();
+  const reach = detail?.reach?.[0];
+  return (
+    <div className="card card--stop">
+      <span className="note">{t("route.stop.heading", { seq })}</span>
+      <h2 className="stop-name">{detail ? detail.name : "…"}</h2>
+      {detail && (
+        <dl className="figures">
+          <div><dt>{t("route.stop.alight")}</dt><dd className="num">{fmt(detail.alightings)}</dd></div>
+          <div className="figures__main"><dt>{t("route.stop.onBoard")}</dt><dd className="num">{fmt(detail.onBoardAfter)}</dd></div>
+          <div><dt>{t("route.stop.board")}</dt><dd className="num">{fmt(detail.boardings)}</dd></div>
+        </dl>
+      )}
+
+      <h3 className="section-title section-title--small">{t("route.reach.heading")}</h3>
+      <label className="reach-input">
+        <span>{t("route.reach.label")}</span>
+        <span className="reach-input__box">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1"
+            step="1"
+            value={reachText}
+            onChange={(e) => setReachText(e.target.value)}
+            aria-label={t("route.reach.input")}
+            aria-invalid={!reachValid}
+            className="num"
+          />
+          <span>{t("route.reach.unit")}</span>
+        </span>
+      </label>
+      {!reachValid && <p className="field-error">{t("route.reach.invalid")}</p>}
+      {reachValid && reach && (
+        <div className="reach-result" aria-live="polite">
+          {reach.untilSeq == null ? (
+            <span>{t("route.reach.never", { value: fmt(reach.level) })}</span>
+          ) : (
+            <>
+              <span className="note">{t("route.reach.result", { value: fmt(reach.level) })}</span>
+              <strong>{reach.untilSeq} {reach.untilName}</strong>
+              <span className="note num">{t("route.reach.more", { count: reach.untilSeq - seq })}</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {detail && (
+        <div className="two-col">
+          <FlowList title={t("route.stop.destinations")} flows={detail.destinations} fmt={fmt} />
+          <FlowList title={t("route.stop.origins")} flows={detail.origins} fmt={fmt} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StopSelect({ stops, value, onChange }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
       {stops.map((s) => (
         <option key={s.seq} value={s.seq}>
           {s.seq} {s.name}
@@ -284,110 +495,56 @@ function StopSelect({ stops, value, onChange }) {
   );
 }
 
-function SegmentView({ segment }) {
-  const t = segment.routeTotal;
+function SegmentView({ segment, fmt }) {
+  const { t } = useI18n();
+  const total = segment.routeTotal;
   const rows = [
-    ["Within (both ends inside)", segment.within],
-    ["Leaving (board inside, alight past the end)", segment.leaving],
-    ["Entering (board before the start, alight inside)", segment.entering],
-    ["Passing through", segment.through]
+    ["within", segment.within],
+    ["leaving", segment.leaving],
+    ["entering", segment.entering],
+    ["through", segment.through]
   ];
   return (
-    <div style={cardStyle}>
-      <strong>
-        Segment {segment.fromSeq} {segment.fromName} → {segment.toSeq} {segment.toName}
-      </strong>
-      <table style={tableStyle}>
-        <tbody>
-          {rows.map(([label, value]) => (
-            <tr key={label}>
-              <td>{label}</td>
-              <td style={numStyle}>{fmt(value)}</td>
-              <td style={numStyle}>{percent(value, t)} of route</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={twoColStyle}>
-        <FlowList title="Riders leaving go to" flows={segment.leavingTo} />
-        <FlowList title="Riders entering come from" flows={segment.enteringFrom} />
-      </div>
-      <details>
-        <summary>Per stop inside the segment</summary>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th>Seq</th>
-              <th>Stop</th>
-              <th>On</th>
-              <th>Off</th>
-              <th>Board here, leave past end</th>
-              <th>Bound past end, on board</th>
-            </tr>
-          </thead>
-          <tbody>
-            {segment.stops.map((s) => (
-              <tr key={s.seq}>
-                <td>{s.seq}</td>
-                <td>{s.name}</td>
-                <td style={numStyle}>{fmt(s.boardings)}</td>
-                <td style={numStyle}>{fmt(s.alightings)}</td>
-                <td style={numStyle}>{fmt(s.leavingHere)}</td>
-                <td style={numStyle}>{fmt(s.leavingOnBoard)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
-    </div>
-  );
-}
-
-function StopView({ detail }) {
-  return (
-    <div style={cardStyle}>
-      <strong>
-        Stop {detail.seq} {detail.name} ({detail.ars})
-      </strong>
-      <p style={mutedStyle}>
-        {fmt(detail.boardings)} board, {fmt(detail.alightings)} alight,{" "}
-        {fmt(detail.onBoardAfter)} on board as the bus leaves.
+    <div className="segment">
+      <p className="label-strong">
+        {t("route.segment.title", {
+          from: segment.fromSeq,
+          fromName: segment.fromName,
+          to: segment.toSeq,
+          toName: segment.toName
+        })}
       </p>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th>More than … of those on board</th>
-            <th>stay on board as far as</th>
-          </tr>
-        </thead>
-        <tbody>
-          {detail.reach.map((r) => (
-            <tr key={r.level}>
-              <td>{fmt(r.level)}</td>
-              <td>{r.untilSeq == null ? "-" : `${r.untilSeq} ${r.untilName}`}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={twoColStyle}>
-        <FlowList title="Boarding here, alight at" flows={detail.destinations} />
-        <FlowList title="Alighting here, boarded at" flows={detail.origins} />
+      <dl className="rows">
+        {rows.map(([key, value]) => (
+          <div key={key}>
+            <dt>{t(`route.segment.${key}`)}</dt>
+            <dd className="num">
+              {fmt(value)} <span className="note">{t("route.segment.share", { value: percent(value, total) })}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="two-col">
+        <FlowList title={t("route.segment.leavingTo")} flows={segment.leavingTo} fmt={fmt} />
+        <FlowList title={t("route.segment.enteringFrom")} flows={segment.enteringFrom} fmt={fmt} />
       </div>
     </div>
   );
 }
 
-function FlowList({ title, flows }) {
+function FlowList({ title, flows, fmt }) {
+  const { t } = useI18n();
   return (
     <div>
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>{title}</div>
+      <h4 className="flow-title">{title}</h4>
       {flows.length === 0 ? (
-        <div style={mutedStyle}>None</div>
+        <p className="note">{t("route.stop.none")}</p>
       ) : (
-        <ol style={{ margin: 0, paddingLeft: 20 }}>
+        <ol className="flow-list">
           {flows.map((f) => (
             <li key={f.seq}>
-              {f.seq} {f.name} — {fmt(f.passengers)}
+              <span>{f.seq} {f.name}</span>
+              <span className="num">{fmt(f.passengers)}</span>
             </li>
           ))}
         </ol>
@@ -395,21 +552,3 @@ function FlowList({ title, flows }) {
     </div>
   );
 }
-
-const panelStyle = {
-  display: "grid",
-  gap: "12px",
-  margin: "16px 20px",
-  padding: "16px 18px",
-  borderRadius: "16px",
-  background: "white",
-  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)"
-};
-const cardStyle = { display: "grid", gap: "8px", padding: "12px", border: "1px solid #e2e8f0", borderRadius: "10px" };
-const rowStyle = { display: "flex", gap: "12px", alignItems: "end", flexWrap: "wrap" };
-const labelStyle = { display: "grid", gap: "4px", fontSize: "14px", fontWeight: 700 };
-const inputStyle = { height: "34px", padding: "0 8px", border: "1px solid #cbd5e1", borderRadius: "8px", minWidth: "160px" };
-const mutedStyle = { margin: 0, color: "#64748b", fontSize: "14px" };
-const tableStyle = { width: "100%", borderCollapse: "collapse", fontSize: "13px" };
-const numStyle = { textAlign: "right" };
-const twoColStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" };

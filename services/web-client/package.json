@@ -15,7 +15,8 @@
     "leaflet": "^1.9.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-leaflet": "^5.0.0"
+    "react-leaflet": "^5.0.0",
+    "wanted-sans": "^1.0.3"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",

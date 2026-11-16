@@ -1,44 +1,63 @@
 import { useState } from "react";
-import { fetchNodeSearch } from "../api/mapDemandApi.js";
 
-/** Search panel for node-centered analysis. */
+import { fetchNodeSearch } from "../api/mapDemandApi.js";
+import { useI18n } from "../i18n/I18nProvider.jsx";
+
+/** Search for a stop or station to open stop-centred analysis. */
 export default function NodeSearchPanel({ onSelectNode }) {
+  const { t } = useI18n();
   const [keyword, setKeyword] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  /** Calls the node search API. */
   const handleSearch = async (event) => {
     event.preventDefault();
-    const trimmedKeyword = keyword.trim();
-    if (trimmedKeyword.length < 2) { setErrorMessage("Enter at least 2 characters."); setResults([]); return; }
-    setLoading(true); setErrorMessage("");
-    try { setResults(await fetchNodeSearch({ keyword: trimmedKeyword, limit: 30 })); }
-    catch (error) { setErrorMessage(error.message); setResults([]); }
-    finally { setLoading(false); }
+    const trimmed = keyword.trim();
+    if (trimmed.length < 2) {
+      setErrorMessage(t("search.tooShort"));
+      setResults([]);
+      return;
+    }
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      setResults(await fetchNodeSearch({ keyword: trimmed, limit: 30 }));
+    } catch (error) {
+      setErrorMessage(error.message);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  /** Sends selected node to parent. */
-  const handleSelectNode = (node) => onSelectNode?.({ ...node, source: "node-search" });
+  const modeLabel = (mode) => {
+    const label = t(`search.modes.${mode}`);
+    return label.startsWith("search.") ? mode : label;
+  };
 
   return (
-    <section className="node-search-panel" style={{ marginTop: "12px", padding: "12px", border: "1px solid #dddddd", borderRadius: "8px", backgroundColor: "#fafafa" }}>
-      <form onSubmit={handleSearch} style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-        <strong>Stop / station search</strong>
-        <label>Keyword <input type="text" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="e.g. 강남, 서현, 07616" style={{ marginLeft: "8px", padding: "6px 8px" }} /></label>
-        <button type="submit" disabled={loading}>{loading ? "Searching..." : "Search node"}</button>
-        <span style={{ color: "#555555" }}>Open node analysis without loading a route first.</span>
+    <section className="sub-card">
+      <form onSubmit={handleSearch} className="route-picker__head">
+        <h2 className="section-title">{t("search.title")}</h2>
+        <label className="field field--inline">
+          <span>{t("search.keyword")}</span>
+          <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={t("search.placeholder")} />
+        </label>
+        <button type="submit" className="button" disabled={loading}>
+          {loading ? t("search.searching") : t("search.submit")}
+        </button>
+        <span className="note">{t("search.hint")}</span>
       </form>
-      {errorMessage && <p style={{ margin: "8px 0 0", color: "#b00020" }}>{errorMessage}</p>}
+      {errorMessage && <p className="field-error">{errorMessage}</p>}
       {results.length > 0 && (
-        <div style={{ marginTop: "10px" }}>
-          <strong>Search results</strong>
-          <ol style={{ maxHeight: "160px", overflowY: "auto", margin: "6px 0 0", paddingRight: "12px" }}>
+        <div>
+          <h3 className="flow-title">{t("search.results")}</h3>
+          <ol className="result-list">
             {results.map((node) => (
               <li key={`${node.mode}-${node.nodeId}-${node.lat}-${node.lng}`}>
-                <button type="button" onClick={() => handleSelectNode(node)} style={{ border: "1px solid #cccccc", borderRadius: "6px", padding: "4px 8px", backgroundColor: "#ffffff", cursor: "pointer", textAlign: "left" }}>
-                  [{node.mode}] {node.nodeName} / {node.nodeId}
+                <button type="button" className="result-item" onClick={() => onSelectNode?.({ ...node, source: "node-search" })}>
+                  <span className="tag">{modeLabel(node.mode)}</span> {node.nodeName} <span className="note num">{node.nodeId}</span>
                 </button>
               </li>
             ))}

@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/I18nProvider.jsx";
 import { useEffect, useMemo, useState } from "react";
 import {
   CircleMarker,
@@ -16,6 +17,7 @@ import {
   fetchNodeCatchment,
   fetchNodeDetail
 } from "../api/mapDemandApi.js";
+import { busRouteStyle } from "../utils/busRouteType.js";
 import DistrictDemandPanel from "./DistrictDemandPanel.jsx";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
 
@@ -50,6 +52,14 @@ const TILE_LAYERS = {
  * Returns a stable color for each route.
  */
 function getRouteColor(mode, serviceId) {
+  // Bus and Han River bus routes use Seoul's colour by route type.
+  if (mode === "bus" || mode === "ferry") {
+    return busRouteStyle(serviceId, mode).bg;
+  }
+  // Bus routes take the colour of their Seoul route type (trunk, branch, ...).
+  if (mode === "bus") {
+    return busRouteStyle(serviceId).background;
+  }
   const text = `${mode || "unknown"}-${serviceId || ""}`;
   let hash = 0;
   for (let index = 0; index < text.length; index += 1) {
@@ -74,12 +84,20 @@ function getDemandValue(point, metric) {
   return boarding + alighting;
 }
 
-function getDistrictName(feature) {
+function getDistrictName(feature, tx = (text) => text) {
   return (
     feature?.properties?.ADM_NM ||
     feature?.properties?.adm_nm ||
-    "Selected district"
+    tx("Selected district")
   );
+}
+
+const METRIC_NAMES = { total: "boarding + alighting", boarding: "boarding", alighting: "alighting" };
+
+/** Mode name in the interface language, or the raw mode. */
+function modeName(tx, mode) {
+  const names = { subway: "Subway", bus: "Bus", ferry: "Han River bus" };
+  return names[mode] ? tx(names[mode]) : mode || tx("Unknown");
 }
 
 function getDistrictCode(feature) {
@@ -178,6 +196,7 @@ export default function TransitDemandMap({
   showCatchmentMarkers = true,
   onShowCatchmentMarkersChange
 }) {
+  const { tx } = useI18n();
   const [points, setPoints] = useState([]);
   const [adminDongGeoJson, setAdminDongGeoJson] = useState(null);
   const [selectedDistricts, setSelectedDistricts] = useState([]);
@@ -597,50 +616,31 @@ export default function TransitDemandMap({
   return (
     <div className="map-page">
       {errorMessage && (
-        <div className="error-box">API error: {errorMessage}</div>
+        <div className="error-box" role="alert">{tx("API error: {message}", { message: errorMessage })}</div>
       )}
 
       <div
         className="map-status-bar"
-        style={{
-          display: "flex",
-          gap: "12px",
-          alignItems: "center",
-          flexWrap: "wrap",
-          padding: "8px 16px",
-          fontSize: "14px"
-        }}
       >
         <span>
-          {geoLoading && "Loading administrative boundaries..."}
+          {geoLoading && tx("Loading district boundaries…")}
           {!geoLoading &&
             !filters &&
             points.length === 0 &&
-            "Select filters and click Load demand, or search a stop/station."}
-          {filters && loading && "Loading demand data..."}
+            tx("Pick filters and press Load demand, or search for a stop or station.")}
+          {filters && loading && tx("Loading demand…")}
           {filters &&
             !loading &&
             points.length === 0 &&
-            "No demand layer loaded. Node analysis uses node-detail and catchment APIs directly."}
+            tx("No demand on the map. Stop analysis reads stop detail and catchment directly.")}
           {filters &&
             !loading &&
             points.length > 0 &&
-            `${visiblePoints.length.toLocaleString()} / ${points.length.toLocaleString()} points shown`}
+            tx("{shown} / {all} points shown", { shown: visiblePoints.length.toLocaleString(), all: points.length.toLocaleString() })}
         </span>
 
         {filters?.autoApplied && (
-          <span
-            style={{
-              color: "#7a4a00",
-              backgroundColor: "#fff7e0",
-              border: "1px solid #f0c060",
-              padding: "2px 8px",
-              borderRadius: "4px"
-            }}
-          >
-            Filters auto-applied from current draft (no routes loaded). Adjust
-            filters and click Load demand to update the map layer.
-          </span>
+          <span className="warn-pill">{tx("Filters auto-applied from current draft (no routes loaded). Adjust filters and click Load demand to update the map layer.")}</span>
         )}
 
         {selectedPoint && nodeCatchment?.nodes?.length > 0 && (
@@ -653,118 +653,27 @@ export default function TransitDemandMap({
               onChange={(event) =>
                 onShowCatchmentMarkersChange?.(event.target.checked)
               }
-            />
-            Show catchment markers on map
-          </label>
+            />{tx("Show catchment markers on map")}</label>
         )}
 
-        {!showAdminBoundary && <span>Administrative boundary disabled.</span>}
+        {!showAdminBoundary && <span>{tx("District boundaries are hidden.")}</span>}
 
         {showAdminBoundary && selectedDistricts.length > 0 && (
           <>
             <strong>
-              Map demand summary is filtered by districts:{" "}
-              {selectedDistricts.map(getDistrictName).join(", ")}
+              {tx("Demand summary limited to: {names}", {
+                names: selectedDistricts.map((d) => getDistrictName(d, tx)).join(", ")
+              })}
             </strong>
             <button
               type="button"
               onClick={clearDistrictSelection}
-            >
-              Clear districts
-            </button>
+            >{tx("Clear districts")}</button>
           </>
         )}
       </div>
 
-      {filters && !loading && points.length > 0 && (
-        <section
-          className="demand-summary"
-          style={{
-            padding: "12px 16px",
-            borderBottom: "1px solid #dddddd",
-            backgroundColor: "#ffffff"
-          }}
-        >
-          <strong>
-            Demand summary
-            {selectedDistricts.length > 0
-              ? " — filtered by selected districts"
-              : ""}
-            {filters?.dayAggregation === "sum"
-              ? " — sum of selected days"
-              : " — average per selected day"}
-          </strong>
-          <div>
-            Boarding: {demandSummary.totals.boarding.toLocaleString()} |
-            Alighting: {demandSummary.totals.alighting.toLocaleString()} | Total:{" "}
-            {demandSummary.totals.total.toLocaleString()}
-          </div>
-
-          <div style={{ marginTop: "8px" }}>
-            <strong>Routes by {metric}</strong>
-            <span style={{ marginLeft: "8px", color: "#666666" }}>
-              ({demandSummary.routes.length.toLocaleString()} route
-              {demandSummary.routes.length === 1 ? "" : "s"})
-            </span>
-            <ol
-              style={{
-                maxHeight: "280px",
-                overflowY: "auto",
-                paddingRight: "12px"
-              }}
-            >
-              {demandSummary.routes.map((route) => (
-                <li key={route.key}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      marginRight: "6px",
-                      backgroundColor: getRouteColor(route.mode, route.serviceId)
-                    }}
-                  />
-                  [{route.mode}] {route.serviceId} —{" "}
-                  {Number(route[metric] || 0).toLocaleString()}
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-      )}
-
-      <DistrictDemandPanel
-        selectedDistricts={selectedDistrictSummaries}
-        districtDemand={districtDemand}
-        filtersApplied={filtersApplied}
-        loading={districtDemandLoading}
-        errorMessage={districtDemandErrorMessage}
-        onRetry={handleRetryDistrictDemand}
-        onClear={clearDistrictSelection}
-        selectedSubwayLines={selectedSubwayLines}
-        selectedBusLines={selectedBusLines}
-        onAddRouteFromNode={onAddRouteFromNode}
-      />
-
-      <NodeDetailPanel
-        selectedPoint={selectedPoint}
-        nodeDetail={nodeDetail}
-        catchment={nodeCatchment}
-        radiusMeters={nodeCatchmentRadiusMeters}
-        onRadiusMetersChange={setNodeCatchmentRadiusMeters}
-        loading={nodeDetailLoading}
-        catchmentLoading={nodeCatchmentLoading}
-        errorMessage={combinedNodeErrorMessage}
-        onRetry={handleRetryNodeAnalysis}
-        onClose={clearNodeSelection}
-        sections={analysisSections}
-        onToggleSection={handleToggleAnalysisSection}
-        selectedSubwayLines={selectedSubwayLines}
-        selectedBusLines={selectedBusLines}
-        onAddRouteFromNode={onAddRouteFromNode}
-      />
-
+      <div className="map-body">
       <section className="map-card">
         <MapContainer
           center={SEOUL_CENTER}
@@ -809,17 +718,17 @@ export default function TransitDemandMap({
                 <Popup>
                   <strong>{point.nodeName}</strong>
                   <br />
-                  Mode: {point.mode}
+                  {tx("Mode")}: {modeName(tx, point.mode)}
                   <br />
-                  Line: {point.serviceId}
+                  {tx("Route")}: {point.serviceId}
                   <br />
-                  Node ID: {point.nodeId}
+                  {tx("Stop ID")}: {point.nodeId}
                   <br />
-                  Boarding: {Number(point.boarding || 0).toLocaleString()}
+                  {tx("Boarding")}: {Number(point.boarding || 0).toLocaleString()}
                   <br />
-                  Alighting: {Number(point.alighting || 0).toLocaleString()}
+                  {tx("Alighting")}: {Number(point.alighting || 0).toLocaleString()}
                   <br />
-                  Total:{" "}
+                  {tx("Total")}:{" "}
                   {(
                     Number(point.boarding || 0) + Number(point.alighting || 0)
                   ).toLocaleString()}
@@ -858,21 +767,21 @@ export default function TransitDemandMap({
                     <strong>{node.nodeName}</strong>
                     <br />
                     <em style={{ color: "#666666" }}>
-                      Catchment node — within {nodeCatchmentRadiusMeters}m
+                      {tx("Nearby stop, within {radius}m", { radius: nodeCatchmentRadiusMeters })}
                     </em>
                     <br />
-                    Mode: {node.mode}
+                    {tx("Mode")}: {modeName(tx, node.mode)}
                     <br />
-                    Node ID: {node.nodeId}
+                    {tx("Stop ID")}: {node.nodeId}
                     <br />
-                    Distance:{" "}
+                    {tx("Distance")}:{" "}
                     {Math.round(Number(node.distanceMeters || 0)).toLocaleString()}m
                     <br />
-                    Boarding: {Number(node.boarding || 0).toLocaleString()}
+                    {tx("Boarding")}: {Number(node.boarding || 0).toLocaleString()}
                     <br />
-                    Alighting: {Number(node.alighting || 0).toLocaleString()}
+                    {tx("Alighting")}: {Number(node.alighting || 0).toLocaleString()}
                     <br />
-                    Total: {Number(node.total || 0).toLocaleString()}
+                    {tx("Total")}: {Number(node.total || 0).toLocaleString()}
                   </Popup>
                 </CircleMarker>
               );
@@ -897,16 +806,101 @@ export default function TransitDemandMap({
                 <Popup>
                   <strong>{selectedPoint.nodeName}</strong>
                   <br />
-                  <em style={{ color: "#666666" }}>Opened from node search</em>
+                  <em style={{ color: "#666666" }}>{tx("Opened from stop search")}</em>
                   <br />
-                  Mode: {selectedPoint.mode}
+                  {tx("Mode")}: {modeName(tx, selectedPoint.mode)}
                   <br />
-                  Node ID: {selectedPoint.nodeId}
+                  {tx("Stop ID")}: {selectedPoint.nodeId}
                 </Popup>
               </CircleMarker>
             )}
         </MapContainer>
       </section>
+
+      <aside className="map-side">
+      {filters && !loading && points.length > 0 && (
+        <section className="demand-summary side-card">
+          <strong>
+            {tx("Demand summary")}
+            {selectedDistricts.length > 0 ? ` — ${tx("chosen districts only")}` : ""}
+            {filters?.dayAggregation === "sum"
+              ? ` — ${tx("sum of chosen days")}`
+              : ` — ${tx("mean per chosen day")}`}
+          </strong>
+          <div>
+            {tx("Boarding {on} | Alighting {off} | Total {total}", {
+              on: demandSummary.totals.boarding.toLocaleString(),
+              off: demandSummary.totals.alighting.toLocaleString(),
+              total: demandSummary.totals.total.toLocaleString()
+            })}
+          </div>
+
+          <div style={{ marginTop: "8px" }}>
+            <strong>{tx("Routes by {metric}", { metric: tx(METRIC_NAMES[metric] || metric) })}</strong>
+            <span style={{ marginLeft: "8px", color: "#666666" }}>
+              {tx("({count} routes)", { count: demandSummary.routes.length.toLocaleString() })}
+            </span>
+            <ol
+              style={{
+                maxHeight: "280px",
+                overflowY: "auto",
+                paddingRight: "12px"
+              }}
+            >
+              {demandSummary.routes.map((route) => (
+                <li key={route.key}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      marginRight: "6px",
+                      backgroundColor: getRouteColor(route.mode, route.serviceId)
+                    }}
+                  />
+                  {route.mode === "subway" ? tx("Subway") : route.mode === "bus" ? tx("Bus") : route.mode} {route.serviceId} —{" "}
+                  {Number(route[metric] || 0).toLocaleString()}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      )}
+
+      <DistrictDemandPanel
+        selectedDistricts={selectedDistrictSummaries}
+        districtDemand={districtDemand}
+        filtersApplied={filtersApplied}
+        loading={districtDemandLoading}
+        errorMessage={districtDemandErrorMessage}
+        onRetry={handleRetryDistrictDemand}
+        onClear={clearDistrictSelection}
+        selectedSubwayLines={selectedSubwayLines}
+        selectedBusLines={selectedBusLines}
+        onAddRouteFromNode={onAddRouteFromNode}
+      />
+
+      <NodeDetailPanel
+        selectedPoint={selectedPoint}
+        nodeDetail={nodeDetail}
+        catchment={nodeCatchment}
+        radiusMeters={nodeCatchmentRadiusMeters}
+        onRadiusMetersChange={setNodeCatchmentRadiusMeters}
+        loading={nodeDetailLoading}
+        catchmentLoading={nodeCatchmentLoading}
+        errorMessage={combinedNodeErrorMessage}
+        onRetry={handleRetryNodeAnalysis}
+        onClose={clearNodeSelection}
+        sections={analysisSections}
+        onToggleSection={handleToggleAnalysisSection}
+        selectedSubwayLines={selectedSubwayLines}
+        selectedBusLines={selectedBusLines}
+        onAddRouteFromNode={onAddRouteFromNode}
+      />
+
+      </aside>
+      </div>
     </div>
   );
 }

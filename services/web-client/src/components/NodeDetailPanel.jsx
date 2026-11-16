@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/I18nProvider.jsx";
 import { useMemo, useState } from "react";
 
 import NodeAnalysisControls from "./NodeAnalysisControls.jsx";
@@ -23,6 +24,7 @@ export default function NodeDetailPanel({
   selectedBusLines = [],
   onAddRouteFromNode
 }) {
+  const { tx } = useI18n();
   const [nodeSortKey, setNodeSortKey] = useState("distanceAsc");
   const [routeSortKey, setRouteSortKey] = useState("totalDesc");
 
@@ -80,10 +82,8 @@ export default function NodeDetailPanel({
           />
         ) : !loading && !errorMessage ? (
           <section style={subSectionStyle}>
-            <strong>This node, all routes</strong>
-            <p style={mutedParagraphStyle}>
-              No node-level demand is available for the current filters.
-            </p>
+            <strong>{tx("This node, all routes")}</strong>
+            <p style={mutedParagraphStyle}>{tx("No node-level demand is available for the current filters.")}</p>
           </section>
         ) : null)}
 
@@ -117,33 +117,30 @@ export default function NodeDetailPanel({
  * Renders the panel header with source label, retry, and close controls.
  */
 function PanelHeader({ selectedPoint, loading, errorMessage, onRetry, onClose }) {
+  const { tx } = useI18n();
   const sourceLabel =
-    selectedPoint.source === "node-search" ? "Node search" : "Map marker";
+    selectedPoint.source === "node-search" ? tx("Stop search") : tx("Map marker");
 
   return (
     <div>
       <div style={headerStyle}>
         <div>
-          <strong>Selected node analysis</strong>
+          <strong>{tx("Selected node analysis")}</strong>
           <p style={mutedParagraphStyle}>
-            {selectedPoint.nodeName || "Unknown node"} /{" "}
-            {selectedPoint.nodeId || "Unknown ID"}
+            {selectedPoint.nodeName || tx("Unknown stop")} /{" "}
+            {selectedPoint.nodeId || tx("Unknown ID")}
           </p>
-          <p style={mutedParagraphStyle}>Source: {sourceLabel}</p>
+          <p style={mutedParagraphStyle}>{tx("Opened from: {source}", { source: sourceLabel })}</p>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           {errorMessage && (
-            <button type="button" onClick={onRetry}>
-              Retry
-            </button>
+            <button type="button" onClick={onRetry}>{tx("Retry")}</button>
           )}
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
+          <button type="button" onClick={onClose}>{tx("Close")}</button>
         </div>
       </div>
       {loading && (
-        <p style={mutedParagraphStyle}>Loading node-based demand...</p>
+        <p style={mutedParagraphStyle}>{tx("Loading node-based demand...")}</p>
       )}
       {errorMessage && (
         <p
@@ -164,6 +161,7 @@ function PanelHeader({ selectedPoint, loading, errorMessage, onRetry, onClose })
  * Renders the selected point details.
  */
 function SelectedPointSection({ selectedPoint }) {
+  const { tx } = useI18n();
   const fromSearch = selectedPoint.source === "node-search";
   const boarding = Number(selectedPoint.boarding || 0);
   const alighting = Number(selectedPoint.alighting || 0);
@@ -171,40 +169,40 @@ function SelectedPointSection({ selectedPoint }) {
 
   return (
     <section style={subSectionStyle}>
-      <strong>Selected point</strong>
+      <strong>{tx("Selected point")}</strong>
       <p style={mutedParagraphStyle}>
         {fromSearch
-          ? "This node was opened from search. Route-specific marker demand is not attached to the search result."
-          : "This is the clicked marker value from the currently loaded route layer."}
+          ? tx("This node was opened from search. Route-specific marker demand is not attached to the search result.")
+          : tx("This is the clicked marker value from the currently loaded route layer.")}
       </p>
       <dl style={definitionGridStyle}>
-        <dt>Mode</dt>
-        <dd style={definitionValueStyle}>{selectedPoint.mode || "Unknown"}</dd>
-        <dt>Route</dt>
+        <dt>{tx("Mode")}</dt>
+        <dd style={definitionValueStyle}>{modeName(tx, selectedPoint.mode)}</dd>
+        <dt>{tx("Route")}</dt>
         <dd style={definitionValueStyle}>
-          {fromSearch ? "Node search" : selectedPoint.serviceId || "Unknown"}
+          {fromSearch ? tx("Stop search") : selectedPoint.serviceId || tx("Unknown")}
         </dd>
-        <dt>Node ID</dt>
+        <dt>{tx("Node ID")}</dt>
         <dd style={definitionValueStyle}>
-          {selectedPoint.nodeId || "Unknown"}
+          {selectedPoint.nodeId || tx("Unknown")}
         </dd>
-        <dt>Boarding</dt>
+        <dt>{tx("Boarding")}</dt>
         <dd style={definitionValueStyle}>
-          {fromSearch ? "N/A" : boarding.toLocaleString()}
+          {fromSearch ? tx("N/A") : boarding.toLocaleString()}
         </dd>
-        <dt>Alighting</dt>
+        <dt>{tx("Alighting")}</dt>
         <dd style={definitionValueStyle}>
-          {fromSearch ? "N/A" : alighting.toLocaleString()}
+          {fromSearch ? tx("N/A") : alighting.toLocaleString()}
         </dd>
-        <dt>Total</dt>
+        <dt>{tx("Total")}</dt>
         <dd style={definitionValueStyle}>
-          {fromSearch ? "N/A" : total.toLocaleString()}
+          {fromSearch ? tx("N/A") : total.toLocaleString()}
         </dd>
-        <dt>Latitude</dt>
+        <dt>{tx("Latitude")}</dt>
         <dd style={definitionValueStyle}>
           {formatCoordinate(selectedPoint.lat)}
         </dd>
-        <dt>Longitude</dt>
+        <dt>{tx("Longitude")}</dt>
         <dd style={definitionValueStyle}>
           {formatCoordinate(selectedPoint.lng)}
         </dd>
@@ -223,22 +221,22 @@ function NodeAllRoutesSection({
   selectedBusLines,
   onAddRouteFromNode
 }) {
+  const { tx } = useI18n();
   return (
     <section style={subSectionStyle}>
       <strong>
-        This node, all routes ({routes.length} route
-        {routes.length === 1 ? "" : "s"})
+        {tx("This node, all routes ({count})", { count: routes.length })}
       </strong>
       <dl style={definitionGridStyle}>
-        <dt>Boarding</dt>
+        <dt>{tx("Boarding")}</dt>
         <dd style={definitionValueStyle}>
           {Number(nodeDetail.boarding || 0).toLocaleString()}
         </dd>
-        <dt>Alighting</dt>
+        <dt>{tx("Alighting")}</dt>
         <dd style={definitionValueStyle}>
           {Number(nodeDetail.alighting || 0).toLocaleString()}
         </dd>
-        <dt>Total</dt>
+        <dt>{tx("Total")}</dt>
         <dd style={definitionValueStyle}>
           {Number(nodeDetail.total || 0).toLocaleString()}
         </dd>
@@ -257,15 +255,14 @@ function NodeAllRoutesSection({
  * Renders an empty-state catchment section that still allows radius switching.
  */
 function CatchmentEmptySection({ radiusMeters, onRadiusMetersChange }) {
+  const { tx } = useI18n();
   return (
     <section style={subSectionStyle}>
       <RadiusSelector
         radiusMeters={radiusMeters}
         onRadiusMetersChange={onRadiusMetersChange}
       />
-      <p style={mutedParagraphStyle}>
-        No catchment demand is available for the current filters.
-      </p>
+      <p style={mutedParagraphStyle}>{tx("No catchment demand is available for the current filters.")}</p>
     </section>
   );
 }
@@ -287,6 +284,7 @@ function CatchmentSection({
   selectedBusLines,
   onAddRouteFromNode
 }) {
+  const { tx } = useI18n();
   return (
     <section style={subSectionStyle}>
       <RadiusSelector
@@ -294,29 +292,26 @@ function CatchmentSection({
         onRadiusMetersChange={onRadiusMetersChange}
         catchmentLoading={catchmentLoading}
       />
-      <p style={mutedParagraphStyle}>
-        Catchment demand is radius-based and is not clipped by selected
-        administrative districts.
-      </p>
+      <p style={mutedParagraphStyle}>{tx("Catchment demand is radius-based and is not clipped by selected administrative districts.")}</p>
       {showCatchmentSummary && (
         <dl style={definitionGridStyle}>
-          <dt>Nodes</dt>
+          <dt>{tx("Nodes")}</dt>
           <dd style={definitionValueStyle}>
             {(catchment.nodes || []).length.toLocaleString()}
           </dd>
-          <dt>Routes</dt>
+          <dt>{tx("Routes")}</dt>
           <dd style={definitionValueStyle}>
             {(catchment.routes || []).length.toLocaleString()}
           </dd>
-          <dt>Boarding</dt>
+          <dt>{tx("Boarding")}</dt>
           <dd style={definitionValueStyle}>
             {Number(catchment.boarding || 0).toLocaleString()}
           </dd>
-          <dt>Alighting</dt>
+          <dt>{tx("Alighting")}</dt>
           <dd style={definitionValueStyle}>
             {Number(catchment.alighting || 0).toLocaleString()}
           </dd>
-          <dt>Total</dt>
+          <dt>{tx("Total")}</dt>
           <dd style={definitionValueStyle}>
             {Number(catchment.total || 0).toLocaleString()}
           </dd>
@@ -326,7 +321,7 @@ function CatchmentSection({
       {showRoutes && (
         <RouteList
           routes={routes}
-          title="Routes in radius"
+          title={tx("Routes in radius")}
           selectedSubwayLines={selectedSubwayLines}
           selectedBusLines={selectedBusLines}
           onAddRouteFromNode={onAddRouteFromNode}
@@ -340,6 +335,7 @@ function CatchmentSection({
  * Renders the radius radio control.
  */
 function RadiusSelector({ radiusMeters, onRadiusMetersChange, catchmentLoading }) {
+  const { tx } = useI18n();
   return (
     <div
       style={{
@@ -349,7 +345,7 @@ function RadiusSelector({ radiusMeters, onRadiusMetersChange, catchmentLoading }
         flexWrap: "wrap"
       }}
     >
-      <strong>Catchment radius</strong>
+      <strong>{tx("Catchment radius")}</strong>
       <fieldset
         style={{
           display: "flex",
@@ -360,7 +356,7 @@ function RadiusSelector({ radiusMeters, onRadiusMetersChange, catchmentLoading }
           margin: 0
         }}
       >
-        <legend style={visuallyHiddenStyle}>Catchment radius</legend>
+        <legend style={visuallyHiddenStyle}>{tx("Catchment radius")}</legend>
         {[400, 800, 1000].map((radius) => (
           <label
             key={radius}
@@ -377,7 +373,7 @@ function RadiusSelector({ radiusMeters, onRadiusMetersChange, catchmentLoading }
           </label>
         ))}
       </fieldset>
-      {catchmentLoading && <span>Updating catchment...</span>}
+      {catchmentLoading && <span>{tx("Updating catchment...")}</span>}
     </div>
   );
 }
@@ -386,20 +382,19 @@ function RadiusSelector({ radiusMeters, onRadiusMetersChange, catchmentLoading }
  * Renders the nearby nodes list with distance and total.
  */
 function NodeList({ nodes }) {
+  const { tx } = useI18n();
   if (nodes.length === 0) {
     return (
-      <p style={mutedParagraphStyle}>
-        No nearby nodes found for the selected radius.
-      </p>
+      <p style={mutedParagraphStyle}>{tx("No nearby nodes found for the selected radius.")}</p>
     );
   }
   return (
     <div style={{ marginTop: "10px" }}>
-      <strong>Nearby nodes</strong>
+      <strong>{tx("Nearby nodes")}</strong>
       <ol style={scrollListStyle}>
         {nodes.slice(0, 60).map((node) => (
           <li key={`${node.mode}-${node.nodeId}-${node.distanceMeters}`}>
-            [{node.mode}] {node.nodeName} —{" "}
+            <span className="tag">{modeName(tx, node.mode)}</span> {node.nodeName} —{" "}
             {Math.round(Number(node.distanceMeters || 0)).toLocaleString()}m —{" "}
             {Number(node.total || 0).toLocaleString()}
           </li>
@@ -414,21 +409,20 @@ function NodeList({ nodes }) {
  */
 function RouteList({
   routes,
-  title = "Route breakdown",
+  title,
   selectedSubwayLines = [],
   selectedBusLines = [],
   onAddRouteFromNode
 }) {
+  const { tx } = useI18n();
   if (routes.length === 0) {
     return (
-      <p style={mutedParagraphStyle}>
-        No route demand is available for this selection.
-      </p>
+      <p style={mutedParagraphStyle}>{tx("No route demand is available for this selection.")}</p>
     );
   }
   return (
     <div style={{ marginTop: "10px" }}>
-      <strong>{title}</strong>
+      <strong>{title || tx("Route breakdown")}</strong>
       <ol style={scrollListStyle}>
         {routes.slice(0, 60).map((route) => {
           const isSelected = isRouteSelected(
@@ -438,16 +432,18 @@ function RouteList({
           );
           return (
             <li key={`${route.mode}-${route.serviceId}`}>
-              [{route.mode}] {route.serviceId} —{" "}
-              {Number(route.total || 0).toLocaleString()} (board{" "}
-              {Number(route.boarding || 0).toLocaleString()} / alight{" "}
-              {Number(route.alighting || 0).toLocaleString()}){" "}
+              <span className="tag">{modeName(tx, route.mode)}</span> {route.serviceId} —{" "}
+              {tx("{total} (on {on} / off {off})", {
+                total: Number(route.total || 0).toLocaleString(),
+                on: Number(route.boarding || 0).toLocaleString(),
+                off: Number(route.alighting || 0).toLocaleString()
+              })}{" "}
               <button
                 type="button"
                 onClick={() => onAddRouteFromNode?.(route)}
                 disabled={isSelected}
               >
-                {isSelected ? "Already selected" : "Add to selected routes"}
+                {isSelected ? tx("Already selected") : tx("Add to selected routes")}
               </button>
             </li>
           );
@@ -470,19 +466,26 @@ function isRouteSelected(route, selectedSubwayLines, selectedBusLines) {
   return false;
 }
 
+/** Mode name in the interface language, or the raw mode. */
+function modeName(tx, mode) {
+  const names = { subway: "Subway", bus: "Bus", ferry: "Han River bus" };
+  return names[mode] ? tx(names[mode]) : mode || tx("Unknown");
+}
+
 function formatCoordinate(value) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(6) : "Unknown";
+  return Number.isFinite(numeric) ? numeric.toFixed(6) : "-";
 }
 
 const panelStyle = {
-  margin: "12px 16px",
-  padding: "12px 14px",
-  border: "1px solid #dddddd",
-  borderRadius: "10px",
-  backgroundColor: "#ffffff",
+  display: "grid",
+  gap: "4px",
+  padding: "18px 20px",
+  border: "1px solid var(--rule)",
+  borderRadius: "var(--radius-panel)",
+  backgroundColor: "var(--surface)",
   fontSize: "14px",
-  lineHeight: 1.5
+  lineHeight: 1.6
 };
 
 const headerStyle = {
@@ -495,26 +498,30 @@ const headerStyle = {
 
 const subSectionStyle = {
   marginTop: "14px",
-  paddingTop: "12px",
-  borderTop: "1px solid #eeeeee"
+  paddingTop: "14px",
+  borderTop: "1px solid var(--rule)"
 };
 
 const definitionGridStyle = {
   display: "grid",
   gridTemplateColumns: "max-content 1fr",
-  gap: "6px 12px",
-  margin: "10px 0 0"
+  gap: "6px 16px",
+  margin: "10px 0 0",
+  fontVariantNumeric: "tabular-nums"
 };
 
 const definitionValueStyle = { margin: 0 };
 
-const mutedParagraphStyle = { margin: "6px 0 0", color: "#555555" };
+const mutedParagraphStyle = { margin: "6px 0 0", color: "var(--muted)", fontSize: "13px" };
 
 const scrollListStyle = {
-  maxHeight: "180px",
+  maxHeight: "280px",
   overflowY: "auto",
-  margin: "6px 0 0",
-  paddingRight: "12px"
+  margin: "8px 0 0",
+  paddingLeft: "20px",
+  paddingRight: "8px",
+  display: "grid",
+  gap: "6px"
 };
 
 const visuallyHiddenStyle = {

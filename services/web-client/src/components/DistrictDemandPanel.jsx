@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/I18nProvider.jsx";
 import { useMemo, useState } from "react";
 
 import {
@@ -24,6 +25,7 @@ export default function DistrictDemandPanel({
   selectedBusLines = [],
   onAddRouteFromNode
 }) {
+  const { tx } = useI18n();
   const [routeSortKey, setRouteSortKey] = useState("totalDesc");
   const [nodeSortKey, setNodeSortKey] = useState("totalDesc");
 
@@ -47,36 +49,27 @@ export default function DistrictDemandPanel({
     <section className="district-demand-panel" style={panelStyle}>
       <div style={headerStyle}>
         <div>
-          <strong>District-centered demand</strong>
+          <strong>{tx("District-centered demand")}</strong>
           <p style={mutedParagraphStyle}>
-            {districtNames} — node activity inside selected administrative
-            polygons, not district-to-district OD flow.
+            {tx("{names}: boarding and alighting at stops inside the chosen districts, not district-to-district OD.", { names: districtNames })}
           </p>
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           {errorMessage && (
-            <button type="button" onClick={onRetry}>
-              Retry district demand
-            </button>
+            <button type="button" onClick={onRetry}>{tx("Retry district demand")}</button>
           )}
-          <button type="button" onClick={onClear}>
-            Clear districts
-          </button>
+          <button type="button" onClick={onClear}>{tx("Clear districts")}</button>
         </div>
       </div>
 
       {!filtersApplied && (
-        <p style={mutedParagraphStyle}>
-          Select day/hour filters and click Load demand first. District demand
-          does not require selected routes, but it uses the applied analysis
-          filters.
-        </p>
+        <p style={mutedParagraphStyle}>{tx("Select day/hour filters and click Load demand first. District demand does not require selected routes, but it uses the applied analysis filters.")}</p>
       )}
 
-      {filtersApplied && loading && <p style={mutedParagraphStyle}>Loading district demand...</p>}
+      {filtersApplied && loading && <p style={mutedParagraphStyle}>{tx("Loading district demand...")}</p>}
 
       {filtersApplied && errorMessage && (
-        <p style={errorTextStyle}>District demand error: {errorMessage}</p>
+        <p style={errorTextStyle}>{tx("District demand error: {message}", { message: errorMessage })}</p>
       )}
 
       {filtersApplied && !loading && !errorMessage && districtDemand && (
@@ -111,28 +104,31 @@ export default function DistrictDemandPanel({
  * mismatch between the GeoJSON layer and the DB.
  */
 function UnmatchedDistrictWarning({ unmatchedDistrictCodes }) {
+  const { tx } = useI18n();
   if (unmatchedDistrictCodes.length === 0) return null;
 
   return (
     <p style={warningTextStyle}>
-      Warning: {unmatchedDistrictCodes.length} selected district code
-      {unmatchedDistrictCodes.length === 1 ? "" : "s"} matched no boundary row
-      and {unmatchedDistrictCodes.length === 1 ? "is" : "are"} excluded from
-      totals: {unmatchedDistrictCodes.join(", ")}. Check for a code-system
-      mismatch between the map layer and the database.
+      {tx("Warning: {count} chosen district codes matched no boundary and are left out of the totals: {codes}. The map layer and the database may use different code systems.", {
+        count: unmatchedDistrictCodes.length,
+        codes: unmatchedDistrictCodes.join(", ")
+      })}
     </p>
   );
 }
 
 /** Renders aggregate district totals. */
 function DistrictSummary({ districtDemand }) {
+  const { tx } = useI18n();
   return (
     <section style={subSectionStyle}>
-      <strong>All routes inside selected district(s)</strong>
+      <strong>{tx("All routes inside selected district(s)")}</strong>
       <div style={{ marginTop: "6px" }}>
-        Boarding: {Number(districtDemand.boarding || 0).toLocaleString()} |
-        Alighting: {Number(districtDemand.alighting || 0).toLocaleString()} | Total:{" "}
-        {Number(districtDemand.total || 0).toLocaleString()}
+        {tx("Boarding {on} | Alighting {off} | Total {total}", {
+          on: Number(districtDemand.boarding || 0).toLocaleString(),
+          off: Number(districtDemand.alighting || 0).toLocaleString(),
+          total: Number(districtDemand.total || 0).toLocaleString()
+        })}
       </div>
     </section>
   );
@@ -140,17 +136,21 @@ function DistrictSummary({ districtDemand }) {
 
 /** Renders bus/subway totals.*/
 function ModeBreakdown({ modes }) {
+  const { tx } = useI18n();
   if (modes.length === 0) return null;
 
   return (
     <section style={subSectionStyle}>
-      <strong>Mode breakdown</strong>
+      <strong>{tx("Mode breakdown")}</strong>
       <ul style={compactListStyle}>
         {modes.map((mode) => (
           <li key={mode.mode}>
-            [{mode.mode}] {Number(mode.total || 0).toLocaleString()} (board{" "}
-            {Number(mode.boarding || 0).toLocaleString()} / alight{" "}
-            {Number(mode.alighting || 0).toLocaleString()})
+            <span className="tag">{modeName(tx, mode.mode)}</span>{" "}
+            {tx("{total} (on {on} / off {off})", {
+              total: Number(mode.total || 0).toLocaleString(),
+              on: Number(mode.boarding || 0).toLocaleString(),
+              off: Number(mode.alighting || 0).toLocaleString()
+            })}
           </li>
         ))}
       </ul>
@@ -167,20 +167,23 @@ function RouteBreakdown({
   selectedBusLines,
   onAddRouteFromNode
 }) {
+  const { tx } = useI18n();
   return (
     <section style={subSectionStyle}>
       <div style={toolbarStyle}>
-        <strong>Routes inside district</strong>
+        <strong>{tx("Routes inside district")}</strong>
         <SortSelect value={sortKey} onChange={onSortKeyChange} type="route" />
       </div>
       {routes.length === 0 ? (
-        <p style={mutedParagraphStyle}>No route demand is available for this district.</p>
+        <p style={mutedParagraphStyle}>{tx("No route demand is available for this district.")}</p>
       ) : (
         <>
           {routes.length > ROUTE_DISPLAY_LIMIT && (
             <p style={mutedParagraphStyle}>
-              Showing top {ROUTE_DISPLAY_LIMIT.toLocaleString()} of{" "}
-              {routes.length.toLocaleString()} routes by the current sort.
+              {tx("Showing the first {shown} of {all} routes in the current order.", {
+                shown: ROUTE_DISPLAY_LIMIT.toLocaleString(),
+                all: routes.length.toLocaleString()
+              })}
             </p>
           )}
         <ol style={scrollListStyle}>
@@ -188,15 +191,18 @@ function RouteBreakdown({
             const isSelected = isRouteSelected(route, selectedSubwayLines, selectedBusLines);
             return (
               <li key={`${route.mode}-${route.serviceId}`}>
-                [{route.mode}] {route.serviceId} — {Number(route.total || 0).toLocaleString()}{" "}
-                (board {Number(route.boarding || 0).toLocaleString()} / alight{" "}
-                {Number(route.alighting || 0).toLocaleString()}){" "}
+                <span className="tag">{modeName(tx, route.mode)}</span> {route.serviceId} —{" "}
+                {tx("{total} (on {on} / off {off})", {
+                  total: Number(route.total || 0).toLocaleString(),
+                  on: Number(route.boarding || 0).toLocaleString(),
+                  off: Number(route.alighting || 0).toLocaleString()
+                })}{" "}
                 <button
                   type="button"
                   onClick={() => onAddRouteFromNode?.(route)}
                   disabled={isSelected}
                 >
-                  {isSelected ? "Already selected" : "Add to selected routes"}
+                  {isSelected ? tx("Already selected") : tx("Add to selected routes")}
                 </button>
               </li>
             );
@@ -216,6 +222,7 @@ function RouteBreakdown({
  * NODE_DISPLAY_LIMIT rows. Both are surfaced so users know rows are cut.
  */
 function NodeBreakdown({ nodes, totalNodeCount, sortKey, onSortKeyChange }) {
+  const { tx } = useI18n();
   const shownCount = Math.min(nodes.length, NODE_DISPLAY_LIMIT);
   const fullCount = Math.max(Number(totalNodeCount || 0), nodes.length);
   const isTruncated = shownCount < fullCount;
@@ -223,27 +230,30 @@ function NodeBreakdown({ nodes, totalNodeCount, sortKey, onSortKeyChange }) {
   return (
     <section style={subSectionStyle}>
       <div style={toolbarStyle}>
-        <strong>Nodes inside district</strong>
+        <strong>{tx("Nodes inside district")}</strong>
         <SortSelect value={sortKey} onChange={onSortKeyChange} type="node" />
       </div>
       {nodes.length === 0 ? (
-        <p style={mutedParagraphStyle}>No stop or station demand is available for this district.</p>
+        <p style={mutedParagraphStyle}>{tx("No stop or station demand is available for this district.")}</p>
       ) : (
         <>
           {isTruncated && (
             <p style={mutedParagraphStyle}>
-              Showing top {shownCount.toLocaleString()} of{" "}
-              {fullCount.toLocaleString()} route-node rows. Totals above are
-              computed from all rows.
+              {tx("Showing the first {shown} of {all} route-stop rows. The totals above use every row.", {
+                shown: shownCount.toLocaleString(),
+                all: fullCount.toLocaleString()
+              })}
             </p>
           )}
         <ol style={scrollListStyle}>
           {nodes.slice(0, NODE_DISPLAY_LIMIT).map((node) => (
             <li key={`${node.mode}-${node.serviceId}-${node.nodeId}`}>
-              [{node.mode}] {node.serviceId} / {node.nodeName} ({node.nodeId}) —{" "}
-              {Number(node.total || 0).toLocaleString()} (board{" "}
-              {Number(node.boarding || 0).toLocaleString()} / alight{" "}
-              {Number(node.alighting || 0).toLocaleString()})
+              <span className="tag">{modeName(tx, node.mode)}</span> {node.serviceId} / {node.nodeName} ({node.nodeId}) —{" "}
+              {tx("{total} (on {on} / off {off})", {
+                total: Number(node.total || 0).toLocaleString(),
+                on: Number(node.boarding || 0).toLocaleString(),
+                off: Number(node.alighting || 0).toLocaleString()
+              })}
             </li>
           ))}
         </ol>
@@ -255,25 +265,26 @@ function NodeBreakdown({ nodes, totalNodeCount, sortKey, onSortKeyChange }) {
 
 /** Renders a small sort selector. */
 function SortSelect({ value, onChange, type }) {
+  const { tx } = useI18n();
   return (
     <label style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-      Sort
+      {tx("Sort")}
       <select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="totalDesc">Total ↓</option>
-        <option value="totalAsc">Total ↑</option>
-        <option value="boardingDesc">Boarding ↓</option>
-        <option value="alightingDesc">Alighting ↓</option>
+        <option value="totalDesc">{tx("Total ↓")}</option>
+        <option value="totalAsc">{tx("Total ↑")}</option>
+        <option value="boardingDesc">{tx("Boarding ↓")}</option>
+        <option value="alightingDesc">{tx("Alighting ↓")}</option>
         {type === "route" ? (
           <>
-            <option value="routeAsc">Route ↑</option>
-            <option value="routeDesc">Route ↓</option>
+            <option value="routeAsc">{tx("Route ↑")}</option>
+            <option value="routeDesc">{tx("Route ↓")}</option>
           </>
         ) : (
           <>
-            <option value="nameAsc">Name ↑</option>
-            <option value="nameDesc">Name ↓</option>
-            <option value="routeAsc">Route ↑</option>
-            <option value="routeDesc">Route ↓</option>
+            <option value="nameAsc">{tx("Name ↑")}</option>
+            <option value="nameDesc">{tx("Name ↓")}</option>
+            <option value="routeAsc">{tx("Route ↑")}</option>
+            <option value="routeDesc">{tx("Route ↓")}</option>
           </>
         )}
       </select>
@@ -286,6 +297,12 @@ function SortSelect({ value, onChange, type }) {
  * than silently falling back to the bus list, so a future third mode cannot
  * be mislabeled as already selected.
  */
+/** Mode name in the interface language, or the raw mode. */
+function modeName(tx, mode) {
+  const names = { subway: "Subway", bus: "Bus", ferry: "Han River bus" };
+  return names[mode] ? tx(names[mode]) : mode || tx("Unknown");
+}
+
 function isRouteSelected(route, selectedSubwayLines, selectedBusLines) {
   if (route.mode === "subway") return selectedSubwayLines.includes(route.serviceId);
   if (route.mode === "bus") return selectedBusLines.includes(route.serviceId);
@@ -293,13 +310,14 @@ function isRouteSelected(route, selectedSubwayLines, selectedBusLines) {
 }
 
 const panelStyle = {
-  margin: "12px 16px",
-  padding: "12px 14px",
-  border: "1px solid #dddddd",
-  borderRadius: "10px",
-  backgroundColor: "#ffffff",
+  display: "grid",
+  gap: "4px",
+  padding: "18px 20px",
+  border: "1px solid var(--rule)",
+  borderRadius: "var(--radius-panel)",
+  backgroundColor: "var(--surface)",
   fontSize: "14px",
-  lineHeight: 1.5
+  lineHeight: 1.6
 };
 
 const headerStyle = {
@@ -311,9 +329,9 @@ const headerStyle = {
 };
 
 const subSectionStyle = {
-  marginTop: "12px",
-  paddingTop: "10px",
-  borderTop: "1px solid #eeeeee"
+  marginTop: "14px",
+  paddingTop: "14px",
+  borderTop: "1px solid var(--rule)"
 };
 
 const toolbarStyle = {
@@ -325,31 +343,34 @@ const toolbarStyle = {
 };
 
 const compactListStyle = {
-  margin: "6px 0 0",
-  paddingLeft: "20px"
+  margin: "8px 0 0",
+  paddingLeft: "20px",
+  display: "grid",
+  gap: "4px"
 };
 
 const scrollListStyle = {
   maxHeight: "280px",
   overflowY: "auto",
-  paddingRight: "12px"
+  margin: "8px 0 0",
+  paddingLeft: "20px",
+  paddingRight: "8px",
+  display: "grid",
+  gap: "6px"
 };
 
-const mutedParagraphStyle = {
-  margin: "4px 0 0",
-  color: "#666666"
-};
+const mutedParagraphStyle = { margin: "6px 0 0", color: "var(--muted)", fontSize: "13px" };
 
 const errorTextStyle = {
   margin: "8px 0 0",
-  color: "#9b1c1c"
+  color: "var(--danger)"
 };
 
 const warningTextStyle = {
   margin: "10px 0 0",
-  padding: "6px 10px",
+  padding: "8px 12px",
   color: "#7a4a00",
-  backgroundColor: "#fff7e0",
-  border: "1px solid #f0c060",
-  borderRadius: "6px"
+  backgroundColor: "#fff4e0",
+  borderLeft: "3px solid var(--selected)",
+  borderRadius: "4px"
 };

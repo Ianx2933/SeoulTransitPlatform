@@ -1,88 +1,37 @@
 import { useMemo, useState } from "react";
+
+import { useI18n } from "../i18n/I18nProvider.jsx";
+import { busRouteStyle } from "../utils/busRouteType.js";
 import NodeSearchPanel from "./NodeSearchPanel.jsx";
 
-/**
- * Supported day type options.
- */
-const DAY_TYPE_OPTIONS = [
-  { value: "mon", label: "Monday" },
-  { value: "tue", label: "Tuesday" },
-  { value: "wed", label: "Wednesday" },
-  { value: "thu", label: "Thursday" },
-  { value: "fri", label: "Friday" },
-  { value: "sat", label: "Saturday" },
-  { value: "sun_holiday", label: "Sunday / Holiday" }
-];
+/** Supported day types, in week order. */
+const DAY_TYPES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun_holiday"];
 
-/**
- * Day type presets for fast multi-day selection.
- */
+/** Day type presets for fast multi-day selection. */
 const DAY_TYPE_PRESETS = [
-  { value: "mon", label: "Monday", dayTypes: ["mon"] },
-  { value: "tue", label: "Tuesday", dayTypes: ["tue"] },
-  { value: "wed", label: "Wednesday", dayTypes: ["wed"] },
-  { value: "thu", label: "Thursday", dayTypes: ["thu"] },
-  { value: "fri", label: "Friday", dayTypes: ["fri"] },
-  {
-    value: "weekdays",
-    label: "Weekdays",
-    dayTypes: ["mon", "tue", "wed", "thu", "fri"]
-  },
-  {
-    value: "weekend",
-    label: "Weekend / Holiday",
-    dayTypes: ["sat", "sun_holiday"]
-  },
-  {
-    value: "all",
-    label: "All days",
-    dayTypes: ["mon", "tue", "wed", "thu", "fri", "sat", "sun_holiday"]
-  },
-  { value: "custom", label: "Custom", dayTypes: [] }
+  { value: "mon", dayTypes: ["mon"] },
+  { value: "tue", dayTypes: ["tue"] },
+  { value: "wed", dayTypes: ["wed"] },
+  { value: "thu", dayTypes: ["thu"] },
+  { value: "fri", dayTypes: ["fri"] },
+  { value: "weekdays", dayTypes: ["mon", "tue", "wed", "thu", "fri"] },
+  { value: "weekend", dayTypes: ["sat", "sun_holiday"] },
+  { value: "all", dayTypes: DAY_TYPES },
+  { value: "custom", dayTypes: [] }
 ];
 
-/**
- * Supported day aggregation options.
- */
-const DAY_AGGREGATION_OPTIONS = [
-  {
-    value: "average",
-    label: "Average per selected day"
-  },
-  {
-    value: "sum",
-    label: "Sum of selected days"
-  }
-];
+const DAY_AGGREGATIONS = ["average", "sum"];
+const METRICS = ["total", "boarding", "alighting"];
+const ROUTE_LIST_LIMIT = 30;
+
+const pad2 = (h) => String(h).padStart(2, "0");
 
 /**
- * Supported metric options.
- */
-const METRIC_OPTIONS = [
-  { value: "total", label: "Total" },
-  { value: "boarding", label: "Boarding" },
-  { value: "alighting", label: "Alighting" }
-];
-
-/**
- * Supported Leaflet tile layer options.
+ * Filters for the demand map. It only collects the user's choices; the map
+ * changes when the user presses Load demand.
  *
- * The CARTO entries were removed because selecting them produced a watermarked
- * basemap: CARTO's CDN now requires an API key. Keep this list in sync with
- * TILE_LAYERS in TransitDemandMap.jsx — an option listed here that has no
- * matching entry there silently falls back to OpenStreetMap, so the dropdown
- * would appear to do nothing.
- */
-const TILE_LAYER_OPTIONS = [
-  { value: "osm", label: "OpenStreetMap" }
-];
-
-/**
- * Control panel for multi-mode demand exploration.
-
- * This component is responsible for letting the user select filters and Load demand data
-
- * It only lets the user select filters and explicitly request loading.
+ * The basemap picker was removed from the screen because only OpenStreetMap
+ * is left (CARTO now needs an API key); selectedTileLayer stays "osm".
  */
 export default function DemandControlPanel({
   dayTypePreset,
@@ -112,426 +61,222 @@ export default function DemandControlPanel({
   hasAppliedFilters,
   showAdminBoundary,
   setShowAdminBoundary,
-  selectedTileLayer,
-  setSelectedTileLayer,
   onSelectSearchNode
 }) {
-  /**
-   * Local search keywords for each route selector.
-   */
+  const { t } = useI18n();
   const [subwayLineSearch, setSubwayLineSearch] = useState("");
   const [busLineSearch, setBusLineSearch] = useState("");
 
-  /**
-   * Applies a predefined day type preset.
-   */
-  const handleDayTypePresetChange = (event) => {
-    const nextPreset = event.target.value;
-    const preset = DAY_TYPE_PRESETS.find((item) => item.value === nextPreset);
-
-    setDayTypePreset(nextPreset);
-
-    if (preset && nextPreset !== "custom") {
+  const handlePresetChange = (event) => {
+    const next = event.target.value;
+    const preset = DAY_TYPE_PRESETS.find((item) => item.value === next);
+    setDayTypePreset(next);
+    if (preset && next !== "custom") {
       setSelectedDayTypes(preset.dayTypes);
     }
   };
 
-  /**
-   * Toggles one day type in custom mode.
-   */
   const toggleDayType = (dayType) => {
     setDayTypePreset("custom");
-    setSelectedDayTypes((currentDayTypes) => {
-      if (currentDayTypes.includes(dayType)) {
-        return currentDayTypes.filter((value) => value !== dayType);
-      }
-
-      return [...currentDayTypes, dayType];
-    });
-  };
-
-  /**
-   * Filters route candidates by the user's keyword.
-   */
-  const filterLines = (lines, keyword) => {
-    const normalizedKeyword = keyword.trim().toLowerCase();
-
-    if (!normalizedKeyword) {
-      return lines.slice(0, 30);
-    }
-
-    return lines
-      .filter((lineName) =>
-        String(lineName).toLowerCase().includes(normalizedKeyword)
-      )
-      .slice(0, 30);
-  };
-
-  const filteredSubwayLines = useMemo(() => {
-    return filterLines(subwayLines, subwayLineSearch);
-  }, [subwayLines, subwayLineSearch]);
-
-  const filteredBusLines = useMemo(() => {
-    return filterLines(busLines, busLineSearch);
-  }, [busLines, busLineSearch]);
-
-  /**
-   * Adds a route to the selected route chips.
-   */
-  const addLine = (lineName, selectedLines, setSelectedLines) => {
-    setSelectedLines((currentLines) => {
-      if (currentLines.includes(lineName)) {
-        return currentLines;
-      }
-
-      return [...currentLines, lineName];
-    });
-  };
-
-  /**
-   * Removes a route from the selected route chips.
-   */
-  const removeLine = (lineName, setSelectedLines) => {
-    setSelectedLines((currentLines) =>
-      currentLines.filter((value) => value !== lineName)
+    setSelectedDayTypes((current) =>
+      current.includes(dayType) ? current.filter((v) => v !== dayType) : [...current, dayType]
     );
   };
 
-  /**
-   * Renders one route selector section.
-   */
-  const renderRouteSelector = ({
-    title,
-    searchValue,
-    setSearchValue,
-    searchPlaceholder,
-    loading,
-    error,
-    lines,
-    selectedLines,
-    setSelectedLines
-  }) => {
-    return (
-      <section
-        className="route-tag-selector"
-        style={{
-          marginTop: "12px",
-          padding: "12px",
-          border: "1px solid #dddddd",
-          borderRadius: "8px",
-          backgroundColor: "#fafafa"
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            alignItems: "center",
-            flexWrap: "wrap"
-          }}
-        >
-          <strong>{title}</strong>
+  const filterLines = (lines, keyword) => {
+    const k = keyword.trim().toLowerCase();
+    const matched = k ? lines.filter((name) => String(name).toLowerCase().includes(k)) : lines;
+    return matched.slice(0, ROUTE_LIST_LIMIT);
+  };
 
-          <label>
-            Route Search
-            <input
-              type="text"
-              value={searchValue}
-              onChange={(event) => setSearchValue(event.target.value)}
-              placeholder={searchPlaceholder}
-              disabled={loading}
-              style={{
-                marginLeft: "8px",
-                padding: "6px 8px"
-              }}
-            />
-          </label>
+  const filteredSubwayLines = useMemo(
+    () => filterLines(subwayLines, subwayLineSearch),
+    [subwayLines, subwayLineSearch]
+  );
+  const filteredBusLines = useMemo(() => filterLines(busLines, busLineSearch), [busLines, busLineSearch]);
 
+  const routeLoading = subwayLineLoading || busLineLoading;
+  const selectedRouteCount = selectedSubwayLines.length + selectedBusLines.length;
+  const canLoad = selectedRouteCount > 0 && selectedDayTypes.length > 0 && !routeLoading;
+
+  return (
+    <section className="filter-panel" aria-labelledby="map-title">
+      <header className="filter-panel__head">
+        <h1 id="map-title" className="page-title">{t("map.title")}</h1>
+        <p className="note">{t("map.intro")}</p>
+      </header>
+
+      <div className="filter-grid">
+        <label className="field">
+          <span>{t("map.presets.label")}</span>
+          <select value={dayTypePreset} onChange={handlePresetChange}>
+            {DAY_TYPE_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>{t(`map.presets.${p.value}`)}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>{t("map.aggregation.label")}</span>
+          <select value={dayAggregation} onChange={(e) => setDayAggregation(e.target.value)}>
+            {DAY_AGGREGATIONS.map((v) => (
+              <option key={v} value={v}>{t(`map.aggregation.${v}`)}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>{t("map.metric.label")}</span>
+          <select value={metric} onChange={(e) => setMetric(e.target.value)}>
+            {METRICS.map((v) => (
+              <option key={v} value={v}>{t(`map.metric.${v}`)}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field field--range">
+          <span className="num">{t("map.hours.start", { hour: pad2(startHour) })}</span>
+          <input type="range" min="0" max="23" value={startHour} onChange={(e) => setStartHour(Number(e.target.value))} />
+        </label>
+
+        <label className="field field--range">
+          <span className="num">{t("map.hours.end", { hour: pad2(endHour) })}</span>
+          <input type="range" min="0" max="23" value={endHour} onChange={(e) => setEndHour(Number(e.target.value))} />
+        </label>
+
+        <label className="check">
+          <input type="checkbox" checked={showAdminBoundary} onChange={(e) => setShowAdminBoundary(e.target.checked)} />
+          {t("map.boundary")}
+        </label>
+      </div>
+
+      <fieldset className="day-chips">
+        <legend>{t("map.customDays")}</legend>
+        {DAY_TYPES.map((d) => (
           <button
+            key={d}
             type="button"
-            onClick={() => setSelectedLines([])}
-            disabled={selectedLines.length === 0}
+            className="chip"
+            aria-pressed={selectedDayTypes.includes(d)}
+            onClick={() => toggleDayType(d)}
           >
-            Clear routes
+            {t(`map.days.${d}`)}
           </button>
+        ))}
+      </fieldset>
 
-          {loading && <span>Loading routes...</span>}
-          {!loading && error && <span>{error}</span>}
-        </div>
+      <NodeSearchPanel onSelectNode={onSelectSearchNode} />
 
-        <div
-          style={{
-            display: "flex",
-            gap: "6px",
-            flexWrap: "wrap",
-            marginTop: "10px"
-          }}
-        >
-          {selectedLines.map((lineName) => (
-            <button
-              key={lineName}
-              type="button"
-              onClick={() => removeLine(lineName, setSelectedLines)}
-              title="Remove selected route"
-              style={{
-                border: "1px solid #999999",
-                borderRadius: "999px",
-                padding: "4px 10px",
-                backgroundColor: "#ffffff",
-                cursor: "pointer"
-              }}
-            >
-              {lineName} ×
-            </button>
-          ))}
-        </div>
+      <div className="sub-card">
+        <h2 className="section-title">{t("map.districtTitle")}</h2>
+        <p className="note">{t("map.districtNote")}</p>
+      </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: "6px",
-            flexWrap: "wrap",
-            marginTop: "10px",
-            maxHeight: "120px",
-            overflowY: "auto"
-          }}
-        >
-          {lines.map((lineName) => {
-            const selected = selectedLines.includes(lineName);
+      <RouteSelector
+        title={t("map.routes.subway")}
+        placeholder={t("map.routes.subwayPlaceholder")}
+        search={subwayLineSearch}
+        setSearch={setSubwayLineSearch}
+        loading={subwayLineLoading}
+        error={subwayLineError}
+        lines={filteredSubwayLines}
+        selected={selectedSubwayLines}
+        setSelected={setSelectedSubwayLines}
+      />
 
+      <RouteSelector
+        title={t("map.routes.bus")}
+        placeholder={t("map.routes.busPlaceholder")}
+        search={busLineSearch}
+        setSearch={setBusLineSearch}
+        loading={busLineLoading}
+        error={busLineError}
+        lines={filteredBusLines}
+        selected={selectedBusLines}
+        setSelected={setSelectedBusLines}
+        styleFor={(name) => busRouteStyle(name)}
+      />
+
+      <div className="load-row">
+        <button type="button" className="button button--primary" onClick={onLoadDemand} disabled={!canLoad}>
+          {t("map.load")}
+        </button>
+        <span role="status" className={filterError ? "field-error" : "note"}>
+          {filterError
+            ? t(`map.error.${filterError}`)
+            : hasAppliedFilters
+              ? t("map.status.loaded")
+              : t("map.status.empty")}
+        </span>
+        <span className="note num">
+          {t("map.counts", {
+            subway: selectedSubwayLines.length,
+            bus: selectedBusLines.length,
+            days: selectedDayTypes.length
+          })}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/** One route picker: search box, chosen routes, and up to 30 matches. */
+function RouteSelector({ title, placeholder, search, setSearch, loading, error, lines, selected, setSelected, styleFor }) {
+  const { t } = useI18n();
+  const add = (name) => setSelected((current) => (current.includes(name) ? current : [...current, name]));
+  const remove = (name) => setSelected((current) => current.filter((v) => v !== name));
+
+  return (
+    <section className="sub-card">
+      <div className="route-picker__head">
+        <h2 className="section-title">{title}</h2>
+        <label className="field field--inline">
+          <span>{t("map.routes.search")}</span>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={placeholder}
+            disabled={loading}
+          />
+        </label>
+        <button type="button" className="button" onClick={() => setSelected([])} disabled={selected.length === 0}>
+          {t("map.routes.clear")}
+        </button>
+        {loading && <span className="note">{t("map.routes.loading")}</span>}
+        {!loading && error && <span className="field-error">{error}</span>}
+      </div>
+
+      {selected.length > 0 && (
+        <div className="chip-row">
+          {selected.map((name) => {
+            const style = styleFor ? styleFor(name) : null;
             return (
               <button
-                key={lineName}
+                key={name}
                 type="button"
-                onClick={() =>
-                  addLine(lineName, selectedLines, setSelectedLines)
-                }
-                disabled={selected}
-                style={{
-                  border: "1px solid #cccccc",
-                  borderRadius: "999px",
-                  padding: "4px 10px",
-                  backgroundColor: selected ? "#eeeeee" : "#ffffff",
-                  cursor: selected ? "default" : "pointer"
-                }}
+                className="route-chip route-chip--selected"
+                onClick={() => remove(name)}
+                aria-label={t("map.routes.remove", { name })}
+                style={style ? { background: style.bg, borderColor: style.bg, color: style.fg } : undefined}
               >
-                {lineName}
+                {name} <span aria-hidden="true">×</span>
               </button>
             );
           })}
         </div>
-      </section>
-    );
-  };
+      )}
 
-  const routeLoading = subwayLineLoading || busLineLoading;
-  const selectedRouteCount =
-    selectedSubwayLines.length + selectedBusLines.length;
-
-  return (
-    <section className="control-panel">
-      <div>
-        <h1>Seoul Transit Demand Map</h1>
-        <p>
-          Select subway routes, bus routes, hours, and metrics, then load aggregated demand.
-        </p>
-      </div>
-
-      <div className="control-grid">
-        <label>
-          Day Type Preset
-          <select
-            value={dayTypePreset}
-            onChange={handleDayTypePresetChange}
-          >
-            {DAY_TYPE_PRESETS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Day Aggregation
-          <select
-            value={dayAggregation}
-            onChange={(event) => setDayAggregation(event.target.value)}
-          >
-            {DAY_AGGREGATION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <fieldset
-          style={{
-            border: "1px solid #dddddd",
-            borderRadius: "8px",
-            padding: "8px",
-            margin: 0
-          }}
-        >
-          <legend>Custom day types</legend>
-          <div
-            style={{
-              display: "flex",
-              gap: "8px",
-              flexWrap: "wrap"
-            }}
-          >
-            {DAY_TYPE_OPTIONS.map((option) => (
-              <label
-                key={option.value}
-                style={{
-                  display: "flex",
-                  gap: "4px",
-                  alignItems: "center"
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedDayTypes.includes(option.value)}
-                  onChange={() => toggleDayType(option.value)}
-                />
-                {option.label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <label>
-          Start Hour: {String(startHour).padStart(2, "0")}:00
-          <input
-            type="range"
-            min="0"
-            max="23"
-            value={startHour}
-            onChange={(event) => setStartHour(Number(event.target.value))}
-          />
-        </label>
-
-        <label>
-          End Hour: {String(endHour).padStart(2, "0")}:00
-          <input
-            type="range"
-            min="0"
-            max="23"
-            value={endHour}
-            onChange={(event) => setEndHour(Number(event.target.value))}
-          />
-        </label>
-
-        <label>
-          Metric
-          <select
-            value={metric}
-            onChange={(event) => setMetric(event.target.value)}
-          >
-            {METRIC_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Map tile
-          <select
-            value={selectedTileLayer}
-            onChange={(event) => setSelectedTileLayer(event.target.value)}
-          >
-            {TILE_LAYER_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label
-          style={{
-            display: "flex",
-            gap: "8px",
-            alignItems: "center"
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showAdminBoundary}
-            onChange={(event) => setShowAdminBoundary(event.target.checked)}
-          />
-          Show administrative boundary
-        </label>
-      </div>
-
-      <NodeSearchPanel onSelectNode={onSelectSearchNode} />
-
-      <section style={{ marginTop: "12px", padding: "10px 12px", border: "1px solid #dddddd", borderRadius: "8px", backgroundColor: "#ffffff" }}>
-        <strong>Administrative district analysis</strong>
-        <p style={{ margin: "6px 0 0", color: "#555555" }}>Administrative boundaries are clickable only when the boundary layer is enabled. Selected districts filter the currently loaded map points, while catchment demand remains radius-based.</p>
-      </section>
-
-      {renderRouteSelector({
-        title: "Subway routes",
-        searchValue: subwayLineSearch,
-        setSearchValue: setSubwayLineSearch,
-        searchPlaceholder: "e.g. 2호선",
-        loading: subwayLineLoading,
-        error: subwayLineError,
-        lines: filteredSubwayLines,
-        selectedLines: selectedSubwayLines,
-        setSelectedLines: setSelectedSubwayLines
-      })}
-
-      {renderRouteSelector({
-        title: "Bus routes",
-        searchValue: busLineSearch,
-        setSearchValue: setBusLineSearch,
-        searchPlaceholder: "e.g. 741 or 9401",
-        loading: busLineLoading,
-        error: busLineError,
-        lines: filteredBusLines,
-        selectedLines: selectedBusLines,
-        setSelectedLines: setSelectedBusLines
-      })}
-
-      <div
-        className="status-row"
-        style={{
-          marginTop: "12px",
-          display: "flex",
-          gap: "12px",
-          alignItems: "center",
-          flexWrap: "wrap"
-        }}
-      >
-        <button
-          type="button"
-          onClick={onLoadDemand}
-          disabled={
-            selectedRouteCount === 0 ||
-            selectedDayTypes.length === 0 ||
-            routeLoading
-          }
-        >
-          Load demand
-        </button>
-
-        <span>
-          {filterError && filterError}
-          {!filterError && hasAppliedFilters &&
-            "Demand layer loaded. Change filters and click Load again."}
-          {!filterError && !hasAppliedFilters &&
-            "No demand layer loaded yet."}
-        </span>
-
-        <span>{selectedSubwayLines.length.toLocaleString()} selected subway route(s)</span>
-        <span>{selectedBusLines.length.toLocaleString()} selected bus route(s)</span>
-        <span>{selectedDayTypes.length.toLocaleString()} selected day type(s)</span>
+      <div className="chip-row chip-row--scroll">
+        {lines.map((name) => {
+          const isSelected = selected.includes(name);
+          return (
+            <button key={name} type="button" className="route-chip" onClick={() => add(name)} disabled={isSelected}>
+              {styleFor && <i className="route-chip__dot" style={{ background: styleFor(name).bg }} aria-hidden="true" />}
+              {name}
+            </button>
+          );
+        })}
       </div>
     </section>
   );
