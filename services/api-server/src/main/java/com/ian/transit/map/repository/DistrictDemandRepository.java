@@ -334,9 +334,16 @@ public class DistrictDemandRepository {
     }
 
     /**
-     * Bus demand for the stops in district_bus_stops. The IN list lets the
-     * partial index idx_ihtdl_bus_norm_node_id (LPAD(node_id) where mode = bus)
-     * find the rows directly.
+     * Bus demand for the stops in district_bus_stops.
+     *
+     * Production stores bus node_id as five-digit text ("04102"); other
+     * loads (the PostGIS test data among them) may drop the leading zeros
+     * ("4102"), so node_id is compared bare against both forms. Wrapping it
+     * in LPAD instead made PostgreSQL use the LPAD expression index, which
+     * reads every day and hour of each stop before filtering: about 30 s for
+     * one district on db-f1-micro (2026-11-16). Compared bare, the primary
+     * key (mode, service_id, node_id, day_type, hour) narrows to the chosen
+     * day and hour per stop (skip scan over service_id, PostgreSQL 18).
      */
     private String buildPrimaryBusBranch(
             List<Object> params,
@@ -355,9 +362,8 @@ public class DistrictDemandRepository {
                         CAST(d.alighting AS BIGINT) AS alighting
                     FROM integrated_hourly_transit_demand_light d
                     JOIN district_bus_stops b
-                      ON LPAD(d.node_id::text, 5, '0') = b.stop_key
+                      ON d.node_id = ANY (ARRAY[b.stop_key, LTRIM(b.stop_key, '0')])
                     WHERE d.mode = 'bus'
-                      AND LPAD(d.node_id::text, 5, '0') IN (SELECT stop_key FROM district_bus_stops)
                 """);
 
         DemandSqlSupport.appendInClause(sql, params, "d.day_type", dayTypes);
@@ -387,9 +393,8 @@ public class DistrictDemandRepository {
                     FROM integrated_hourly_transit_demand_light d
                     JOIN district_integrated_stops m
                       ON d.service_id = m.service_id
-                     AND LPAD(d.node_id::text, 5, '0') = m.demand_node_key
+                     AND d.node_id = ANY (ARRAY[m.demand_node_key, LTRIM(m.demand_node_key, '0')])
                     WHERE d.mode = 'bus'
-                      AND LPAD(d.node_id::text, 5, '0') IN (SELECT demand_node_key FROM district_integrated_stops)
                 """);
 
         DemandSqlSupport.appendInClause(sql, params, "d.day_type", dayTypes);
