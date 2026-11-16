@@ -329,3 +329,20 @@
   .map-body .map-card { position: static; }
   .map-body .leaflet-map { height: 60vh; min-height: 360px; }
 }
+
+/* ---------- district OD card on the route map ---------- */
+.dong-card {
+  position: absolute; left: 16px; top: 16px; z-index: 600; width: 300px; max-height: calc(100% - 96px); overflow-y: auto;
+  display: grid; gap: 8px; padding: 14px 16px; background: var(--surface);
+  border: 1px solid var(--rule); border-radius: var(--radius-panel); font-size: 14px;
+}
+.dong-card__head, .dong-card__chosen { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dong-card .flow-list li { display: flex; justify-content: space-between; gap: 8px; }
+.dong-card .flow-list li span + span { float: none; }
+.link-button {
+  padding: 0; border: 0; background: none; color: var(--route-up); font: inherit; text-align: left; cursor: pointer;
+}
+.link-button:hover { text-decoration: underline; }
+@media (max-width: 900px) {
+  .dong-card { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
+}

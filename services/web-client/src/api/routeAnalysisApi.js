@@ -53,3 +53,8 @@ export function fetchRouteStopPoints({ route }) {
     hours: ALL_HOURS
   });
 }
+
+/** The route's OD grouped by administrative district, with boundaries. */
+export function fetchRouteDongOd({ route, dayType, hour, messages }) {
+  return fetchJson(`${base(route)}/dong-od?${routeQuery({ dayType, hour })}`, messages);
+}

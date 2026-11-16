@@ -32,7 +32,8 @@ export default function RouteAnalysisPanel({
   onRouteData,
   onReach,
   onTurnaround,
-  onSegment
+  onSegment,
+  onQuery
 }) {
   const { t, lang } = useI18n();
   const fmt = (value) =>
@@ -65,6 +66,11 @@ export default function RouteAnalysisPanel({
 
   const chart = useMemo(() => buildBarChart(routeData?.stops || [], CHART), [routeData]);
   const turnaround = useMemo(() => findTurnaround(routeData?.stops), [routeData]);
+
+  useEffect(() => {
+    onQuery?.({ dayType, hour: activeHour });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayType, activeHour]);
 
   // Tell the map what to draw.
   useEffect(() => {
