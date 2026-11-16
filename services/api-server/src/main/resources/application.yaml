@@ -7,6 +7,11 @@
 #   PORT               HTTP listen port, default: 8080. Cloud Run injects this.
 #   DB_URL             default: jdbc:postgresql://localhost:5432/Seoul_Transit
 #   DB_USERNAME        default: postgres
+#   DB_STATEMENT_TIMEOUT
+#                      PostgreSQL statement_timeout for API connections, default: 25s.
+#                      Kept under the 30 s Hikari wait so one slow query fails on its
+#                      own instead of holding a pooled connection and stalling every
+#                      other request (2026-11-16: node search held all three for 12 min).
 #   DB_POOL_MAX        Hikari max pool size, default: 5. Cloud SQL db-f1-micro has a
 #                      low connection limit, so this is held well below the Hikari
 #                      default of 10 and multiplied by Cloud Run max-instances.
@@ -48,6 +53,7 @@ spring:
       # instance connection limit.
       maximum-pool-size: ${DB_POOL_MAX:5}
       minimum-idle: 1
+      connection-init-sql: SET statement_timeout = '${DB_STATEMENT_TIMEOUT:25s}'
 
   jpa:
     hibernate:
