@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n/I18nProvider.jsx";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CircleMarker,
   GeoJSON,
@@ -23,6 +23,9 @@ import { colorOf, DEMAND_COLORS, dongDayType, quantileBreaks } from "../utils/do
 import DongOdPanel from "./DongOdPanel.jsx";
 import DistrictDemandPanel from "./DistrictDemandPanel.jsx";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
+import RouteLoadLayer from "./RouteLoadLayer.jsx";
+import RouteLoadLegend from "./RouteLoadLegend.jsx";
+import { styleSegments } from "../utils/routeLoad.js";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
 
@@ -208,6 +211,17 @@ export default function TransitDemandMap({
   const [dongColorBy, setDongColorBy] = useState("departures");
   const [dongColorMode, setDongColorMode] = useState("all");
   const [dongSummary, setDongSummary] = useState(null);
+  // { result, minLoad, routes } from the district panel's road view, or null.
+  const [routeLoad, setRouteLoad] = useState(null);
+  const [roadBoundaries, setRoadBoundaries] = useState(true);
+  const handleRouteLoad = useCallback((value) => setRouteLoad(value), []);
+  const roadStyled = useMemo(
+    () =>
+      routeLoad
+        ? styleSegments(routeLoad.result.segments, { minLoad: routeLoad.minLoad, routes: routeLoad.routes })
+        : null,
+    [routeLoad]
+  );
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [nodeDetail, setNodeDetail] = useState(null);
   const [nodeCatchment, setNodeCatchment] = useState(null);
@@ -652,7 +666,8 @@ export default function TransitDemandMap({
       color: isSelected ? "#111111" : "#444444",
       weight: isSelected ? 3 : 1,
       fillColor: fill || "#3388ff",
-      fillOpacity: fill ? (isSelected ? 0.6 : 0.45) : isSelected ? 0.14 : 0.04
+      // Fainter while the road layer is on, so the lines stay readable.
+      fillOpacity: (fill ? (isSelected ? 0.6 : 0.45) : isSelected ? 0.14 : 0.04) * (routeLoad ? 0.35 : 1)
     };
   };
 
@@ -764,14 +779,16 @@ export default function TransitDemandMap({
             url={tileLayer.url}
           />
 
-          {showAdminBoundary && adminDongGeoJson && (
+          {showAdminBoundary && adminDongGeoJson && (!routeLoad || roadBoundaries) && (
             <GeoJSON
-              key={`${selectedDistricts.map(getDistrictCode).join("-") || "all"}-${dongColorKey}`}
+              key={`${selectedDistricts.map(getDistrictCode).join("-") || "all"}-${dongColorKey}-${routeLoad ? "road" : ""}`}
               data={adminDongGeoJson}
               style={getDistrictStyle}
               onEachFeature={handleEachDistrict}
             />
           )}
+
+          {showAdminBoundary && roadStyled && <RouteLoadLayer result={routeLoad.result} segments={roadStyled.segments} />}
 
           {visiblePoints.map((point) => {
             const color = getRouteColor(point.mode, point.serviceId);
@@ -892,6 +909,11 @@ export default function TransitDemandMap({
               </CircleMarker>
             )}
         </MapContainer>
+        {showAdminBoundary && roadStyled && roadStyled.shown > 0 && (
+          <div className="map-legend-overlay">
+            <RouteLoadLegend styled={roadStyled} minLoad={routeLoad.minLoad} />
+          </div>
+        )}
       </section>
 
       <aside className="map-side">
@@ -901,6 +923,9 @@ export default function TransitDemandMap({
           name={getDistrictName(lastDistrict, tx)}
           initialDayType={dongDay}
           onPickDistrict={pickDistrictByCode}
+          onRouteLoad={handleRouteLoad}
+          boundariesOn={roadBoundaries}
+          onBoundariesChange={setRoadBoundaries}
         />
       )}
       {filters && !loading && points.length > 0 && (

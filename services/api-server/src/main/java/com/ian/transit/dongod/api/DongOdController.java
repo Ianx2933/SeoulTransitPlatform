@@ -1,6 +1,8 @@
 package com.ian.transit.dongod.api;
 
 import com.ian.transit.dongod.application.DongOdService;
+import com.ian.transit.dongod.application.DongRouteLoadService;
+import com.ian.transit.dongod.dto.DongRouteLoadResponse;
 import com.ian.transit.dongod.dto.DongOdResponse;
 import com.ian.transit.dongod.dto.DongOdSummaryRow;
 import com.ian.transit.dongod.dto.DongRoutesResponse;
@@ -22,6 +24,7 @@ import java.util.List;
  *   GET /api/dong-od/summary?date=weekday&level=dong|gu|city
  *   GET /api/dong-od/{code}?date=weekday&level=dong&dest=dong|gu&direction=from|to&limit=15
  *   GET /api/dong-od/{code}/routes?date=weekday&level=dong|gu
+ *   GET /api/dong-od/{code}/route-load?date=weekday&level=dong|gu&direction=od|do|both
  */
 @RestController
 @RequestMapping("/api/dong-od")
@@ -29,6 +32,7 @@ import java.util.List;
 public class DongOdController {
 
     private final DongOdService service;
+    private final DongRouteLoadService routeLoadService;
 
     @GetMapping("/summary")
     public ResponseEntity<List<DongOdSummaryRow>> summary(
@@ -57,5 +61,15 @@ public class DongOdController {
         @RequestParam(value = "level", required = false) String level
     ) {
         return ResponseEntity.ok(service.routes(date, level, code));
+    }
+
+    @GetMapping("/{code}/route-load")
+    public ResponseEntity<DongRouteLoadResponse> routeLoad(
+        @PathVariable("code") String code,
+        @RequestParam(value = "date", required = false) String date,
+        @RequestParam(value = "level", required = false) String level,
+        @RequestParam(value = "direction", required = false) String direction
+    ) {
+        return ResponseEntity.ok(routeLoadService.load(date, level, code, direction));
     }
 }

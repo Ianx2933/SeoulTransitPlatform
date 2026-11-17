@@ -38,4 +38,12 @@ class DongAreaTest {
         assertThat(DongArea.GU.unitSql("origin_cd")).contains("LEFT(origin_cd, 5)");
         assertThat(DongArea.GU.filterSql("origin_cd")).isEqualTo("origin_cd >= :code AND origin_cd < :codeEnd");
     }
+
+    @Test
+    void placeNamePrefixesTheProvinceOutsideSeoul() {
+        assertThat(DongArea.placeName("11240760", "위례동")).isEqualTo("위례동");
+        assertThat(DongArea.placeName("31023680", "위례동")).isEqualTo("경기 위례동");
+        assertThat(DongArea.placeName("23010510", "신포동")).isEqualTo("인천 신포동");
+        assertThat(DongArea.placeName(null, "x")).isEqualTo("x");
+    }
 }

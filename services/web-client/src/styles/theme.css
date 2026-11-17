@@ -357,3 +357,36 @@
 .map-side .segmented button { min-height: 32px; font-size: 12px; padding: 0 8px; }
 .dong-route { display: grid !important; grid-template-columns: 1fr auto; gap: 2px 8px; }
 .dong-route__dests { grid-column: 1 / -1; }
+
+/* road layer: controls, ten-step scale, route picks */
+.road-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 13px; }
+.field-inline { display: inline-flex; align-items: center; gap: 6px; }
+.field-inline input {
+  width: 72px; height: 30px; padding: 0 6px; text-align: right;
+  border: 1px solid var(--rule); border-radius: var(--radius-control); background: var(--surface);
+}
+.load-legend { margin: 6px 0 8px; }
+.load-legend figcaption { margin-bottom: 4px; }
+.load-legend__steps {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px 6px;
+  margin: 0; padding: 0; list-style: none; font-size: 12px;
+}
+.load-legend__steps li { display: flex; align-items: center; gap: 4px; }
+.load-legend__steps i { flex: none; display: inline-block; width: 22px; height: 10px; border-radius: 2px; }
+.route-picks { margin: 8px 0 0; padding: 0; border: 0; }
+.route-picks legend { float: left; padding: 0; }
+.route-picks > .link-button { float: right; font-size: 12px; }
+.route-picks__list {
+  clear: both; max-height: 260px; overflow-y: auto; margin: 4px 0 0; padding: 0; list-style: none;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-size: 13px;
+}
+.route-picks__list li { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.map-legend-overlay {
+  position: absolute; left: 12px; bottom: 12px; z-index: 500; max-width: 340px;
+  padding: 8px 10px; background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--rule); border-radius: var(--radius-control);
+}
+.map-legend-overlay .load-legend { margin: 0; }
+@media (max-width: 900px) {
+  .map-body .map-card { position: relative; }
+}

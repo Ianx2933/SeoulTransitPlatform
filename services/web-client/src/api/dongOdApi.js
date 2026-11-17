@@ -26,6 +26,18 @@ export function fetchDongRoutes({ code, level = "dong", dayType }) {
   });
 }
 
+/**
+ * Bus riders of an area on the road: segments between stops with the riders
+ * boarding there (od), alighting there (do) or either (both), summed over
+ * routes and kept by route (byRoute).
+ */
+export function fetchDongRouteLoad({ code, level = "dong", dayType, direction = "both" }) {
+  const params = new URLSearchParams({ date: dayType, level, direction });
+  return fetchJson(`/api/dong-od/${encodeURIComponent(code)}/route-load?${params}`, {
+    defaultMessage: "Failed to fetch bus riders on the road"
+  });
+}
+
 /** Area code for a level, from a 행정동 code: the 행정동, its 구 (5 digits) or Seoul. */
 export function areaCode(dongCode, level) {
   if (level === "city") return "11";

@@ -25,7 +25,10 @@ public class DongOdQueryRepository {
      * district of the alighting stop. Stops are placed like the district
      * demand query: point COALESCE(geom, lat/lng), ST_Covers, bus_stop_location
      * first, integrated_bus_stop_location for the rest. ARS numbers are
-     * matched with and without leading zeros.
+     * matched with and without leading zeros. Alighting stops are placed the
+     * same way, in one pass over each stop table (alight_pts): they used to be
+     * looked up in bus_stop_location only, so riders alighting at stops only
+     * integrated_bus_stop_location knows (452, 2026-11-17) had no district.
      */
     private static final String ROUTES_SQL = """
             WITH dong AS (
@@ -52,28 +55,38 @@ public class DongOdQueryRepository {
                   AND o.승차_정류장ars IN (SELECT ars FROM stop_keys)
             ),
             alight AS MATERIALIZED (
-                SELECT DISTINCT alight_ars FROM legs
+                SELECT DISTINCT LPAD(alight_ars, 5, '0') AS ars FROM legs
+            ),
+            alight_pts AS MATERIALIZED (
+                SELECT DISTINCT ON (ars) ars, g
+                FROM (
+                    SELECT LPAD(b."정류장번호"::text, 5, '0') AS ars,
+                           COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)) AS g, 1 AS pri
+                    FROM bus_stop_location b
+                    WHERE LPAD(b."정류장번호"::text, 5, '0') IN (SELECT ars FROM alight)
+                    UNION ALL
+                    SELECT LPAD(b.ars_id::text, 5, '0'),
+                           COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)), 2
+                    FROM integrated_bus_stop_location b
+                    WHERE LPAD(b.ars_id::text, 5, '0') IN (SELECT ars FROM alight)
+                ) x
+                WHERE g IS NOT NULL
+                ORDER BY ars, pri
             ),
             alight_dong AS (
-                SELECT a.alight_ars, d.adm_cd, d.adm_nm
-                FROM alight a
-                JOIN LATERAL (
-                    SELECT COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)) AS g
-                    FROM bus_stop_location b
-                    WHERE LPAD(b."정류장번호"::text, 5, '0') = LPAD(a.alight_ars, 5, '0')
-                    LIMIT 1
-                ) s ON true
+                SELECT p.ars, d.adm_cd, d.adm_nm
+                FROM alight_pts p
                 JOIN LATERAL (
                     SELECT x.adm_cd, x.adm_nm
                     FROM public.admin_dong_boundary x
-                    WHERE ST_Covers(x.geom, s.g)
+                    WHERE ST_Covers(x.geom, p.g)
                     ORDER BY x.adm_cd
                     LIMIT 1
                 ) d ON true
             )
             SELECT l.route, ad.adm_cd, ad.adm_nm, SUM(l.passengers) AS passengers
             FROM legs l
-            LEFT JOIN alight_dong ad ON ad.alight_ars = l.alight_ars
+            LEFT JOIN alight_dong ad ON ad.ars = LPAD(l.alight_ars, 5, '0')
             GROUP BY l.route, ad.adm_cd, ad.adm_nm
             """;
 
@@ -164,6 +177,7 @@ public class DongOdQueryRepository {
         MapSqlParameterSource p = params(null, level, code).addValue("label", label);
         String sql = ROUTES_SQL.formatted(level.filterSql("adm_cd"));
         return jdbc.query(sql, p, (rs, i) -> new DongRouteFlows.Row(
-                rs.getString("route"), rs.getString("adm_cd"), rs.getString("adm_nm"), rs.getDouble("passengers")));
+                rs.getString("route"), rs.getString("adm_cd"),
+                DongArea.placeName(rs.getString("adm_cd"), rs.getString("adm_nm")), rs.getDouble("passengers")));
     }
 }

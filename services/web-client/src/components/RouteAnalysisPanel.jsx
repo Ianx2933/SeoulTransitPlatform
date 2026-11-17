@@ -429,8 +429,8 @@ function RouteSign({ name }) {
   const { t } = useI18n();
   const style = busRouteStyle(name);
   return (
-    <span className="route-sign" style={{ background: style.background, color: style.text }}>
-      <span className="visually-hidden">{t(`busType.${style.type}`)} </span>
+    <span className="route-sign" style={{ background: style.bg, color: style.fg }}>
+      <span className="visually-hidden">{t(`busType.${busRouteType(name)}`)} </span>
       {name}
     </span>
   );

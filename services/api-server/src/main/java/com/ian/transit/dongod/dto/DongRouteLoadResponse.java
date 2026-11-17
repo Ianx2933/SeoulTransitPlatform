@@ -1,0 +1,52 @@
+package com.ian.transit.dongod.dto;
+
+import com.ian.transit.common.TypicalDay;
+
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+
+/**
+ * Riders of an area (행정동 or 구) on the road: every bus segment between two
+ * stops carrying riders who board in the area (direction od), alight in it
+ * (do) or either (both, a trip inside the area counted once), summed over all
+ * routes that use the same pair of stops.
+ *
+ * byRoute keeps each route's riders on the segment, so the map can show
+ * chosen routes only. path is [lat, lng] pairs along the road.
+ * unplacedPassengers are riders on routes without a stored path (closed
+ * routes) or whose stops the path lacks.
+ */
+public record DongRouteLoadResponse(
+    String level,
+    String code,
+    String dayType,
+    String direction,
+    Double passengers,
+    Double placedPassengers,
+    Double unplacedPassengers,
+    List<Segment> segments,
+    List<Unplaced> unplacedRoutes
+) {
+    public DongRouteLoadResponse {
+        passengers = TypicalDay.round(passengers);
+        placedPassengers = TypicalDay.round(placedPassengers);
+        unplacedPassengers = TypicalDay.round(unplacedPassengers);
+    }
+
+    public record Segment(String fromArs, String toArs, Double load, List<String> routes,
+                          Map<String, Double> byRoute, List<double[]> path) {
+        public Segment {
+            load = TypicalDay.round(load);
+            Map<String, Double> rounded = new TreeMap<>();
+            byRoute.forEach((route, riders) -> rounded.put(route, TypicalDay.round(riders)));
+            byRoute = rounded;
+        }
+    }
+
+    public record Unplaced(String route, Double passengers) {
+        public Unplaced {
+            passengers = TypicalDay.round(passengers);
+        }
+    }
+}

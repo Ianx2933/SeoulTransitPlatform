@@ -88,4 +88,22 @@ public enum DongArea {
             case CITY -> "서울";
         };
     }
+
+    /**
+     * Name of a 행정동 anywhere in the capital area, told apart from a Seoul one
+     * of the same name: outside Seoul the province goes in front (위례동 is in
+     * 송파구 and also in 경기). Seoul names stay as they are.
+     */
+    public static String placeName(String admCd, String dongName) {
+        if (admCd == null || dongName == null) {
+            return dongName;
+        }
+        if (admCd.startsWith("23")) {
+            return "인천 " + dongName;
+        }
+        if (admCd.startsWith("31")) {
+            return "경기 " + dongName;
+        }
+        return dongName;
+    }
 }
