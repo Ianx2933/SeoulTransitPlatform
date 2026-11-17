@@ -17,7 +17,10 @@ import {
   fetchNodeCatchment,
   fetchNodeDetail
 } from "../api/mapDemandApi.js";
+import { fetchDongOdSummary } from "../api/dongOdApi.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
+import { colorOf, DEMAND_COLORS, dongDayType, quantileBreaks } from "../utils/dongColor.js";
+import DongOdPanel from "./DongOdPanel.jsx";
 import DistrictDemandPanel from "./DistrictDemandPanel.jsx";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
 
@@ -200,6 +203,10 @@ export default function TransitDemandMap({
   const [points, setPoints] = useState([]);
   const [adminDongGeoJson, setAdminDongGeoJson] = useState(null);
   const [selectedDistricts, setSelectedDistricts] = useState([]);
+  // District demand colours (TOPIS district OD, low green to high red).
+  const [dongColorOn, setDongColorOn] = useState(true);
+  const [dongColorBy, setDongColorBy] = useState("departures");
+  const [dongSummary, setDongSummary] = useState(null);
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [nodeDetail, setNodeDetail] = useState(null);
   const [nodeCatchment, setNodeCatchment] = useState(null);
@@ -294,6 +301,32 @@ export default function TransitDemandMap({
   );
 
   const selectedDistrictCodesKey = selectedDistrictCodeList.join(",");
+
+  const dongDay = dongDayType(filters?.dayTypes);
+
+  useEffect(() => {
+    if (!showAdminBoundary || !dongColorOn) return undefined;
+    let ignore = false;
+    fetchDongOdSummary({ dayType: dongDay })
+      .then((rows) => {
+        if (!ignore) setDongSummary({ dayType: dongDay, rows });
+      })
+      .catch(() => {
+        if (!ignore) setDongSummary(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [showAdminBoundary, dongColorOn, dongDay]);
+
+  const dongValues = useMemo(() => {
+    const m = new Map();
+    for (const r of dongSummary?.rows || []) m.set(r.code, Number(r[dongColorBy] || 0));
+    return m;
+  }, [dongSummary, dongColorBy]);
+  const dongBreaks = useMemo(() => quantileBreaks([...dongValues.values()]), [dongValues]);
+  const dongColorKey = dongColorOn && dongSummary ? `${dongSummary.dayType}-${dongColorBy}-${dongValues.size}` : "plain";
+  const lastDistrict = selectedDistricts.length > 0 ? selectedDistricts[selectedDistricts.length - 1] : null;
 
   const selectedDistrictCodes = useMemo(
     () => new Set(selectedDistrictCodeList),
@@ -605,12 +638,20 @@ export default function TransitDemandMap({
   };
 
   const getDistrictStyle = (feature) => {
-    const isSelected = selectedDistrictCodes.has(getDistrictCode(feature));
+    const code = getDistrictCode(feature);
+    const isSelected = selectedDistrictCodes.has(code);
+    const fill = dongColorOn ? colorOf(dongValues.get(code), dongBreaks) : null;
     return {
       color: isSelected ? "#111111" : "#444444",
       weight: isSelected ? 3 : 1,
-      fillOpacity: isSelected ? 0.14 : 0.04
+      fillColor: fill || "#3388ff",
+      fillOpacity: fill ? (isSelected ? 0.6 : 0.45) : isSelected ? 0.14 : 0.04
     };
+  };
+
+  const pickDistrictByCode = (code) => {
+    const feature = adminDongGeoJson?.features?.find((f) => getDistrictCode(f) === code);
+    if (feature) setSelectedDistricts([feature]);
   };
 
   return (
@@ -658,6 +699,30 @@ export default function TransitDemandMap({
 
         {!showAdminBoundary && <span>{tx("District boundaries are hidden.")}</span>}
 
+        {showAdminBoundary && (
+          <span className="dong-legend">
+            <label className="check">
+              <input type="checkbox" checked={dongColorOn} onChange={(e) => setDongColorOn(e.target.checked)} />
+              {tx("Colour districts by demand")}
+            </label>
+            {dongColorOn && (
+              <>
+                <select value={dongColorBy} onChange={(e) => setDongColorBy(e.target.value)} aria-label={tx("Colour by")}>
+                  <option value="departures">{tx("Departures")}</option>
+                  <option value="arrivals">{tx("Arrivals")}</option>
+                </select>
+                <span className="dong-legend__scale" aria-hidden="true">
+                  {tx("Low")}
+                  {DEMAND_COLORS.map((c) => (
+                    <i key={c} style={{ background: c }} />
+                  ))}
+                  {tx("High")}
+                </span>
+              </>
+            )}
+          </span>
+        )}
+
         {showAdminBoundary && selectedDistricts.length > 0 && (
           <>
             <strong>
@@ -689,7 +754,7 @@ export default function TransitDemandMap({
 
           {showAdminBoundary && adminDongGeoJson && (
             <GeoJSON
-              key={selectedDistricts.map(getDistrictCode).join("-") || "all"}
+              key={`${selectedDistricts.map(getDistrictCode).join("-") || "all"}-${dongColorKey}`}
               data={adminDongGeoJson}
               style={getDistrictStyle}
               onEachFeature={handleEachDistrict}
@@ -818,6 +883,14 @@ export default function TransitDemandMap({
       </section>
 
       <aside className="map-side">
+      {showAdminBoundary && lastDistrict && (
+        <DongOdPanel
+          code={getDistrictCode(lastDistrict)}
+          name={getDistrictName(lastDistrict, tx)}
+          initialDayType={dongDay}
+          onPickDistrict={pickDistrictByCode}
+        />
+      )}
       {filters && !loading && points.length > 0 && (
         <section className="demand-summary side-card">
           <strong>

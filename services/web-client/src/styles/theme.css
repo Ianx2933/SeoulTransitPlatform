@@ -346,3 +346,14 @@
 @media (max-width: 900px) {
   .dong-card { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
 }
+
+/* ---------- district demand colours and district OD ---------- */
+.dong-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dong-legend select { height: 30px; padding: 0 6px; border: 1px solid var(--rule); border-radius: var(--radius-control); background: var(--surface); }
+.dong-legend__scale { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+.dong-legend__scale i { display: inline-block; width: 18px; height: 10px; }
+.dong-legend__scale i:first-of-type { margin-left: 4px; }
+.dong-legend__scale i:last-of-type { margin-right: 4px; }
+.map-side .segmented button { min-height: 32px; font-size: 12px; padding: 0 8px; }
+.dong-route { display: grid !important; grid-template-columns: 1fr auto; gap: 2px 8px; }
+.dong-route__dests { grid-column: 1 / -1; }
