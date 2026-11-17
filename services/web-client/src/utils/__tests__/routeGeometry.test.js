@@ -52,3 +52,26 @@ describe("pathBetween and boundsOf", () => {
     expect(boundsOf([])).toBeNull();
   });
 });
+
+import { seqOfArs } from "../routeGeometry.js";
+
+describe("seqOfArs", () => {
+  const route = [
+    { seq: 1, ars: "01001" },
+    { seq: 30, ars: "48028" },
+    { seq: 63, ars: "24117" },
+    { seq: 90, ars: "48028" }
+  ];
+
+  test("finds the stop by ARS ignoring leading zeros", () => {
+    expect(seqOfArs(route, "1001")).toBe(1);
+    expect(seqOfArs(route, "24117")).toBe(63);
+    expect(seqOfArs(route, "99999")).toBeNull();
+    expect(seqOfArs(route, null)).toBeNull();
+  });
+
+  test("takes the occurrence nearest the estimate when a stop is served twice", () => {
+    expect(seqOfArs(route, "48028", 80)).toBe(90);
+    expect(seqOfArs(route, "48028")).toBe(30);
+  });
+});

@@ -58,3 +58,11 @@ export function fetchRouteStopPoints({ route }) {
 export function fetchRouteDongOd({ route, dayType, hour, messages }) {
   return fetchJson(`${base(route)}/dong-od?${routeQuery({ dayType, hour })}`, messages);
 }
+
+/** Road path of the route ([lat, lng] points) and the stop it turns at, from the city's bus API. */
+export function fetchRoutePath({ route }) {
+  return fetchJson(`${base(route)}/path`, {
+    defaultMessage: "Failed to fetch route path",
+    notFoundMessage: "No road path for this route."
+  });
+}

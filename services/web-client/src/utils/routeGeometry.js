@@ -95,3 +95,17 @@ export function boundsOf(placed) {
     [Math.max(...lats), Math.max(...lngs)]
   ];
 }
+
+/**
+ * Sequence of the stop with the given ARS number (leading zeros ignored).
+ * A route that serves the stop twice takes the occurrence nearest `near`
+ * (the estimated turnaround), or the first. Null when no stop matches.
+ */
+export function seqOfArs(stops, ars, near = null) {
+  const want = normaliseId(ars);
+  if (!want) return null;
+  const hits = (stops || []).filter((s) => normaliseId(s.ars) === want).map((s) => s.seq);
+  if (hits.length === 0) return null;
+  if (near == null) return hits[0];
+  return hits.reduce((best, seq) => (Math.abs(seq - near) < Math.abs(best - near) ? seq : best));
+}

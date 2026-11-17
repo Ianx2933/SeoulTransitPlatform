@@ -1,5 +1,6 @@
 package com.ian.transit.dongod.infrastructure;
 
+import com.ian.transit.dongod.application.DongArea;
 import com.ian.transit.dongod.application.DongRouteFlows;
 import com.ian.transit.dongod.dto.DongOdResponse;
 import com.ian.transit.dongod.dto.DongOdSummaryRow;
@@ -11,54 +12,13 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 /**
- * Reads district OD (od_dong_typical) and the bus routes boarding in a
- * district (od_typical_route_stop). All queries are small: one district's
- * rows, or one row per district for the summary.
+ * Reads district OD (od_dong_typical) and the bus routes boarding in an area
+ * (od_typical_route_stop), for a 행정동, a 구 or all of Seoul (DongArea).
+ * Queries read one area's rows, or one row per unit for the summary.
  */
 @Repository
 @RequiredArgsConstructor
 public class DongOdQueryRepository {
-
-    private static final String FLOWS_FROM_SQL = """
-            SELECT dest_cd AS code, dest_name AS name, subway_rides, bus_rides, total_rides
-            FROM od_dong_typical
-            WHERE day_type = :dayType AND origin_cd = :code
-            ORDER BY total_rides DESC
-            LIMIT :limit
-            """;
-
-    private static final String FLOWS_TO_SQL = """
-            SELECT origin_cd AS code, origin_name AS name, subway_rides, bus_rides, total_rides
-            FROM od_dong_typical
-            WHERE day_type = :dayType AND dest_cd = :code
-            ORDER BY total_rides DESC
-            LIMIT :limit
-            """;
-
-    private static final String TOTALS_SQL = """
-            SELECT
-                (SELECT COALESCE(SUM(total_rides), 0) FROM od_dong_typical
-                 WHERE day_type = :dayType AND origin_cd = :code) AS departures,
-                (SELECT COALESCE(SUM(total_rides), 0) FROM od_dong_typical
-                 WHERE day_type = :dayType AND dest_cd = :code) AS arrivals,
-                (SELECT MIN(adm_nm) FROM public.admin_dong_boundary WHERE adm_cd = :code) AS name
-            """;
-
-    private static final String SUMMARY_SQL = """
-            WITH dep AS (
-                SELECT origin_cd AS code, SUM(total_rides) AS v
-                FROM od_dong_typical WHERE day_type = :dayType AND origin_cd <> 'outside'
-                GROUP BY origin_cd
-            ), arr AS (
-                SELECT dest_cd AS code, SUM(total_rides) AS v
-                FROM od_dong_typical WHERE day_type = :dayType AND dest_cd <> 'outside'
-                GROUP BY dest_cd
-            )
-            SELECT COALESCE(dep.code, arr.code) AS code,
-                   COALESCE(dep.v, 0) AS departures,
-                   COALESCE(arr.v, 0) AS arrivals
-            FROM dep FULL JOIN arr ON dep.code = arr.code
-            """;
 
     /**
      * Riders boarding at bus stops inside the district, by route and the
@@ -69,7 +29,7 @@ public class DongOdQueryRepository {
      */
     private static final String ROUTES_SQL = """
             WITH dong AS (
-                SELECT ST_Union(geom) AS g FROM public.admin_dong_boundary WHERE adm_cd = :code
+                SELECT ST_Union(geom) AS g FROM public.admin_dong_boundary WHERE %s
             ),
             stops AS MATERIALIZED (
                 SELECT LPAD("정류장번호"::text, 5, '0') AS ars
@@ -119,31 +79,91 @@ public class DongOdQueryRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    public record Totals(String name, double departures, double arrivals) {
+    public record Totals(double departures, double arrivals, double subwayDepartures,
+                         double busDepartures, String dongName) {
     }
 
-    public List<DongOdResponse.Flow> flows(String dayType, String code, boolean from, int limit) {
-        MapSqlParameterSource p = new MapSqlParameterSource()
-                .addValue("dayType", dayType).addValue("code", code).addValue("limit", limit);
-        return jdbc.query(from ? FLOWS_FROM_SQL : FLOWS_TO_SQL, p, (rs, i) -> new DongOdResponse.Flow(
-                rs.getString("code"), rs.getString("name"),
-                rs.getDouble("subway_rides"), rs.getDouble("bus_rides"), rs.getDouble("total_rides")));
-    }
-
-    public Totals totals(String dayType, String code) {
+    private static MapSqlParameterSource params(String dayType, DongArea level, String code) {
         MapSqlParameterSource p = new MapSqlParameterSource().addValue("dayType", dayType).addValue("code", code);
-        return jdbc.queryForObject(TOTALS_SQL, p, (rs, i) -> new Totals(
-                rs.getString("name"), rs.getDouble("departures"), rs.getDouble("arrivals")));
+        if (level == DongArea.GU) {
+            p.addValue("codeEnd", DongArea.codeEnd(code));
+        }
+        return p;
     }
 
-    public List<DongOdSummaryRow> summary(String dayType) {
-        return jdbc.query(SUMMARY_SQL, new MapSqlParameterSource("dayType", dayType), (rs, i) -> new DongOdSummaryRow(
-                rs.getString("code"), rs.getDouble("departures"), rs.getDouble("arrivals")));
+    /** Rows of the area's OD grouped to destLevel units (or origins, with from = false). */
+    public List<DongOdResponse.Flow> flows(String dayType, DongArea level, String code, DongArea destLevel,
+                                           boolean from, int limit) {
+        String self = from ? "origin_cd" : "dest_cd";
+        String other = from ? "dest_cd" : "origin_cd";
+        String otherName = from ? "dest_name" : "origin_name";
+        String sql = """
+                SELECT %s AS code, MIN(%s) AS dong_name,
+                       SUM(subway_rides) AS subway, SUM(bus_rides) AS bus, SUM(total_rides) AS total
+                FROM od_dong_typical
+                WHERE day_type = :dayType AND %s
+                GROUP BY 1
+                ORDER BY SUM(total_rides) DESC
+                LIMIT :limit
+                """.formatted(destLevel.unitSql(other), otherName, level.filterSql(self));
+        MapSqlParameterSource p = params(dayType, level, code).addValue("limit", limit);
+        return jdbc.query(sql, p, (rs, i) -> {
+            String unit = rs.getString("code");
+            return new DongOdResponse.Flow(unit, destLevel.nameOf(unit, rs.getString("dong_name")),
+                    rs.getDouble("subway"), rs.getDouble("bus"), rs.getDouble("total"));
+        });
     }
 
-    public List<DongRouteFlows.Row> routeRows(String label, String code) {
-        MapSqlParameterSource p = new MapSqlParameterSource().addValue("label", label).addValue("code", code);
-        return jdbc.query(ROUTES_SQL, p, (rs, i) -> new DongRouteFlows.Row(
+    public Totals totals(String dayType, DongArea level, String code) {
+        String sql = """
+                SELECT
+                    (SELECT COALESCE(SUM(total_rides), 0) FROM od_dong_typical
+                     WHERE day_type = :dayType AND %1$s) AS departures,
+                    (SELECT COALESCE(SUM(subway_rides), 0) FROM od_dong_typical
+                     WHERE day_type = :dayType AND %1$s) AS subway_departures,
+                    (SELECT COALESCE(SUM(bus_rides), 0) FROM od_dong_typical
+                     WHERE day_type = :dayType AND %1$s) AS bus_departures,
+                    (SELECT COALESCE(SUM(total_rides), 0) FROM od_dong_typical
+                     WHERE day_type = :dayType AND %2$s) AS arrivals,
+                    (SELECT MIN(adm_nm) FROM public.admin_dong_boundary WHERE adm_cd = :code) AS dong_name
+                """.formatted(level.filterSql("origin_cd"), level.filterSql("dest_cd"));
+        return jdbc.queryForObject(sql, params(dayType, level, code), (rs, i) -> new Totals(
+                rs.getDouble("departures"), rs.getDouble("arrivals"),
+                rs.getDouble("subway_departures"), rs.getDouble("bus_departures"), rs.getString("dong_name")));
+    }
+
+    /** Departures and arrivals by mode for every unit of the level inside Seoul. */
+    public List<DongOdSummaryRow> summary(String dayType, DongArea level) {
+        String sql = """
+                WITH dep AS (
+                    SELECT %1$s AS code, SUM(total_rides) AS t, SUM(subway_rides) AS s, SUM(bus_rides) AS b
+                    FROM od_dong_typical WHERE day_type = :dayType AND origin_cd <> 'outside'
+                    GROUP BY 1
+                ), arr AS (
+                    SELECT %2$s AS code, SUM(total_rides) AS t, SUM(subway_rides) AS s, SUM(bus_rides) AS b
+                    FROM od_dong_typical WHERE day_type = :dayType AND dest_cd <> 'outside'
+                    GROUP BY 1
+                )
+                SELECT COALESCE(dep.code, arr.code) AS code,
+                       COALESCE(dep.t, 0) AS departures, COALESCE(arr.t, 0) AS arrivals,
+                       COALESCE(dep.s, 0) AS subway_departures, COALESCE(dep.b, 0) AS bus_departures,
+                       COALESCE(arr.s, 0) AS subway_arrivals, COALESCE(arr.b, 0) AS bus_arrivals
+                FROM dep FULL JOIN arr ON dep.code = arr.code
+                """.formatted(level.unitSql("origin_cd"), level.unitSql("dest_cd"));
+        return jdbc.query(sql, new MapSqlParameterSource("dayType", dayType), (rs, i) -> new DongOdSummaryRow(
+                rs.getString("code"), rs.getDouble("departures"), rs.getDouble("arrivals"),
+                rs.getDouble("subway_departures"), rs.getDouble("bus_departures"),
+                rs.getDouble("subway_arrivals"), rs.getDouble("bus_arrivals")));
+    }
+
+    /** Bus routes boarding inside a 행정동 or a 구 (not all of Seoul: too many stops). */
+    public List<DongRouteFlows.Row> routeRows(String label, DongArea level, String code) {
+        if (level == DongArea.CITY) {
+            throw new IllegalArgumentException("bus routes are listed for a dong or a gu, not all of Seoul");
+        }
+        MapSqlParameterSource p = params(null, level, code).addValue("label", label);
+        String sql = ROUTES_SQL.formatted(level.filterSql("adm_cd"));
+        return jdbc.query(sql, p, (rs, i) -> new DongRouteFlows.Row(
                 rs.getString("route"), rs.getString("adm_cd"), rs.getString("adm_nm"), rs.getDouble("passengers")));
     }
 }

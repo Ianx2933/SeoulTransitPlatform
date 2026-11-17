@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 
-import { fetchRouteDongOd, fetchRouteStopPoints } from "../api/routeAnalysisApi.js";
+import { fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints } from "../api/routeAnalysisApi.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
-import { boundsOf, pathBetween, placeStops, splitAtTurnaround } from "../utils/routeGeometry.js";
+import { busRouteStyle } from "../utils/busRouteType.js";
+import { boundsOf, pathBetween, placeStops, seqOfArs, splitAtTurnaround } from "../utils/routeGeometry.js";
+import { findTurnaround } from "../utils/routeLoadChart.js";
 import RouteAnalysisPanel from "./RouteAnalysisPanel.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.978];
@@ -37,6 +39,7 @@ export default function RouteAnalysisView({ busLines }) {
   const [points, setPoints] = useState([]);
   const [pointsState, setPointsState] = useState("idle");
   const [query, setQuery] = useState({ dayType: "weekday", hour: null });
+  const [roadPath, setRoadPath] = useState(null);
   const [dongOn, setDongOn] = useState(false);
   const [dongData, setDongData] = useState(null);
   const [dongState, setDongState] = useState("idle");
@@ -68,6 +71,30 @@ export default function RouteAnalysisView({ busLines }) {
       ignore = true;
     };
   }, [routeName]);
+
+  // Road path and turnaround from the city's bus route API (through our API).
+  useEffect(() => {
+    setRoadPath(null);
+    if (!routeName) return undefined;
+    let ignore = false;
+    fetchRoutePath({ route: routeName })
+      .then((data) => {
+        if (!ignore) setRoadPath(data);
+      })
+      .catch(() => {
+        if (!ignore) setRoadPath({ path: [], turnaroundArs: null });
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [routeName]);
+
+  const turnaroundFromBis = useMemo(() => {
+    if (!roadPath?.turnaroundArs || !routeData) return null;
+    return seqOfArs(routeData.stops, roadPath.turnaroundArs, findTurnaround(routeData.stops));
+  }, [roadPath, routeData]);
+  const hasRoad = Array.isArray(roadPath?.path) && roadPath.path.length > 1;
+  const roadColor = routeName ? busRouteStyle(routeName).bg : COLORS.up;
 
   // District OD, loaded only while the district view is on.
   useEffect(() => {
@@ -119,13 +146,17 @@ export default function RouteAnalysisView({ busLines }) {
   const dongMax = Math.max(0, ...dongValues.values());
 
   const placed = useMemo(() => placeStops(routeData?.stops || [], points), [routeData, points]);
-  const lines = useMemo(() => splitAtTurnaround(placed, turnaround), [placed, turnaround]);
+  const effectiveTurnaround = turnaroundFromBis ?? turnaround;
+  const lines = useMemo(() => splitAtTurnaround(placed, effectiveTurnaround), [placed, effectiveTurnaround]);
   const reachPath = useMemo(() => pathBetween(placed, stopSeq, reachSeq), [placed, stopSeq, reachSeq]);
   const segmentPath = useMemo(
     () => (segment ? pathBetween(placed, segment[0], segment[1]) : []),
     [placed, segment]
   );
-  const bounds = useMemo(() => boundsOf(placed), [placed]);
+  const bounds = useMemo(() => {
+    if (hasRoad) return boundsOf(roadPath.path.map(([lat, lng]) => ({ lat, lng })));
+    return boundsOf(placed);
+  }, [placed, hasRoad, roadPath]);
   const selected = placed.find((p) => p.seq === stopSeq) || null;
 
   let note = t("route.map.empty");
@@ -136,6 +167,7 @@ export default function RouteAnalysisView({ busLines }) {
       placed.length === 0
         ? t("route.map.none")
         : t("route.map.placed", { placed: placed.length, all: routeData.stops.length });
+    if (roadPath) note += " " + (hasRoad ? t("route.map.road") : t("route.map.straight"));
   }
 
   return (
@@ -176,10 +208,13 @@ export default function RouteAnalysisView({ busLines }) {
           {segmentPath.length > 1 && (
             <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
-          {lines.up.length > 1 && (
+          {hasRoad && (
+            <Polyline positions={roadPath.path} pathOptions={{ color: roadColor, weight: 5, opacity: 0.85 }} />
+          )}
+          {!hasRoad && lines.up.length > 1 && (
             <Polyline positions={lines.up} pathOptions={{ color: COLORS.up, weight: 5, opacity: 0.9 }} />
           )}
-          {lines.down.length > 1 && (
+          {!hasRoad && lines.down.length > 1 && (
             <Polyline positions={lines.down} pathOptions={{ color: COLORS.down, weight: 5, opacity: 0.95 }} />
           )}
           {reachPath.length > 1 && (
@@ -187,7 +222,7 @@ export default function RouteAnalysisView({ busLines }) {
           )}
 
           {placed.map((p) => {
-            const down = turnaround != null && p.seq > turnaround;
+            const down = effectiveTurnaround != null && p.seq > effectiveTurnaround;
             return (
               <CircleMarker
                 key={p.seq}
@@ -239,6 +274,7 @@ export default function RouteAnalysisView({ busLines }) {
         onReach={setReachSeq}
         onSegment={setSegment}
         onQuery={setQuery}
+        turnaroundFromBis={turnaroundFromBis}
       />
     </div>
   );

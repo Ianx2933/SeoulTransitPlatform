@@ -206,6 +206,7 @@ export default function TransitDemandMap({
   // District demand colours (TOPIS district OD, low green to high red).
   const [dongColorOn, setDongColorOn] = useState(true);
   const [dongColorBy, setDongColorBy] = useState("departures");
+  const [dongColorMode, setDongColorMode] = useState("all");
   const [dongSummary, setDongSummary] = useState(null);
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [nodeDetail, setNodeDetail] = useState(null);
@@ -321,11 +322,17 @@ export default function TransitDemandMap({
 
   const dongValues = useMemo(() => {
     const m = new Map();
-    for (const r of dongSummary?.rows || []) m.set(r.code, Number(r[dongColorBy] || 0));
+    // Field of the summary row: departures / arrivals, or by rail / bus.
+    const field =
+      dongColorMode === "all"
+        ? dongColorBy
+        : `${dongColorMode}${dongColorBy === "departures" ? "Departures" : "Arrivals"}`;
+    for (const r of dongSummary?.rows || []) m.set(r.code, Number(r[field] || 0));
     return m;
-  }, [dongSummary, dongColorBy]);
+  }, [dongSummary, dongColorBy, dongColorMode]);
   const dongBreaks = useMemo(() => quantileBreaks([...dongValues.values()]), [dongValues]);
-  const dongColorKey = dongColorOn && dongSummary ? `${dongSummary.dayType}-${dongColorBy}-${dongValues.size}` : "plain";
+  const dongColorKey =
+    dongColorOn && dongSummary ? `${dongSummary.dayType}-${dongColorBy}-${dongColorMode}-${dongValues.size}` : "plain";
   const lastDistrict = selectedDistricts.length > 0 ? selectedDistricts[selectedDistricts.length - 1] : null;
 
   const selectedDistrictCodes = useMemo(
@@ -710,6 +717,11 @@ export default function TransitDemandMap({
                 <select value={dongColorBy} onChange={(e) => setDongColorBy(e.target.value)} aria-label={tx("Colour by")}>
                   <option value="departures">{tx("Departures")}</option>
                   <option value="arrivals">{tx("Arrivals")}</option>
+                </select>
+                <select value={dongColorMode} onChange={(e) => setDongColorMode(e.target.value)} aria-label={tx("Mode")}>
+                  <option value="all">{tx("Rail and bus")}</option>
+                  <option value="subway">{tx("Rail")}</option>
+                  <option value="bus">{tx("Bus")}</option>
                 </select>
                 <span className="dong-legend__scale" aria-hidden="true">
                   {tx("Low")}

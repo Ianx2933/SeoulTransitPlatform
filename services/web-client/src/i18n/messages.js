@@ -86,7 +86,9 @@ export const messages = {
         loading: "정류소 위치를 불러오는 중…",
         error: "정류소 위치를 불러오지 못했습니다. 분석 결과는 그대로 볼 수 있습니다.",
         none: "이 노선의 정류소 위치를 찾지 못했습니다.",
-        placed: "정류소 {all}곳 중 {placed}곳을 지도에 그렸습니다. 지도에서 정류소를 누르면 자세히 봅니다."
+        placed: "정류소 {all}곳 중 {placed}곳을 지도에 그렸습니다. 지도에서 정류소를 누르면 자세히 봅니다.",
+        road: "노선은 서울시 버스 노선 정보의 실제 경로로 그렸습니다.",
+        straight: "실제 경로를 받지 못해 정류소를 직선으로 이었습니다."
       },
       hour: {
         label: "시간대",
@@ -103,6 +105,7 @@ export const messages = {
         up: "상행",
         down: "하행",
         turnaround: "{seq}번에서 돌아옴(추정)",
+        turnaroundBis: "{seq}번에서 돌아옴",
         bar: "{seq} {name}: 떠날 때 {onBoard}명, 승차 {on}명, 하차 {off}명",
         max: "가장 많을 때 {value}명"
       },
@@ -240,7 +243,9 @@ export const messages = {
         loading: "Loading stop locations…",
         error: "Could not load stop locations. The analysis still works.",
         none: "No stop locations found for this route.",
-        placed: "{placed} of {all} stops drawn. Click a stop on the map to look at it."
+        placed: "{placed} of {all} stops drawn. Click a stop on the map to look at it.",
+        road: "The route follows its road path from Seoul's bus route data.",
+        straight: "No road path was available, so stops are joined by straight lines."
       },
       hour: {
         label: "Time of day",
@@ -257,6 +262,7 @@ export const messages = {
         up: "Upbound",
         down: "Downbound",
         turnaround: "Turns at stop {seq} (estimated)",
+        turnaroundBis: "Turns at stop {seq}",
         bar: "{seq} {name}: {onBoard} on board leaving, {on} on, {off} off",
         max: "Peak {value}"
       },

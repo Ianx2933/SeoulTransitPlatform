@@ -133,5 +133,19 @@ export const koByEnglish = {
   "Departures": "출발",
   "Arrivals": "도착",
   "Low": "적음",
-  "High": "많음"
+  "High": "많음",
+  "Rail and bus, typical day, from TOPIS district OD.": "철도와 버스, 대표일, TOPIS 행정동 OD 기준입니다.",
+  "Area": "범위",
+  "This district": "이 행정동",
+  "Its gu": "이 구 전체",
+  "All of Seoul": "서울 전체",
+  "Seoul": "서울",
+  "Group by": "묶는 단위",
+  "By district": "행정동별",
+  "By gu": "구별",
+  "Departures by rail {rail} ({railShare}) · by bus {bus}": "출발 중 철도 {rail} ({railShare}) · 버스 {bus}",
+  "inside the area": "범위 안",
+  "rail {s} · bus {b}": "철도 {s} · 버스 {b}",
+  "Rail and bus": "철도+버스",
+  "Rail": "철도"
 };

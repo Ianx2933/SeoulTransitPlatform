@@ -2,7 +2,9 @@ package com.ian.transit.curatedod.api;
 
 import com.ian.transit.common.TypicalDay;
 import com.ian.transit.curatedod.application.RouteAnalysisService;
+import com.ian.transit.curatedod.application.RoutePathService;
 import com.ian.transit.curatedod.dto.RouteDongOdResponse;
+import com.ian.transit.curatedod.dto.RoutePathResponse;
 import com.ian.transit.curatedod.dto.RouteSegmentResponse;
 import com.ian.transit.curatedod.dto.RouteStopDetailResponse;
 import com.ian.transit.curatedod.dto.RouteStopsResponse;
@@ -25,6 +27,7 @@ import java.util.List;
  *   GET /api/curated-od/routes/{route}/stops/{seq}?date=weekday
  *   GET /api/curated-od/routes/{route}/segment?from=5&to=22&date=weekday
  *   GET /api/curated-od/routes/{route}/dong-od?date=weekday
+ *   GET /api/curated-od/routes/{route}/path        road path and turnaround (Seoul bus route API)
  *
  * Every endpoint takes an optional hour (0-23): the riders who boarded in that
  * hour of the typical day, from estimated_hourly_od (weekdays only). The stop
@@ -37,6 +40,7 @@ import java.util.List;
 public class RouteAnalysisController {
 
     private final RouteAnalysisService service;
+    private final RoutePathService pathService;
 
     @GetMapping("/stops")
     public ResponseEntity<RouteStopsResponse> stops(
@@ -77,5 +81,11 @@ public class RouteAnalysisController {
         @RequestParam(value = "hour", required = false) Integer hour
     ) {
         return ResponseEntity.ok(service.dongOd(TypicalDay.label(기준일자), 노선명, hour));
+    }
+
+    /** Road path of the route and the stop it turns at, from the Seoul bus route API (cached a day). */
+    @GetMapping("/path")
+    public ResponseEntity<RoutePathResponse> path(@PathVariable("routeName") String 노선명) {
+        return ResponseEntity.ok(pathService.path(노선명));
     }
 }

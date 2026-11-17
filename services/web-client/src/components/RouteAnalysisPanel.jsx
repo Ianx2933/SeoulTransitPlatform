@@ -33,7 +33,8 @@ export default function RouteAnalysisPanel({
   onReach,
   onTurnaround,
   onSegment,
-  onQuery
+  onQuery,
+  turnaroundFromBis = null
 }) {
   const { t, lang } = useI18n();
   const fmt = (value) =>
@@ -65,7 +66,9 @@ export default function RouteAnalysisPanel({
   });
 
   const chart = useMemo(() => buildBarChart(routeData?.stops || [], CHART), [routeData]);
-  const turnaround = useMemo(() => findTurnaround(routeData?.stops), [routeData]);
+  const estimatedTurnaround = useMemo(() => findTurnaround(routeData?.stops), [routeData]);
+  // The city's stop list marks the turnaround (transYn); the estimate is the fallback.
+  const turnaround = turnaroundFromBis ?? estimatedTurnaround;
 
   useEffect(() => {
     onQuery?.({ dayType, hour: activeHour });
@@ -342,7 +345,9 @@ export default function RouteAnalysisPanel({
                     <g key="turnaround">
                       <line x1={b.cx} x2={b.cx} y1={16} y2={chart.baseY} stroke="var(--ink)" strokeDasharray="4 3" />
                       <text x={b.cx + 4} y={14} fontSize="11" className="axis-label axis-label--strong">
-                        {t("route.chart.turnaround", { seq: b.seq })}
+                        {turnaroundFromBis != null
+                          ? t("route.chart.turnaroundBis", { seq: b.seq })
+                          : t("route.chart.turnaround", { seq: b.seq })}
                       </text>
                     </g>
                   ))}
