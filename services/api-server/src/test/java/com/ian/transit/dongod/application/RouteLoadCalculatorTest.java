@@ -57,6 +57,16 @@ class RouteLoadCalculatorTest {
     }
 
     @Test
+    void ridersFromTheVirtualDepotStopRideFromTheFirstStation() {
+        List<Station> l = line("143", "143", "01001", "01002", "01003");
+        var r = RouteLoadCalculator.compute(List.of(new Leg("143", "00000", "01003", 6, 0, 3)), l);
+        assertThat(r.loads()).containsEntry(new SegmentRef("143", 1), 6.0).containsEntry(new SegmentRef("143", 2), 6.0).hasSize(2);
+        assertThat(r.unplaced()).isZero();
+        // without the depot sequence an all-zero ARS stays unplaced
+        assertThat(RouteLoadCalculator.compute(List.of(new Leg("143", "00000", "01003", 6)), l).unplaced()).isEqualTo(6.0);
+    }
+
+    @Test
     void variantsAreChosenByWhichOneServesBothStopsInOrder() {
         List<Station> stations = new ArrayList<>(line("2312", "2312|2312A", "00001", "00002", "00003"));
         stations.addAll(line("2312", "2312|2312B", "00003", "00002", "00001"));

@@ -19,6 +19,8 @@ import java.util.function.BiPredicate;
  * on 6411 the stop 17104 is served twice, and riders who stay on through the
  * loop were put on the short span (2026-11-18, 390 riders a day short over 92
  * segments against the route chart).
+ * Riders boarding at TOPIS's virtual depot stop (ARS 00000, sequence 0) are
+ * placed from the first stored station (143: 448 riders a day were unplaced).
  * Every segment from the boarding stop to the one before the alighting stop
  * carries the leg's passengers. Legs that no variant can hold (no stored
  * path, or a stop missing from it) are counted as unplaced by route.
@@ -126,8 +128,11 @@ public final class RouteLoadCalculator {
             int bestFrom = -1;
             int bestTo = -1;
             boolean withSeq = leg.boardSeq() != null && leg.alightSeq() != null;
+            // TOPIS's virtual stop "…(가상)": ARS 00000 at sequence 0, the depot
+            // before the first stop. Its riders ride from the first stored station.
+            boolean fromDepot = leg.boardSeq() != null && leg.boardSeq() == 0;
             for (Variant v : variants.getOrDefault(leg.route(), List.of())) {
-                List<Integer> froms = v.positions().get(b);
+                List<Integer> froms = b == null && fromDepot ? List.of(0) : v.positions().get(b);
                 List<Integer> tos = v.positions().get(a);
                 if (froms == null || tos == null) {
                     continue;
