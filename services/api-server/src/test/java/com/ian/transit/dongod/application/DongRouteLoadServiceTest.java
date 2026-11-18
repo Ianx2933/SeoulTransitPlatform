@@ -23,7 +23,7 @@ class DongRouteLoadServiceTest {
                 new SegmentRef("2312|2312A", 9), 4.0,
                 new SegmentRef("440", 2), 1.0), 15, 0, Map.of());
         List<DongRouteLoadResponse.Segment> s = DongRouteLoadService.merge(result, List.of(
-                new SegmentRow("302", 5, "01001", "01002", path()),
+                new SegmentRow("302", 5, "01001", "01002", path(), "광화문", "세종로"),
                 new SegmentRow("2312|2312A", 9, "1001", "1002", path()),
                 new SegmentRow("440", 2, "01002", "01003", path())));
         assertThat(s).hasSize(2);
@@ -42,5 +42,14 @@ class DongRouteLoadServiceTest {
                 new SegmentRow("A", 1, null, "01002", path()),
                 new SegmentRow("B", 1, null, "01002", path())));
         assertThat(s).extracting(DongRouteLoadResponse.Segment::load).containsExactly(3.0, 2.0);
+    }
+
+    @Test
+    void stopNamesComeFromTheStoredStations() {
+        var result = new RouteLoadCalculator.Result(Map.of(new SegmentRef("302", 5), 10.0), 10, 0, Map.of());
+        List<DongRouteLoadResponse.Segment> s = DongRouteLoadService.merge(result, List.of(
+                new SegmentRow("302", 5, "01001", "01002", path(), "광화문", "세종로")));
+        assertThat(s.get(0).fromName()).isEqualTo("광화문");
+        assertThat(s.get(0).toName()).isEqualTo("세종로");
     }
 }

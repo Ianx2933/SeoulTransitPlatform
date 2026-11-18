@@ -31,6 +31,12 @@ export default function RouteLoadLayer({ result, segments, onSegmentClick }) {
       }
     >
       <Tooltip sticky>
+        {(s.fromName || s.toName) && (
+          <>
+            <strong>{`${s.fromName || s.fromArs || "?"} → ${s.toName || s.toArs || "?"}`}</strong>
+            <br />
+          </>
+        )}
         {tx("{riders} riders a day", { riders: fmt(s.load) })}
         <br />
         {tx("Routes: {routes}", { routes: routeBreakdown(s, fmt) })}

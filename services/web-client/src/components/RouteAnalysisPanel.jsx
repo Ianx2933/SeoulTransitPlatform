@@ -8,6 +8,8 @@ import {
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle, busRouteType } from "../utils/busRouteType.js";
 import { buildBarChart, findTurnaround, percent } from "../utils/routeLoadChart.js";
+import { csvFileName, routeStopsCsv } from "../utils/roadCsv.js";
+import CsvButton from "./CsvButton.jsx";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -386,6 +388,11 @@ export default function RouteAnalysisPanel({
 
           <details className="card">
             <summary>{t("route.table.summary", { count: routeData.stops.length })}</summary>
+            <CsvButton
+              result={routeData}
+              toCsv={routeStopsCsv}
+              fileName={csvFileName("route", routeData.노선명, "stops", routeData.기준일자)}
+            />
             <div className="table-wrap">
               <table className="data-table">
                 <thead>

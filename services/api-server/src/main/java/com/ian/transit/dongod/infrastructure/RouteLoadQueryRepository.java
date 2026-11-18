@@ -68,16 +68,31 @@ public class RouteLoadQueryRepository {
             WHERE r.status = 'ok' AND r.od_route_nm IN (:routes)
             """;
 
+    /** Segments with the names of their two stops (the next stored station, seq may skip). */
     private static final String SEGMENTS_SQL = """
-            SELECT route_nm, seq, from_ars, to_ars,
-                   ST_AsText(ST_SimplifyPreserveTopology(geom, :tolerance)) AS wkt
-            FROM bus_route_path_segment
-            WHERE route_nm IN (:variants)
+            SELECT s.route_nm, s.seq, s.from_ars, s.to_ars,
+                   a.station_nm AS from_name, b.station_nm AS to_name,
+                   ST_AsText(ST_SimplifyPreserveTopology(s.geom, :tolerance)) AS wkt
+            FROM bus_route_path_segment s
+            LEFT JOIN bus_route_path_station a ON a.route_nm = s.route_nm AND a.seq = s.seq
+            LEFT JOIN LATERAL (
+                SELECT n.station_nm
+                FROM bus_route_path_station n
+                WHERE n.route_nm = s.route_nm AND n.seq > s.seq
+                ORDER BY n.seq
+                LIMIT 1
+            ) b ON true
+            WHERE s.route_nm IN (:variants)
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    public record SegmentRow(String variant, int seq, String fromArs, String toArs, List<double[]> path) {
+    public record SegmentRow(String variant, int seq, String fromArs, String toArs, List<double[]> path,
+                             String fromName, String toName) {
+
+        public SegmentRow(String variant, int seq, String fromArs, String toArs, List<double[]> path) {
+            this(variant, seq, fromArs, toArs, path, null, null);
+        }
     }
 
     /**
@@ -120,7 +135,8 @@ public class RouteLoadQueryRepository {
                 .addValue("variants", List.copyOf(variants))
                 .addValue("tolerance", SIMPLIFY_TOLERANCE);
         return jdbc.query(SEGMENTS_SQL, p, (rs, i) -> new SegmentRow(rs.getString("route_nm"), rs.getInt("seq"),
-                rs.getString("from_ars"), rs.getString("to_ars"), parseLineString(rs.getString("wkt"))));
+                rs.getString("from_ars"), rs.getString("to_ars"), parseLineString(rs.getString("wkt")),
+                rs.getString("from_name"), rs.getString("to_name")));
     }
 
     /** [lat, lng] pairs of a WKT LINESTRING, rounded to 6 decimals; empty for anything else. */

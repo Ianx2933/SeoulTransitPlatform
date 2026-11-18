@@ -6,6 +6,7 @@
  * Korean uses 정류소, not 정류장.
  */
 export const koByEnglish = {
+  "Add these {count} routes up on the map": "이 노선 {count}개 합쳐 보기",
   "Download CSV": "CSV 내려받기",
   "Bus riders of this stop on the road": "도로 위 버스 이용객",
   "Every route that serves the stop, typical day.": "해당 정류소에 서는 모든 노선을 대표일 기준으로 봅니다.",

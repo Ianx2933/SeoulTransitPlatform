@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RoadLoadService {
 
-    public static final int MAX_ROUTES = 10;
+    public static final int MAX_ROUTES = 20;
     public static final int MAX_POINTS = 150;
 
     private final RoadLoadQueryRepository repository;

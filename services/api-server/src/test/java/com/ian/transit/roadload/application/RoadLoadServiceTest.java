@@ -14,7 +14,10 @@ class RoadLoadServiceTest {
     void parsesRouteLists() {
         assertThat(RoadLoadService.parseRoutes(" 302, 440,302,,333 ")).containsExactly("302", "440", "333");
         assertThatThrownBy(() -> RoadLoadService.parseRoutes(" , ")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> RoadLoadService.parseRoutes("1,2,3,4,5,6,7,8,9,10,11"))
+        String twenty = java.util.stream.IntStream.rangeClosed(1, 20).mapToObj(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(","));
+        assertThat(RoadLoadService.parseRoutes(twenty)).hasSize(20);
+        assertThatThrownBy(() -> RoadLoadService.parseRoutes(twenty + ",21"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

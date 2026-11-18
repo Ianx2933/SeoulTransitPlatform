@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle } from "../utils/busRouteType.js";
@@ -6,6 +6,9 @@ import { busiestRoutes } from "../utils/routeLoad.js";
 import { csvFileName } from "../utils/roadCsv.js";
 import CsvButton from "./CsvButton.jsx";
 import RouteLoadLegend from "./RouteLoadLegend.jsx";
+
+/** Routes one road-load request may add up (RoadLoadService.MAX_ROUTES). */
+export const MAX_COMBINED_ROUTES = 20;
 
 /**
  * Route analysis map in demand colours: the route (and any routes added to
@@ -32,6 +35,8 @@ export default function RouteRoadCard({
 }) {
   const { tx, lang } = useI18n();
   const [draft, setDraft] = useState(extraRoutes.join(", "));
+  // Routes added from outside (a segment look-up) show up in the box too.
+  useEffect(() => setDraft(extraRoutes.join(", ")), [extraRoutes]);
   const fmt = (v) => Number(v || 0).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });
   const routes = result ? busiestRoutes(result.segments) : [];
   const applyDraft = () =>
@@ -40,7 +45,7 @@ export default function RouteRoadCard({
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s && s !== routeName)
-        .slice(0, 9)
+        .slice(0, MAX_COMBINED_ROUTES - 1)
     );
   const toggle = (r) => setPicked((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
 

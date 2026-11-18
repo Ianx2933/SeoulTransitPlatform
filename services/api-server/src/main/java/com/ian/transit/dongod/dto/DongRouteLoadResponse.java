@@ -13,7 +13,8 @@ import java.util.TreeMap;
  * routes that use the same pair of stops.
  *
  * byRoute keeps each route's riders on the segment, so the map can show
- * chosen routes only. path is [lat, lng] pairs along the road.
+ * chosen routes only. path is [lat, lng] pairs along the road. fromName and
+ * toName are the stop names (null when the stored path has none).
  * unplacedPassengers are riders on routes without a stored path (closed
  * routes) or whose stops the path lacks.
  */
@@ -35,7 +36,7 @@ public record DongRouteLoadResponse(
     }
 
     public record Segment(String fromArs, String toArs, Double load, List<String> routes,
-                          Map<String, Double> byRoute, List<double[]> path) {
+                          Map<String, Double> byRoute, List<double[]> path, String fromName, String toName) {
         public Segment {
             load = TypicalDay.round(load);
             Map<String, Double> rounded = new TreeMap<>();

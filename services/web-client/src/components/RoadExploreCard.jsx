@@ -4,9 +4,10 @@ import CsvButton from "./CsvButton.jsx";
 
 /**
  * Summary of a stop or segment look-up (select link): who they are, where
- * they board and where they get off. onClose ends the look-up.
+ * they board and where they get off. onClose ends the look-up; with
+ * onCombineRoutes (route analysis) the routes found can be added up on the map.
  */
-export default function RoadExploreCard({ request, state, error, result, onClose }) {
+export default function RoadExploreCard({ request, state, error, result, onClose, onCombineRoutes }) {
   const { tx, lang } = useI18n();
   if (!request) return null;
   const fmt = (v) => Number(v || 0).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });
@@ -35,6 +36,11 @@ export default function RoadExploreCard({ request, state, error, result, onClose
             })}
           </p>
           <p className="note">{tx("Blue circles: where they board. Red circles: where they get off. Lines: the road they ride.")}</p>
+          {onCombineRoutes && (result.routes || []).length > 0 && (
+            <button type="button" className="chip" onClick={() => onCombineRoutes(result.routes)}>
+              {tx("Add these {count} routes up on the map", { count: result.routes.length })}
+            </button>
+          )}
           <CsvButton
             result={result}
             fileName={csvFileName(request.kind, request.kind === "segment" ? `${request.from}_${request.to}` : request.ars, request.direction, result.dayType)}

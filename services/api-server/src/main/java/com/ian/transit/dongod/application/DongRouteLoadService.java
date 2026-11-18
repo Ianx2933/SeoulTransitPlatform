@@ -65,7 +65,8 @@ public class DongRouteLoadService {
         for (RouteLoadQueryRepository.SegmentRow r : rows) {
             byRef.put(new RouteLoadCalculator.SegmentRef(r.variant(), r.seq()), r);
         }
-        record Acc(String from, String to, List<double[]> path, double[] load, Map<String, Double> routes) {
+        record Acc(String from, String to, List<double[]> path, double[] load, Map<String, Double> routes,
+                   String fromName, String toName) {
         }
         Map<String, Acc> merged = new LinkedHashMap<>();
         result.loads().forEach((ref, load) -> {
@@ -76,14 +77,15 @@ public class DongRouteLoadService {
             String from = RouteLoadCalculator.pad(row.fromArs());
             String to = RouteLoadCalculator.pad(row.toArs());
             String key = from != null && to != null ? from + ">" + to : ref.variant() + "#" + ref.seq();
-            Acc acc = merged.computeIfAbsent(key, k -> new Acc(from, to, row.path(), new double[1], new TreeMap<>()));
+            Acc acc = merged.computeIfAbsent(key, k -> new Acc(from, to, row.path(), new double[1], new TreeMap<>(),
+                    row.fromName(), row.toName()));
             acc.load()[0] += load;
             acc.routes().merge(routeName(ref.variant()), load, Double::sum);
         });
         List<DongRouteLoadResponse.Segment> out = new ArrayList<>();
         for (Acc a : merged.values()) {
             out.add(new DongRouteLoadResponse.Segment(a.from(), a.to(), a.load()[0],
-                    List.copyOf(a.routes().keySet()), a.routes(), a.path()));
+                    List.copyOf(a.routes().keySet()), a.routes(), a.path(), a.fromName(), a.toName()));
         }
         out.sort(Comparator.comparing(DongRouteLoadResponse.Segment::load).reversed());
         return out;

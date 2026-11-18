@@ -8,12 +8,13 @@ import { busRouteStyle } from "../utils/busRouteType.js";
 import { boundsOf, pathBetween, placeStops, seqOfArs, splitAtTurnaround } from "../utils/routeGeometry.js";
 import { findTurnaround } from "../utils/routeLoadChart.js";
 import { useRoadLoad } from "../hooks/useRoadLoad.js";
+import { useStoredNumber } from "../hooks/useStoredNumber.js";
 import { DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
 import RoadExploreCard from "./RoadExploreCard.jsx";
 import RoadPointsLayer from "./RoadPointsLayer.jsx";
 import RouteAnalysisPanel from "./RouteAnalysisPanel.jsx";
 import RouteLoadLayer from "./RouteLoadLayer.jsx";
-import RouteRoadCard from "./RouteRoadCard.jsx";
+import RouteRoadCard, { MAX_COMBINED_ROUTES } from "./RouteRoadCard.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.978];
 const COLORS = {
@@ -57,7 +58,7 @@ export default function RouteAnalysisView({ busLines }) {
   // Demand colours: the route (plus added routes) by riders on board.
   const [roadOn, setRoadOn] = useState(false);
   const [extraRoutes, setExtraRoutes] = useState([]);
-  const [roadMinLoad, setRoadMinLoad] = useState(DEFAULT_MIN_LOAD);
+  const [roadMinLoad, setRoadMinLoad] = useStoredNumber("roadMinLoad", DEFAULT_MIN_LOAD);
   const [roadPicked, setRoadPicked] = useState([]);
   const [explore, setExplore] = useState(null);
   useEffect(() => {
@@ -212,7 +213,8 @@ export default function RouteAnalysisView({ busLines }) {
           <FitRoute bounds={bounds} routeName={routeName} />
 
           <Pane name="districts" style={{ zIndex: 350 }}>
-            {dongOn && dongFeatures.length > 0 && (
+            {/* The road view draws riders itself; district fills would hide it. */}
+            {dongOn && !roadOn && dongFeatures.length > 0 && (
               <GeoJSON
                 key={`${dongData.노선명}-${dongData.기준일자}-${dongData.hour}-${dongSelected}-${dongDirection}`}
                 data={{ type: "FeatureCollection", features: dongFeatures }}
@@ -320,6 +322,11 @@ export default function RouteAnalysisView({ busLines }) {
               error={exploreLoad.error}
               result={exploreLoad.result}
               onClose={() => setExplore(null)}
+              onCombineRoutes={(routes) => {
+                setExtraRoutes(routes.filter((r) => r !== routeName).slice(0, MAX_COMBINED_ROUTES - 1));
+                setRoadPicked([]);
+                setExplore(null);
+              }}
             />
           )}
           <DongCard

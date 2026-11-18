@@ -4,7 +4,9 @@
  * result has them. Every segment is included, not only those on the map.
  * Pure, for tests; downloadCsv does the browser part.
  */
-const HEADER = ["type", "from_ars", "to_ars", "stop_ars", "stop_name", "lat", "lng", "riders", "routes"];
+const HEADER = [
+  "type", "from_ars", "from_name", "to_ars", "to_name", "stop_ars", "stop_name", "lat", "lng", "riders", "routes"
+];
 
 function cell(value) {
   if (value === null || value === undefined) return "";
@@ -22,12 +24,24 @@ function routesText(segment) {
 export function roadCsv(result) {
   const rows = [HEADER];
   for (const s of result?.segments || []) {
-    rows.push(["segment", s.fromArs, s.toArs, "", "", "", "", s.load, routesText(s)]);
+    rows.push(["segment", s.fromArs, s.fromName, s.toArs, s.toName, "", "", "", "", s.load, routesText(s)]);
   }
   for (const [type, points] of [["origin", result?.origins], ["destination", result?.destinations]]) {
     for (const p of points || []) {
-      rows.push([type, "", "", p.ars, p.name, p.lat, p.lng, p.riders, ""]);
+      rows.push([type, "", "", "", "", p.ars, p.name, p.lat, p.lng, p.riders, ""]);
     }
+  }
+  return rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
+}
+
+/**
+ * CSV of the route analysis stop table: every stop in order with riders
+ * boarding, alighting and on board after it (routeData from the stops API).
+ */
+export function routeStopsCsv(routeData) {
+  const rows = [["seq", "stop_name", "ars", "boardings", "alightings", "on_board_after"]];
+  for (const s of routeData?.stops || []) {
+    rows.push([s.seq, s.name, s.ars, s.boardings, s.alightings, s.onBoardAfter]);
   }
   return rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
 }

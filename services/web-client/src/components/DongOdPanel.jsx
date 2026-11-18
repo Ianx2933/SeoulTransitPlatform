@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { areaCode, fetchDongOd, fetchDongRouteLoad, fetchDongRoutes } from "../api/dongOdApi.js";
+import { useStoredNumber } from "../hooks/useStoredNumber.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle } from "../utils/busRouteType.js";
 import { csvFileName } from "../utils/roadCsv.js";
@@ -46,7 +47,7 @@ export default function DongOdPanel({
   const [dest, setDest] = useState("dong");
   const [view, setView] = useState("from");
   const [loadDirection, setLoadDirection] = useState("both");
-  const [minLoad, setMinLoad] = useState(DEFAULT_MIN_LOAD);
+  const [minLoad, setMinLoad] = useStoredNumber("roadMinLoad", DEFAULT_MIN_LOAD);
   const [pickedRoutes, setPickedRoutes] = useState([]);
   const [answer, setAnswer] = useState(null);
   const [state, setState] = useState("idle");
