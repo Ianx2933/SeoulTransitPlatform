@@ -10,6 +10,7 @@ import { busRouteStyle, busRouteType } from "../utils/busRouteType.js";
 import { buildBarChart, findTurnaround, percent } from "../utils/routeLoadChart.js";
 import { csvFileName, routeStopsCsv } from "../utils/roadCsv.js";
 import CsvButton from "./CsvButton.jsx";
+import useLatest from "../hooks/useLatest.js";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -72,17 +73,19 @@ export default function RouteAnalysisPanel({
   // The city's stop list marks the turnaround (transYn); the estimate is the fallback.
   const turnaround = turnaroundFromBis ?? estimatedTurnaround;
 
+  // Parent callbacks are new functions on every render; effects below run on
+  // their own values and call the latest callback.
+  const callbacks = useLatest({ onQuery, onRouteData, onTurnaround, onReach, onSegment });
+
   useEffect(() => {
-    onQuery?.({ dayType, hour: activeHour });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayType, activeHour]);
+    callbacks.current.onQuery?.({ dayType, hour: activeHour });
+  }, [callbacks, dayType, activeHour]);
 
   // Tell the map what to draw.
   useEffect(() => {
-    onRouteData?.(routeData);
-    onTurnaround?.(turnaround);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeData, turnaround]);
+    callbacks.current.onRouteData?.(routeData);
+    callbacks.current.onTurnaround?.(turnaround);
+  }, [callbacks, routeData, turnaround]);
 
   const run = async (task) => {
     setLoading(true);
@@ -110,6 +113,9 @@ export default function RouteAnalysisPanel({
       }
     });
 
+  // What the effects below need at the moment they run, without rerunning them.
+  const current = useLatest({ run, loadRoute, messagesFor, routeData, dayType, activeHour });
+
   const onSubmit = (event) => {
     event.preventDefault();
     const name = route.trim();
@@ -127,31 +133,31 @@ export default function RouteAnalysisPanel({
       firstRun.current = false;
       return;
     }
-    if (routeData) loadRoute(routeData.노선명, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayType, activeHour]);
+    const { routeData: shown, loadRoute: reload } = current.current;
+    if (shown) reload(shown.노선명, true);
+  }, [current, dayType, activeHour]);
 
   // Stop detail follows the chosen stop, the time of day and the threshold,
   // with a short delay while the threshold is being typed.
   useEffect(() => {
     if (!routeData || stopSeq === null || !reachValid) return undefined;
     const timer = setTimeout(() => {
-      run(async () => {
+      const now = current.current;
+      now.run(async () => {
         setStopDetail(
           await fetchRouteStop({
             route: routeData.노선명,
-            dayType,
-            hour: activeHour,
+            dayType: now.dayType,
+            hour: now.activeHour,
             seq: stopSeq,
             reach: [reachValue],
-            messages: messagesFor(routeData.노선명)
+            messages: now.messagesFor(routeData.노선명)
           })
         );
       });
     }, REACH_DELAY_MS);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeData, stopSeq, reachValue, reachValid]);
+  }, [current, routeData, stopSeq, reachValue, reachValid]);
 
   const loadSegment = () =>
     run(async () => {
@@ -172,13 +178,11 @@ export default function RouteAnalysisPanel({
   const reachSeq = reach?.untilSeq ?? null;
 
   useEffect(() => {
-    onReach?.(reachSeq);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reachSeq]);
+    callbacks.current.onReach?.(reachSeq);
+  }, [callbacks, reachSeq]);
   useEffect(() => {
-    onSegment?.(segment ? [segment.fromSeq, segment.toSeq] : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segment]);
+    callbacks.current.onSegment?.(segment ? [segment.fromSeq, segment.toSeq] : null);
+  }, [callbacks, segment]);
   const bandBars =
     stopSeq !== null && reachSeq !== null
       ? chart.bars.filter((b) => b.seq >= stopSeq && b.seq <= reachSeq)

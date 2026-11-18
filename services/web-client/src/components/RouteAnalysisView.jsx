@@ -16,6 +16,7 @@ import {
 import { findTurnaround } from "../utils/routeLoadChart.js";
 import { useRoadLoad } from "../hooks/useRoadLoad.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
+import useLatest from "../hooks/useLatest.js";
 import { DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
 import RoadExploreCard from "./RoadExploreCard.jsx";
 import RoadPointsLayer from "./RoadPointsLayer.jsx";
@@ -45,6 +46,7 @@ const COLORS = {
  */
 export default function RouteAnalysisView({ busLines }) {
   const { t } = useI18n();
+  const translate = useLatest(t);
   const [routeData, setRouteData] = useState(null);
   const [turnaround, setTurnaround] = useState(null);
   const [stopSeq, setStopSeq] = useState(null);
@@ -144,11 +146,12 @@ export default function RouteAnalysisView({ busLines }) {
     }
     let ignore = false;
     setDongState("loading");
+    const tr = translate.current;
     fetchRouteDongOd({
       route: routeName,
       dayType: query.dayType,
       hour: query.hour,
-      messages: { defaultMessage: t("route.dong.error"), notFoundMessage: t("route.dong.error") }
+      messages: { defaultMessage: tr("route.dong.error"), notFoundMessage: tr("route.dong.error") }
     })
       .then((data) => {
         if (ignore) return;
@@ -164,8 +167,7 @@ export default function RouteAnalysisView({ busLines }) {
     return () => {
       ignore = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dongOn, routeName, query.dayType, query.hour]);
+  }, [translate, dongOn, routeName, query.dayType, query.hour]);
 
   const dongFeatures = useMemo(
     () =>
@@ -184,6 +186,7 @@ export default function RouteAnalysisView({ busLines }) {
   );
   const dongMax = Math.max(0, ...dongValues.values());
 
+  const variantPaths = (roadPath?.variants || []).filter((v) => Array.isArray(v.path) && v.path.length > 1);
   // Demand-layer positions first; the stored route path fills the rest (piers, new stops).
   const placed = useMemo(
     () => placeStops(routeData?.stops || [], [...points, ...pathStopPoints(roadPath)]),
@@ -252,9 +255,16 @@ export default function RouteAnalysisView({ busLines }) {
           {segmentPath.length > 1 && (
             <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
-          {!roadOn && hasRoad && (
+          {!roadOn && hasRoad && variantPaths.length === 0 && (
             <Polyline positions={roadPath.path} pathOptions={{ color: roadColor, weight: 5, opacity: 0.85 }} />
           )}
+          {/* A route stored as several runs (한강버스01, 8762 출근/퇴근): draw each. */}
+          {!roadOn &&
+            variantPaths.map((v) => (
+              <Polyline key={v.name} positions={v.path} pathOptions={{ color: roadColor, weight: 5, opacity: 0.85 }}>
+                <Tooltip sticky>{v.name}</Tooltip>
+              </Polyline>
+            ))}
           {!roadOn && !hasRoad && lines.up.length > 1 && (
             <Polyline positions={lines.up} pathOptions={{ color: COLORS.up, weight: 5, opacity: 0.9 }} />
           )}
@@ -446,16 +456,18 @@ function DongCard({ on, setOn, state, data, selected, setSelected, direction, se
  */
 function FitRoute({ bounds, routeName }) {
   const map = useMap();
+  const latestBounds = useLatest(bounds);
+  const hasBounds = bounds !== null;
   useEffect(() => {
-    if (!bounds) return;
+    const target = latestBounds.current;
+    if (!target) return;
     const wide = map.getContainer().clientWidth > 900;
-    map.fitBounds(bounds, {
+    map.fitBounds(target, {
       paddingTopLeft: [40, 40],
       paddingBottomRight: [wide ? 520 : 40, 40],
       maxZoom: 15
     });
     // Fit when the route changes, not on every re-render of its stops.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeName, bounds === null]);
+  }, [map, latestBounds, routeName, hasBounds]);
   return null;
 }
