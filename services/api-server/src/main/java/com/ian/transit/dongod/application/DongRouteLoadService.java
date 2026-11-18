@@ -59,7 +59,7 @@ public class DongRouteLoadService {
      * Segments with riders, summed by (from ARS, to ARS); a segment whose ends
      * lack an ARS stays on its own. The first geometry seen draws the pair.
      */
-    static List<DongRouteLoadResponse.Segment> merge(RouteLoadCalculator.Result result,
+    public static List<DongRouteLoadResponse.Segment> merge(RouteLoadCalculator.Result result,
                                                      List<RouteLoadQueryRepository.SegmentRow> rows) {
         Map<RouteLoadCalculator.SegmentRef, RouteLoadQueryRepository.SegmentRow> byRef = new HashMap<>();
         for (RouteLoadQueryRepository.SegmentRow r : rows) {
@@ -90,7 +90,7 @@ public class DongRouteLoadService {
     }
 
     /** TOPIS route name of a stored variant ("2312|2312A" -> "2312"). */
-    static String routeName(String variant) {
+    public static String routeName(String variant) {
         int bar = variant.indexOf('|');
         return bar < 0 ? variant : variant.substring(0, bar);
     }

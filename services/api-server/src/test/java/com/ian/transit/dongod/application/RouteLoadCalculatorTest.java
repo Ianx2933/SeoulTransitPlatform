@@ -73,4 +73,22 @@ class RouteLoadCalculatorTest {
         assertThat(RouteLoadCalculator.pad(" ")).isNull();
         assertThat(RouteLoadCalculator.pad(null)).isNull();
     }
+
+    @Test
+    void selectLinkKeepsOnlyLegsCrossingTheSegment() {
+        List<Station> stations = new ArrayList<>(line("302", "302", "00001", "00002", "00003", "00004"));
+        stations.addAll(line("440", "440", "00009", "00002", "00003"));
+        var r = RouteLoadCalculator.compute(List.of(
+                new Leg("302", "1", "4", 5),      // crosses 2 -> 3
+                new Leg("302", "3", "4", 7),      // after it
+                new Leg("440", "9", "3", 2),      // crosses on another route
+                new Leg("999", "1", "2", 4)),     // no path: left out, not unplaced
+                stations, (a, b) -> a.equals("00002") && b.equals("00003"));
+        assertThat(r.placed()).isEqualTo(7.0);
+        assertThat(r.unplaced()).isZero();
+        assertThat(r.placedLegs()).extracting("route", "boardArs", "alightArs")
+                .containsExactlyInAnyOrder(org.assertj.core.groups.Tuple.tuple("302", "00001", "00004"),
+                        org.assertj.core.groups.Tuple.tuple("440", "00009", "00003"));
+        assertThat(r.loads()).containsEntry(new SegmentRef("302", 3), 5.0).doesNotContainKey(new SegmentRef("302", 4));
+    }
 }

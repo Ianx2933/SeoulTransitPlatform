@@ -390,3 +390,17 @@
 @media (max-width: 900px) {
   .map-body .map-card { position: relative; }
 }
+
+/* route analysis: cards stacked on the left of the map */
+.route-cards {
+  position: absolute; left: 16px; top: 16px; z-index: 600; width: 320px; max-height: calc(100% - 96px);
+  overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+}
+.route-cards .dong-card { position: static; width: auto; max-height: none; overflow: visible; }
+.route-cards .road-explore { margin: 0; }
+.road-explore__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.field-inline__wide { width: 130px !important; text-align: left !important; }
+.road-stop { display: grid; gap: 4px; }
+@media (max-width: 900px) {
+  .route-cards { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
+}

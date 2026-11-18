@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { areaCode, fetchDongOd, fetchDongRouteLoad, fetchDongRoutes } from "../api/dongOdApi.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle } from "../utils/busRouteType.js";
+import { csvFileName } from "../utils/roadCsv.js";
 import { busiestRoutes, DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
 import { guName } from "../utils/seoulGu.js";
+import CsvButton from "./CsvButton.jsx";
 import RouteLoadLegend from "./RouteLoadLegend.jsx";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
@@ -274,6 +276,7 @@ export default function DongOdPanel({
             })}
           </p>
           <RouteLoadLegend styled={styled} minLoad={minLoad} />
+          <CsvButton result={roadResult} fileName={csvFileName("road", areaTitle, roadResult.direction, roadResult.dayType)} />
           {styled.shown === 0 && <p className="note">{tx("No bus riders on the road for this choice.")}</p>}
 
           {roadRoutes.length > 0 && (

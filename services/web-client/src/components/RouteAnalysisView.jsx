@@ -7,7 +7,13 @@ import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
 import { boundsOf, pathBetween, placeStops, seqOfArs, splitAtTurnaround } from "../utils/routeGeometry.js";
 import { findTurnaround } from "../utils/routeLoadChart.js";
+import { useRoadLoad } from "../hooks/useRoadLoad.js";
+import { DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
+import RoadExploreCard from "./RoadExploreCard.jsx";
+import RoadPointsLayer from "./RoadPointsLayer.jsx";
 import RouteAnalysisPanel from "./RouteAnalysisPanel.jsx";
+import RouteLoadLayer from "./RouteLoadLayer.jsx";
+import RouteRoadCard from "./RouteRoadCard.jsx";
 
 const SEOUL_CENTER = [37.5665, 126.978];
 const COLORS = {
@@ -47,6 +53,31 @@ export default function RouteAnalysisView({ busLines }) {
   const [dongDirection, setDongDirection] = useState("from");
 
   const routeName = routeData?.노선명 ?? null;
+
+  // Demand colours: the route (plus added routes) by riders on board.
+  const [roadOn, setRoadOn] = useState(false);
+  const [extraRoutes, setExtraRoutes] = useState([]);
+  const [roadMinLoad, setRoadMinLoad] = useState(DEFAULT_MIN_LOAD);
+  const [roadPicked, setRoadPicked] = useState([]);
+  const [explore, setExplore] = useState(null);
+  useEffect(() => {
+    setExtraRoutes([]);
+    setRoadPicked([]);
+    setExplore(null);
+  }, [routeName]);
+  const roadRequest =
+    roadOn && routeName ? { kind: "routes", routes: [routeName, ...extraRoutes], dayType: query.dayType } : null;
+  const roadLoad = useRoadLoad(roadRequest);
+  const exploreLoad = useRoadLoad(roadOn ? explore : null);
+  const roadStyled = useMemo(() => {
+    if (exploreLoad.result) return styleSegments(exploreLoad.result.segments, { minLoad: roadMinLoad });
+    if (!roadLoad.result) return null;
+    const known = new Set((roadLoad.result.routes || []));
+    return styleSegments(roadLoad.result.segments, {
+      minLoad: roadMinLoad,
+      routes: roadPicked.filter((r) => known.has(r))
+    });
+  }, [roadLoad.result, exploreLoad.result, roadMinLoad, roadPicked]);
 
   useEffect(() => {
     if (!routeName) {
@@ -208,15 +239,23 @@ export default function RouteAnalysisView({ busLines }) {
           {segmentPath.length > 1 && (
             <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
-          {hasRoad && (
+          {!roadOn && hasRoad && (
             <Polyline positions={roadPath.path} pathOptions={{ color: roadColor, weight: 5, opacity: 0.85 }} />
           )}
-          {!hasRoad && lines.up.length > 1 && (
+          {!roadOn && !hasRoad && lines.up.length > 1 && (
             <Polyline positions={lines.up} pathOptions={{ color: COLORS.up, weight: 5, opacity: 0.9 }} />
           )}
-          {!hasRoad && lines.down.length > 1 && (
+          {!roadOn && !hasRoad && lines.down.length > 1 && (
             <Polyline positions={lines.down} pathOptions={{ color: COLORS.down, weight: 5, opacity: 0.95 }} />
           )}
+          {roadOn && roadStyled && (
+            <RouteLoadLayer
+              result={exploreLoad.result || roadLoad.result}
+              segments={roadStyled.segments}
+              onSegmentClick={(s) => setExplore({ kind: "segment", from: s.fromArs, to: s.toArs, dayType: query.dayType })}
+            />
+          )}
+          {roadOn && exploreLoad.result && <RoadPointsLayer result={exploreLoad.result} />}
           {reachPath.length > 1 && (
             <Polyline positions={reachPath} pathOptions={{ color: COLORS.selected, weight: 8, opacity: 0.95 }} />
           )}
@@ -252,6 +291,37 @@ export default function RouteAnalysisView({ busLines }) {
         </MapContainer>
         <p className="map-note" role="status">{note}</p>
         {routeName && (
+          <div className="route-cards">
+          <RouteRoadCard
+            key={routeName}
+            routeName={routeName}
+            on={roadOn}
+            setOn={setRoadOn}
+            extraRoutes={extraRoutes}
+            setExtraRoutes={setExtraRoutes}
+            state={roadLoad.state}
+            error={roadLoad.error}
+            result={roadLoad.result}
+            styled={exploreLoad.result ? null : roadStyled}
+            minLoad={roadMinLoad}
+            setMinLoad={setRoadMinLoad}
+            picked={roadPicked}
+            setPicked={setRoadPicked}
+            stop={routeData?.stops?.find((s) => s.seq === stopSeq) || null}
+            onStopLookup={(direction) => {
+              const stop = routeData?.stops?.find((s) => s.seq === stopSeq);
+              if (stop?.ars) setExplore({ kind: "stop", ars: String(stop.ars), direction, dayType: query.dayType });
+            }}
+          />
+          {roadOn && (
+            <RoadExploreCard
+              request={explore}
+              state={exploreLoad.state}
+              error={exploreLoad.error}
+              result={exploreLoad.result}
+              onClose={() => setExplore(null)}
+            />
+          )}
           <DongCard
             on={dongOn}
             setOn={setDongOn}
@@ -263,6 +333,7 @@ export default function RouteAnalysisView({ busLines }) {
             setDirection={setDongDirection}
             values={dongValues}
           />
+          </div>
         )}
       </div>
       <RouteAnalysisPanel

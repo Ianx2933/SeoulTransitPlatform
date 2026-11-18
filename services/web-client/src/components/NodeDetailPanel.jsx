@@ -4,6 +4,11 @@ import { useMemo, useState } from "react";
 import NodeAnalysisControls from "./NodeAnalysisControls.jsx";
 import { sortCatchmentNodes, sortRoutes } from "../utils/nodeDetailSort.js";
 
+/** A bus stop whose node id is its ARS number (road look-ups need one). */
+function isBusStop(point) {
+  return point?.mode === "bus" && /^\d{4,5}$/.test(String(point?.nodeId ?? ""));
+}
+
 /**
  * Displays selected point, all-route node demand, and catchment demand.
  */
@@ -22,7 +27,8 @@ export default function NodeDetailPanel({
   onToggleSection,
   selectedSubwayLines = [],
   selectedBusLines = [],
-  onAddRouteFromNode
+  onAddRouteFromNode,
+  onRoadLookup
 }) {
   const { tx } = useI18n();
   const [nodeSortKey, setNodeSortKey] = useState("distanceAsc");
@@ -69,6 +75,21 @@ export default function NodeDetailPanel({
 
       {sections.showSelectedPoint && (
         <SelectedPointSection selectedPoint={selectedPoint} />
+      )}
+
+      {onRoadLookup && isBusStop(selectedPoint) && (
+        <section style={subSectionStyle}>
+          <strong>{tx("Bus riders of this stop on the road")}</strong>
+          <p style={mutedParagraphStyle}>{tx("Every route that serves the stop, typical day.")}</p>
+          <div className="chip-row">
+            <button type="button" className="chip" onClick={() => onRoadLookup(String(selectedPoint.nodeId), "board")}>
+              {tx("Who boards here")}
+            </button>
+            <button type="button" className="chip" onClick={() => onRoadLookup(String(selectedPoint.nodeId), "alight")}>
+              {tx("Who gets off here")}
+            </button>
+          </div>
+        </section>
       )}
 
       {sections.showNodeDetail &&

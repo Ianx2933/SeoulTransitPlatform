@@ -25,6 +25,10 @@ import DistrictDemandPanel from "./DistrictDemandPanel.jsx";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
 import RouteLoadLayer from "./RouteLoadLayer.jsx";
 import RouteLoadLegend from "./RouteLoadLegend.jsx";
+import RoadExploreCard from "./RoadExploreCard.jsx";
+import RoadPointsLayer from "./RoadPointsLayer.jsx";
+import { useRoadLoad } from "../hooks/useRoadLoad.js";
+import { DEFAULT_MIN_LOAD } from "../utils/routeLoad.js";
 import { styleSegments } from "../utils/routeLoad.js";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
@@ -215,13 +219,22 @@ export default function TransitDemandMap({
   const [routeLoad, setRouteLoad] = useState(null);
   const [roadBoundaries, setRoadBoundaries] = useState(true);
   const handleRouteLoad = useCallback((value) => setRouteLoad(value), []);
-  const roadStyled = useMemo(
-    () =>
-      routeLoad
-        ? styleSegments(routeLoad.result.segments, { minLoad: routeLoad.minLoad, routes: routeLoad.routes })
-        : null,
+  // Select link: who passes one clicked segment (all routes, not only this area).
+  const [explore, setExplore] = useState(null);
+  const exploreLoad = useRoadLoad(explore);
+  const exploreSegment = useCallback(
+    (s) => setExplore({ kind: "segment", from: s.fromArs, to: s.toArs, dayType: routeLoad?.result?.dayType }),
     [routeLoad]
   );
+  const roadStyled = useMemo(() => {
+    if (exploreLoad.result) {
+      return styleSegments(exploreLoad.result.segments, { minLoad: routeLoad?.minLoad ?? DEFAULT_MIN_LOAD });
+    }
+    return routeLoad
+      ? styleSegments(routeLoad.result.segments, { minLoad: routeLoad.minLoad, routes: routeLoad.routes })
+      : null;
+  }, [routeLoad, exploreLoad.result]);
+  const roadMinLoad = routeLoad?.minLoad ?? DEFAULT_MIN_LOAD;
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [nodeDetail, setNodeDetail] = useState(null);
   const [nodeCatchment, setNodeCatchment] = useState(null);
@@ -788,7 +801,14 @@ export default function TransitDemandMap({
             />
           )}
 
-          {showAdminBoundary && roadStyled && <RouteLoadLayer result={routeLoad.result} segments={roadStyled.segments} />}
+          {roadStyled && (exploreLoad.result || showAdminBoundary) && (
+            <RouteLoadLayer
+              result={exploreLoad.result || routeLoad?.result}
+              segments={roadStyled.segments}
+              onSegmentClick={exploreSegment}
+            />
+          )}
+          {exploreLoad.result && <RoadPointsLayer result={exploreLoad.result} />}
 
           {visiblePoints.map((point) => {
             const color = getRouteColor(point.mode, point.serviceId);
@@ -909,14 +929,21 @@ export default function TransitDemandMap({
               </CircleMarker>
             )}
         </MapContainer>
-        {showAdminBoundary && roadStyled && roadStyled.shown > 0 && (
+        {roadStyled && (exploreLoad.result || showAdminBoundary) && roadStyled.shown > 0 && (
           <div className="map-legend-overlay">
-            <RouteLoadLegend styled={roadStyled} minLoad={routeLoad.minLoad} />
+            <RouteLoadLegend styled={roadStyled} minLoad={roadMinLoad} />
           </div>
         )}
       </section>
 
       <aside className="map-side">
+      <RoadExploreCard
+        request={explore}
+        state={exploreLoad.state}
+        error={exploreLoad.error}
+        result={exploreLoad.result}
+        onClose={() => setExplore(null)}
+      />
       {showAdminBoundary && lastDistrict && (
         <DongOdPanel
           code={getDistrictCode(lastDistrict)}
@@ -1007,6 +1034,7 @@ export default function TransitDemandMap({
         selectedSubwayLines={selectedSubwayLines}
         selectedBusLines={selectedBusLines}
         onAddRouteFromNode={onAddRouteFromNode}
+        onRoadLookup={(ars, direction) => setExplore({ kind: "stop", ars, direction, dayType: dongDay })}
       />
 
       </aside>
