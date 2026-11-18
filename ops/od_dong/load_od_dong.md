@@ -1,8 +1,19 @@
 # Load district OD (od_dong_typical) into Cloud SQL
 
-One-off load, 2026-11. Weekly refresh is still to be wired into the warehouse
-step next to od-typical. Run after the weekly workflow has finished, and only
-when no other Cloud SQL admin operation (export, import, patch) is running.
+Since 2026-11-18 this runs on its own: the weekly workflow, when a new TOPIS
+month arrives, runs the warehouse od-refresh (which exports the district OD to
+gs://seoul-transit-prod-pipeline/od-dong/<day>/) and then the Cloud Run Job
+transit-od-dong-load (pipelines/od_dong/load_od_dong.py), which swaps the table
+in through od_dong_typical__next without a Cloud SQL admin operation.
+
+By hand, the same two steps:
+
+    gcloud run jobs execute transit-warehouse --region asia-northeast3 --project seoul-transit-prod --update-env-vars WAREHOUSE_STEPS=od-dong --wait
+    gcloud run jobs execute transit-od-dong-load --region asia-northeast3 --project seoul-transit-prod --wait
+
+The manual import below is how the first load was done (2026-11-17) and stays as
+a fallback. Run it after the weekly workflow has finished, and only when no
+other Cloud SQL admin operation (export, import, patch) is running.
 
 PowerShell, from the repository root, one line at a time.
 

@@ -4,10 +4,13 @@
 #
 #   collect (hourly boarding) -> od_collect (TOPIS archives)
 #   -> new OD month? yes -> od_correct (days without a report only)
+#   -> bus_route_path (every week; a failure is logged, not fatal)
 #   -> anything new?  no -> end
 #   -> scale DB up
-#   -> new OD month? yes -> warehouse od-refresh (OD loads, dbt, typical OD export)
+#   -> new OD month? yes -> warehouse od-refresh (OD loads, dbt, typical OD and
+#                              district OD exports)
 #                           -> od_typical_load (representative OD into Cloud SQL)
+#                           -> od_dong_load (district OD into Cloud SQL)
 #   -> rebuild into <table>__next copies -> validate -> publish (swap them in)
 #   -> warehouse (BigQuery + dbt) -> scale DB down
 #
@@ -27,6 +30,12 @@
 # The database is scaled back down even when a step fails. The heavy writing
 # steps run one at a time: running two at once made both several times slower
 # on a two-vCPU instance (2026-11-06).
+#
+# bus_route_path refreshes the stored bus route geometry (bus_route_path_*,
+# read by the route and road-load maps) for routes fetched more than 30 days
+# ago, at most 900 calls to the city's bus API (its daily quota is about
+# 1,000); what is left is picked up the next week. It writes little and runs
+# on the small tier, before the rebuild decision, so it runs in quiet weeks too.
 #
 # Argument (optional): {"force": true} runs the OD steps and the rebuild even
 # without a new month.
@@ -110,6 +119,19 @@ main:
                   call: run_job
                   args: {project: '${project}', region: '${region}', job: "transit-od-correct", env: [], timeout: 3600}
 
+    - bus_route_path:
+        try:
+          call: run_job
+          args: {project: '${project}', region: '${region}', job: "transit-bus-route-path", env: [], timeout: 1800}
+        except:
+          as: route_path_error
+          steps:
+            - log_route_path_failure:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: '${"bus-route-path failed, continuing: " + json.encode_to_string(route_path_error)}'
+
     - decide:
         switch:
           - condition: ${not new_hourly and not new_od and not force}
@@ -141,6 +163,9 @@ main:
                       - od_typical_load:
                           call: run_job
                           args: {project: '${project}', region: '${region}', job: "transit-od-typical-load", env: [], timeout: 3600}
+                      - od_dong_load:
+                          call: run_job
+                          args: {project: '${project}', region: '${region}', job: "transit-od-dong-load", env: [], timeout: 1800}
             - month_day_count:
                 call: run_job
                 args: {project: '${project}', region: '${region}', job: "transit-month-day-count", env: [], timeout: 1800}
