@@ -1,6 +1,7 @@
 package com.ian.transit.dongod.infrastructure;
 
 import com.ian.transit.dongod.application.DongArea;
+import com.ian.transit.dongod.application.DongReach;
 import com.ian.transit.dongod.application.DongRouteFlows;
 import com.ian.transit.dongod.dto.DongOdResponse;
 import com.ian.transit.dongod.dto.DongOdSummaryRow;
@@ -107,11 +108,7 @@ public class DongOdQueryRepository {
     }
 
     private static MapSqlParameterSource params(String dayType, DongArea level, String code) {
-        MapSqlParameterSource p = new MapSqlParameterSource().addValue("dayType", dayType).addValue("code", code);
-        if (level == DongArea.GU) {
-            p.addValue("codeEnd", DongArea.codeEnd(code));
-        }
-        return p;
+        return new MapSqlParameterSource().addValue("dayType", dayType).addValues(level.params(code));
     }
 
     /** Rows of the area's OD grouped to destLevel units (or origins, with from = false). */
@@ -177,6 +174,40 @@ public class DongOdQueryRepository {
                 rs.getString("code"), rs.getDouble("departures"), rs.getDouble("arrivals"),
                 rs.getDouble("subway_departures"), rs.getDouble("bus_departures"),
                 rs.getDouble("subway_arrivals"), rs.getDouble("bus_arrivals")));
+    }
+
+    /**
+     * District OD rows of the area with the straight-line km between the two
+     * districts' points (0 inside one district, null to or from outside).
+     * from = rows leaving the area, otherwise rows arriving in it.
+     */
+    public List<DongReach.Row> reachRows(String dayType, DongArea level, String code, boolean from) {
+        String self = from ? "origin_cd" : "dest_cd";
+        String other = from ? "dest_cd" : "origin_cd";
+        String sql = """
+                WITH f AS MATERIALIZED (
+                    SELECT %1$s AS here, %2$s AS there, subway_rides, bus_rides, total_rides
+                    FROM od_dong_typical
+                    WHERE day_type = :dayType AND %3$s
+                ),
+                pts AS (
+                    SELECT adm_cd, ST_PointOnSurface(ST_Union(geom)) AS p
+                    FROM public.admin_dong_boundary
+                    WHERE adm_cd IN (SELECT here FROM f UNION SELECT there FROM f)
+                    GROUP BY adm_cd
+                )
+                SELECT CASE WHEN f.there = 'outside' OR f.here = 'outside' OR a.p IS NULL OR b.p IS NULL THEN NULL
+                            WHEN f.here = f.there THEN 0
+                            ELSE ST_DistanceSphere(a.p, b.p) / 1000.0 END AS km,
+                       (f.there = 'outside' OR f.here = 'outside') AS outside,
+                       f.subway_rides, f.bus_rides, f.total_rides
+                FROM f
+                LEFT JOIN pts a ON a.adm_cd = f.here
+                LEFT JOIN pts b ON b.adm_cd = f.there
+                """.formatted(self, other, level.filterSql(self));
+        return jdbc.query(sql, params(dayType, level, code), (rs, i) -> new DongReach.Row(
+                rs.getObject("km", Double.class), rs.getBoolean("outside"),
+                rs.getDouble("subway_rides"), rs.getDouble("bus_rides"), rs.getDouble("total_rides")));
     }
 
     /** Bus routes boarding inside a 행정동 or a 구 (not all of Seoul: too many stops). */

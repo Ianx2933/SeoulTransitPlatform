@@ -4,6 +4,7 @@ import com.ian.transit.common.TypicalDay;
 import com.ian.transit.common.exception.NotFoundException;
 import com.ian.transit.dongod.dto.DongOdResponse;
 import com.ian.transit.dongod.dto.DongOdSummaryRow;
+import com.ian.transit.dongod.dto.DongReachResponse;
 import com.ian.transit.dongod.dto.DongRoutesResponse;
 import com.ian.transit.dongod.infrastructure.DongOdQueryRepository;
 import lombok.RequiredArgsConstructor;
@@ -38,8 +39,9 @@ public class DongOdService {
                                 String direction, int limit) {
         DongArea level = DongArea.parse(levelName, DongArea.DONG);
         level.requireCode(code);
-        DongArea destLevel = DongArea.parse(destLevelName, level == DongArea.CITY ? DongArea.GU : level);
-        if (destLevel == DongArea.CITY) {
+        DongArea destLevel = DongArea.parse(destLevelName,
+                level == DongArea.CITY ? DongArea.GU : level == DongArea.GROUP ? DongArea.DONG : level);
+        if (destLevel == DongArea.CITY || destLevel == DongArea.GROUP) {
             throw new IllegalArgumentException("dest must be dong or gu");
         }
         if (direction != null && !direction.equals("from") && !direction.equals("to")) {
@@ -59,7 +61,27 @@ public class DongOdService {
     }
 
     public List<DongOdSummaryRow> summary(String date, String levelName) {
-        return repository.summary(dayType(date), DongArea.parse(levelName, DongArea.DONG));
+        DongArea level = DongArea.parse(levelName, DongArea.DONG);
+        if (level == DongArea.GROUP) {
+            throw new IllegalArgumentException("summary is by dong, gu or city");
+        }
+        return repository.summary(dayType(date), level);
+    }
+
+    /** How far the area's riders travel (direction from) or its arrivals come from (to). */
+    public DongReachResponse reach(String date, String levelName, String code, String direction) {
+        DongArea level = DongArea.parse(levelName, DongArea.DONG);
+        level.requireCode(code);
+        if (direction != null && !direction.equals("from") && !direction.equals("to")) {
+            throw new IllegalArgumentException("direction must be from or to, got " + direction);
+        }
+        boolean from = !"to".equals(direction);
+        String dayType = dayType(date);
+        DongReach.Result r = DongReach.summarize(repository.reachRows(dayType, level, code, from));
+        if (r.total() == 0) {
+            throw new NotFoundException("No district OD for " + code + " on " + dayType);
+        }
+        return DongReachResponse.of(level.name().toLowerCase(), code, dayType, from ? "from" : "to", r);
     }
 
     public DongRoutesResponse routes(String date, String levelName, String code) {

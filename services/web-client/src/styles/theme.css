@@ -404,3 +404,11 @@
 @media (max-width: 900px) {
   .route-cards { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
 }
+
+/* District OD "How far": one row per distance band with a bar. */
+.reach-list { list-style: none; padding-left: 0; }
+.reach-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 0; }
+.reach-list li span + span { float: none; }
+.reach-bar { grid-column: 1 / -1; height: 6px; background: #e6e8eb; border-radius: 3px; overflow: hidden; }
+.reach-bar__fill { display: block; height: 100%; background: #2f6fb3; }
+.reach-list li > .note:last-child { grid-column: 1 / -1; }

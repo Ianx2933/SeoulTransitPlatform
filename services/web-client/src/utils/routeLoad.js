@@ -7,7 +7,7 @@ export const LOAD_COLORS = [
 ];
 
 /** Line weight per step, thin to thick. */
-export const LOAD_WEIGHTS = [1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8];
+export const LOAD_WEIGHTS = [2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
 
 export const DEFAULT_MIN_LOAD = 10;
 

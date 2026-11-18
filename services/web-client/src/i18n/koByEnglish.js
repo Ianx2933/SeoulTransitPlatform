@@ -192,5 +192,21 @@ export const koByEnglish = {
   "inside the area": "범위 안",
   "rail {s} · bus {b}": "철도 {s} · 버스 {b}",
   "Rail and bus": "철도+버스",
-  "Rail": "철도"
+  "Rail": "철도",
+  "Chosen districts": "선택한 동",
+  "{count} chosen districts": "선택한 동 {count}곳",
+  "Ctrl- or Shift-click more districts on the map to see them together.": "지도에서 Ctrl 또는 Shift를 누른 채 동을 더 누르면 묶어서 볼 수 있습니다.",
+  "How far": "이동 거리",
+  "Leaving here": "여기서 출발",
+  "Arriving here": "여기로 도착",
+  "Inside the same district": "같은 동 안",
+  "Under 1 km": "1 km 미만",
+  "1–3 km": "1–3 km",
+  "3–5 km": "3–5 km",
+  "5–10 km": "5–10 km",
+  "10–20 km": "10–20 km",
+  "20 km or more": "20 km 이상",
+  "Half the riders go {km} km or less (rail {rail} km · bus {bus} km), straight line between districts.": "이용객 절반이 {km} km 이내로 이동합니다(철도 {rail} km · 버스 {bus} km, 동 사이 직선거리).",
+  "Outside Seoul {outside} a day, not measured: TOPIS gives one code for everywhere outside Seoul.": "서울 외 지역 하루 {outside}명은 거리에서 뺐습니다. TOPIS가 서울 밖을 한 코드로 주기 때문입니다.",
+  "Failed to fetch how far riders go": "이동 거리를 불러오지 못했습니다"
 };

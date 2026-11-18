@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { areaCode, fetchDongOd, fetchDongRouteLoad, fetchDongRoutes } from "../api/dongOdApi.js";
+import { areaCode, fetchDongOd, fetchDongReach, fetchDongRouteLoad, fetchDongRoutes } from "../api/dongOdApi.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { csvFileName } from "../utils/roadCsv.js";
@@ -11,7 +11,17 @@ import RoadLoadControls from "./RoadLoadControls.jsx";
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
 const DAY_NAMES = { weekday: "Weekday", saturday: "Saturday", sunday_holiday: "Sunday & holiday" };
 const LEVELS = ["dong", "gu", "city"];
-const LEVEL_NAMES = { dong: "This district", gu: "Its gu", city: "All of Seoul" };
+const LEVEL_NAMES = { dong: "This district", gu: "Its gu", city: "All of Seoul", group: "Chosen districts" };
+const MAX_GROUP = 20;
+const REACH_NAMES = {
+  same: "Inside the same district",
+  "0-1": "Under 1 km",
+  "1-3": "1–3 km",
+  "3-5": "3–5 km",
+  "5-10": "5–10 km",
+  "10-20": "10–20 km",
+  "20+": "20 km or more"
+};
 const LOAD_DIRECTIONS = ["od", "do", "both"];
 const LOAD_DIRECTION_NAMES = { od: "Boarding here", do: "Alighting here", both: "Both (once each)" };
 
@@ -31,6 +41,7 @@ const LOAD_DIRECTION_NAMES = { od: "Boarding here", do: "Alighting here", both: 
 export default function DongOdPanel({
   code,
   name,
+  picked = [],
   initialDayType = "weekday",
   onPickDistrict,
   onRouteLoad,
@@ -45,6 +56,7 @@ export default function DongOdPanel({
   const [dest, setDest] = useState("dong");
   const [view, setView] = useState("from");
   const [loadDirection, setLoadDirection] = useState("both");
+  const [reachDirection, setReachDirection] = useState("from");
   const [minLoad, setMinLoad] = useStoredNumber("roadMinLoad", DEFAULT_MIN_LOAD);
   const [pickedRoutes, setPickedRoutes] = useState([]);
   const [answer, setAnswer] = useState(null);
@@ -53,24 +65,47 @@ export default function DongOdPanel({
 
   useEffect(() => setDayType(initialDayType), [initialDayType]);
 
+  // Districts picked on the map with Ctrl/Shift-click form a group; picking a
+  // second one switches to it, going back to one leaves it.
+  const groupCodes = useMemo(() => picked.map((d) => d.districtCode).filter(Boolean).slice(0, MAX_GROUP), [picked]);
+  const groupOk = groupCodes.length >= 2;
+  const prevGroupOk = useRef(groupOk);
+  useEffect(() => {
+    if (groupOk && !prevGroupOk.current) setLevel("group");
+    if (!groupOk && prevGroupOk.current) setLevel((l) => (l === "group" ? "dong" : l));
+    prevGroupOk.current = groupOk;
+  }, [groupOk]);
+  const levels = groupOk ? [...LEVELS, "group"] : LEVELS;
+
   const routesAllowed = level !== "city";
   const activeView = (view === "routes" || view === "road") && !routesAllowed ? "from" : view;
-  const area = areaCode(code, level);
-  const requestKey = [activeView, level, dest, area, dayType, activeView === "road" ? loadDirection : ""].join("|");
+  const area = areaCode(code, level, groupCodes);
+  const inArea = (unitCode) => (level === "group" ? groupCodes.includes(unitCode) : unitCode === area);
+  const requestKey = [
+    activeView,
+    level,
+    dest,
+    area,
+    dayType,
+    activeView === "road" ? loadDirection : activeView === "reach" ? reachDirection : ""
+  ].join("|");
 
   // The request runs when its key changes; its parameters are read from a ref.
   const paramsRef = useRef(null);
-  paramsRef.current = { activeView, area, level, dest, dayType, loadDirection };
+  paramsRef.current = { activeView, area, level, dest, dayType, loadDirection, reachDirection };
 
   useEffect(() => {
-    if (!code) return undefined;
     const p = paramsRef.current;
+    // A group needs two districts; the level switches back a render later.
+    if (!code || (p.level === "group" && !p.area.includes(","))) return undefined;
     let ignore = false;
     setState("loading");
     setError("");
     const request =
       p.activeView === "routes"
         ? fetchDongRoutes({ code: p.area, level: p.level, dayType: p.dayType })
+        : p.activeView === "reach"
+          ? fetchDongReach({ code: p.area, level: p.level, dayType: p.dayType, direction: p.reachDirection })
         : p.activeView === "road"
           ? fetchDongRouteLoad({ code: p.area, level: p.level, dayType: p.dayType, direction: p.loadDirection })
           : fetchDongOd({ code: p.area, level: p.level, dest: p.dest, dayType: p.dayType, direction: p.activeView, limit: 15 });
@@ -111,7 +146,13 @@ export default function DongOdPanel({
   useEffect(() => () => onRouteLoad?.(null), [onRouteLoad]);
 
   const areaTitle =
-    level === "city" ? tx("Seoul") : level === "gu" ? guName(area, lang) || area : name || code;
+    level === "group"
+      ? tx("{count} chosen districts", { count: groupCodes.length })
+      : level === "city"
+        ? tx("Seoul")
+        : level === "gu"
+          ? guName(area, lang) || area
+          : name || code;
 
   const placeName = (row, unit) => {
     if (row.code === "outside") return tx("Outside Seoul");
@@ -127,12 +168,17 @@ export default function DongOdPanel({
       <p className="note">{tx("Rail and bus, typical day, from TOPIS district OD.")}</p>
 
       <div role="group" aria-label={tx("Area")} className="segmented segmented--fill">
-        {LEVELS.map((l) => (
+        {levels.map((l) => (
           <button key={l} type="button" aria-pressed={level === l} onClick={() => setLevel(l)}>
             {tx(LEVEL_NAMES[l])}
           </button>
         ))}
       </div>
+      {level === "group" ? (
+        <p className="note">{picked.slice(0, MAX_GROUP).map((d) => d.districtName || d.districtCode).join(" · ")}</p>
+      ) : (
+        <p className="note">{tx("Ctrl- or Shift-click more districts on the map to see them together.")}</p>
+      )}
       <div role="group" aria-label={tx("Day type")} className="segmented segmented--fill">
         {DAY_TYPES.map((d) => (
           <button key={d} type="button" aria-pressed={dayType === d} onClick={() => setDayType(d)}>
@@ -149,7 +195,20 @@ export default function DongOdPanel({
         <button type="button" aria-pressed={activeView === "road"} disabled={!routesAllowed} onClick={() => setView("road")}>
           {tx("On the road")}
         </button>
+        <button type="button" aria-pressed={activeView === "reach"} onClick={() => setView("reach")}>
+          {tx("How far")}
+        </button>
       </div>
+      {activeView === "reach" && (
+        <div role="group" aria-label={tx("Riders")} className="segmented segmented--fill">
+          <button type="button" aria-pressed={reachDirection === "from"} onClick={() => setReachDirection("from")}>
+            {tx("Leaving here")}
+          </button>
+          <button type="button" aria-pressed={reachDirection === "to"} onClick={() => setReachDirection("to")}>
+            {tx("Arriving here")}
+          </button>
+        </div>
+      )}
       {activeView === "road" && (
         <div role="group" aria-label={tx("Riders")} className="segmented segmented--fill">
           {LOAD_DIRECTIONS.map((d) => (
@@ -159,7 +218,7 @@ export default function DongOdPanel({
           ))}
         </div>
       )}
-      {activeView !== "routes" && activeView !== "road" && (
+      {activeView !== "routes" && activeView !== "road" && activeView !== "reach" && (
         <div role="group" aria-label={tx("Group by")} className="segmented segmented--fill">
           <button type="button" aria-pressed={dest === "dong"} onClick={() => setDest("dong")}>{tx("By district")}</button>
           <button type="button" aria-pressed={dest === "gu"} onClick={() => setDest("gu")}>{tx("By gu")}</button>
@@ -175,7 +234,9 @@ export default function DongOdPanel({
         </p>
       )}
 
-      {current && current.view !== "routes" && current.view !== "road" && (
+      {current && current.view === "reach" && <ReachCard result={current.result} fmt={fmt} tx={tx} />}
+
+      {current && current.view !== "routes" && current.view !== "road" && current.view !== "reach" && (
         <>
           <p className="note num">
             {tx("Departures {dep} · arrivals {arr} a day", {
@@ -192,7 +253,7 @@ export default function DongOdPanel({
           </p>
           <ol className="flow-list">
             {current.result.flows.map((f) => {
-              const clickable = rowUnit === "dong" && f.code !== "outside" && f.code !== code;
+              const clickable = rowUnit === "dong" && f.code !== "outside" && !inArea(f.code) && f.code !== code;
               return (
                 <li key={f.code}>
                   <span>
@@ -203,7 +264,7 @@ export default function DongOdPanel({
                     ) : (
                       placeName(f, rowUnit)
                     )}
-                    {f.code === area ? ` (${tx("inside the area")})` : ""}
+                    {inArea(f.code) ? ` (${tx("inside the area")})` : ""}
                   </span>
                   <span className="num">
                     {fmt(f.total)}
@@ -271,3 +332,44 @@ export default function DongOdPanel({
     </section>
   );
 }
+
+/**
+ * Riders by straight-line distance between districts: one bar per band
+ * (share of riders with a distance), rail and bus apart, and the medians.
+ */
+function ReachCard({ result, fmt, tx }) {
+  const measured = result.total - result.outside - result.unknown;
+  const max = Math.max(...result.bands.map((b) => b.total), 1);
+  const pct = (v) => (measured > 0 ? `${((v / measured) * 100).toFixed(1)}%` : "-");
+  return (
+    <>
+      <p className="note num">
+        {tx("Half the riders go {km} km or less (rail {rail} km · bus {bus} km), straight line between districts.", {
+          km: result.medianKm ?? "-",
+          rail: result.subwayMedianKm ?? "-",
+          bus: result.busMedianKm ?? "-"
+        })}
+      </p>
+      <ol className="flow-list reach-list">
+        {result.bands.map((b) => (
+          <li key={b.key}>
+            <span>{tx(REACH_NAMES[b.key] || b.key)}</span>
+            <span className="num">
+              {fmt(b.total)} <span className="note">({pct(b.total)})</span>
+            </span>
+            <span className="reach-bar" aria-hidden="true">
+              <span className="reach-bar__fill" style={{ width: `${(b.total / max) * 100}%` }} />
+            </span>
+            <span className="note">{tx("rail {s} · bus {b}", { s: fmt(b.subway), b: fmt(b.bus) })}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="note num">
+        {tx("Outside Seoul {outside} a day, not measured: TOPIS gives one code for everywhere outside Seoul.", {
+          outside: fmt(result.outside)
+        })}
+      </p>
+    </>
+  );
+}
+

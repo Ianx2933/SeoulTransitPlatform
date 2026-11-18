@@ -119,10 +119,7 @@ public class RouteLoadQueryRepository {
             default -> BOARD + " UNION " + ALIGHT;
         };
         String sql = AREA_STOPS.formatted(level.filterSql("adm_cd")) + body;
-        MapSqlParameterSource p = new MapSqlParameterSource().addValue("label", label).addValue("code", code);
-        if (level == DongArea.GU) {
-            p.addValue("codeEnd", DongArea.codeEnd(code));
-        }
+        MapSqlParameterSource p = new MapSqlParameterSource().addValue("label", label).addValues(level.params(code));
         return jdbc.query(sql, p, (rs, i) -> new RouteLoadCalculator.Leg(
                 rs.getString("route"), rs.getString("b"), rs.getString("a"), rs.getDouble("p"),
                 rs.getObject("bq", Integer.class), rs.getObject("aq", Integer.class)));

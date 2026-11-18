@@ -5,6 +5,7 @@ import com.ian.transit.dongod.application.DongRouteLoadService;
 import com.ian.transit.dongod.dto.DongRouteLoadResponse;
 import com.ian.transit.dongod.dto.DongOdResponse;
 import com.ian.transit.dongod.dto.DongOdSummaryRow;
+import com.ian.transit.dongod.dto.DongReachResponse;
 import com.ian.transit.dongod.dto.DongRoutesResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,9 @@ import java.util.List;
  *   GET /api/dong-od/{code}?date=weekday&level=dong&dest=dong|gu&direction=from|to&limit=15
  *   GET /api/dong-od/{code}/routes?date=weekday&level=dong|gu
  *   GET /api/dong-od/{code}/route-load?date=weekday&level=dong|gu&direction=od|do|both
+ *   GET /api/dong-od/{code}/reach?date=weekday&level=dong|gu|city|group&direction=from|to
+ *
+ * level=group takes 2 to 20 행정동 codes joined by commas as {code}.
  */
 @RestController
 @RequestMapping("/api/dong-od")
@@ -71,5 +75,15 @@ public class DongOdController {
         @RequestParam(value = "direction", required = false) String direction
     ) {
         return ResponseEntity.ok(routeLoadService.load(date, level, code, direction));
+    }
+
+    @GetMapping("/{code}/reach")
+    public ResponseEntity<DongReachResponse> reach(
+        @PathVariable("code") String code,
+        @RequestParam(value = "date", required = false) String date,
+        @RequestParam(value = "level", required = false) String level,
+        @RequestParam(value = "direction", required = false) String direction
+    ) {
+        return ResponseEntity.ok(service.reach(date, level, code, direction));
     }
 }

@@ -38,8 +38,23 @@ export function fetchDongRouteLoad({ code, level = "dong", dayType, direction = 
   });
 }
 
-/** Area code for a level, from a 행정동 code: the 행정동, its 구 (5 digits) or Seoul. */
-export function areaCode(dongCode, level) {
+/**
+ * How far an area's riders go (direction from) or come from (to): riders by
+ * straight-line distance band between districts, by rail and bus.
+ */
+export function fetchDongReach({ code, level = "dong", dayType, direction = "from" }) {
+  const params = new URLSearchParams({ date: dayType, level, direction });
+  return fetchJson(`/api/dong-od/${encodeURIComponent(code)}/reach?${params}`, {
+    defaultMessage: "Failed to fetch how far riders go"
+  });
+}
+
+/**
+ * Area code for a level, from a 행정동 code: the 행정동, its 구 (5 digits),
+ * Seoul, or for level group the picked 행정동 codes joined by commas.
+ */
+export function areaCode(dongCode, level, groupCodes = []) {
+  if (level === "group") return groupCodes.join(",");
   if (level === "city") return "11";
   if (level === "gu") return String(dongCode || "").slice(0, 5);
   return dongCode;

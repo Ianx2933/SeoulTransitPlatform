@@ -66,7 +66,6 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-Seoul_Transit}
       DB_USERNAME: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-local-dev-token}
       # validate, not update: the schema is created by database/schema/run_all.sql.
       JPA_DDL_AUTO: validate
       CACHE_TYPE: redis
@@ -151,8 +150,6 @@ services:
       # obvious when it reaches anything but a local machine.
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local-dev-insecure-change-me}
       PIPELINE_DB_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-Seoul_Transit}
-      TRANSIT_API_BASE_URL: http://api-server:8080
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
       SEOUL_HOURLY_API_KEY: ${SEOUL_HOURLY_API_KEY:-}
       # Warehouse DAG. The source is the PostgreSQL install on the host, not the
       # postgres service above, so it gets its own connection settings. The

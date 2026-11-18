@@ -655,8 +655,9 @@ export default function TransitDemandMap({
     const isSelected = selectedDistrictCodes.has(code);
     const fill = dongColorOn ? colorOf(dongValues.get(code), dongBreaks) : null;
     return {
-      color: isSelected ? "#111111" : "#444444",
-      weight: isSelected ? 3 : 1,
+      color: isSelected ? "#111111" : "#2b2f36",
+      weight: isSelected ? 3.5 : 1.3,
+      opacity: isSelected ? 1 : 0.75,
       fillColor: fill || "#3388ff",
       // Fainter while the road layer is on, so the lines stay readable.
       fillOpacity: (fill ? (isSelected ? 0.6 : 0.45) : isSelected ? 0.14 : 0.04) * (routeLoad ? 0.35 : 1)
@@ -916,6 +917,7 @@ export default function TransitDemandMap({
         <DongOdPanel
           code={getDistrictCode(lastDistrict)}
           name={getDistrictName(lastDistrict, tx)}
+          picked={selectedDistrictSummaries}
           initialDayType={dongDay}
           onPickDistrict={pickDistrictByCode}
           onRouteLoad={road.setRouteLoad}

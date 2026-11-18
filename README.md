@@ -37,9 +37,7 @@ client on Firebase Hosting, calling the deployed API. It is in a closed beta wit
 external users.
 
 The backend scales to zero, so the first request after a quiet period waits for
-a cold start. The OD correction endpoints change data, so in the deployed
-environment they reject every request. Their contracts are still in the OpenAPI
-document.
+a cold start (2–4 s).
 
 ## Highlights
 
@@ -48,6 +46,7 @@ document.
 | **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions ([details](#data-quality-and-validation)) |
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance. The Java OD correction was ported to pandas and matched row for row against its own SQL on three real days (1.48M rows); the port then fixes a merge defect that added 675–1,550 passengers a day and cleared 15,000–20,000 stop codes ([details](#inflated-od-days-and-the-java-correction)) |
 | **Representative OD** | Twelve months of corrected days averaged per day type in BigQuery and scored by leaving each day out: on weekdays the error is 5.6% by stop, 3.3% by route and 25.6% by OD pair. The weekday result is loaded into Cloud SQL, serves the congestion and curated OD endpoints, and is the input of the hourly allocation ([details](#representative-od)) |
+| **Bus riders on the road** | Each OD leg is placed on the stop-to-stop segments of its route's stored path (Seoul bus route API), and routes sharing a road are added up: a district's riders by road, chosen routes together, one stop, or everyone who passes one segment (select link). Checked automatically against the route chart on 8 routes; the check found three defects, now fixed, and every route agrees to within 4.4 riders a segment ([details](#bus-riders-on-the-road)) |
 | **OD collection** | A Cloud Run Job copies TOPIS's monthly OD archives to Cloud Storage unchanged, with a SHA-256 manifest written last as the completion marker; 34 months stored. A second Job corrects every stored day (102) and the warehouse loads them into BigQuery, checked against each day's report |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes ([details](#performance-district-demand)) |
@@ -169,8 +168,9 @@ The rows were not patched in place: the days were regenerated from the TOPIS
 originals (below), the endpoints now read the representative OD, and the old
 table is kept as `analysis_table_final_legacy`.
 
-Porting the Java OD correction (`services/api-server/.../odcorrection`) to
-pandas found a second source of inflation, in the correction itself. Each of its
+Porting the Java OD correction (the API server's `odcorrection` package, removed
+in November 2026 once the port ran as a Job; its SQL is kept in
+`pipelines/od_correction/sql/` as the baseline) to pandas found a second source of inflation, in the correction itself. Each of its
 three groups of fixes (virtual stops, stop sequences, same-stop trips) ends with
 `deduplicateAndSum`, which merges rows that now share a key. It has four defects:
 
@@ -284,6 +284,56 @@ The checks above prove the allocation is complete and conserves every passenger,
 not that its hours match real trips, which would need OD records with boarding
 times. More months make the profiles steadier; they do not add OD days.
 
+## Bus riders on the road
+
+The route chart shows riders on board along one route. The road view puts every
+route's riders on the road itself, so a corridor served by twelve routes shows
+its total. Each representative-OD leg (route, boarding stop, alighting stop,
+riders) is placed on the route's stored path: `bus_route_path_*`, cut into
+stop-to-stop segments from the Seoul bus route API and refreshed weekly by the
+`transit-bus-route-path` Job. Segments with the same two stops are summed across
+routes and keep each route's share.
+
+| View | Endpoint | Median response |
+|---|---|---|
+| A district's riders (boarding, alighting or both, a trip inside counted once) | `GET /api/dong-od/{code}/route-load` | 5.19 s |
+| Chosen routes added up (up to 20) | `GET /api/road-load/routes` | 1.00 s |
+| One stop's riders on every route | `GET /api/road-load/stop` | 0.51 s |
+| Everyone who passes one segment, with where they come from and go to (select link) | `GET /api/road-load/segment` | 0.92 s |
+
+Medians of three calls to the deployed service on 2026-11-18; a first call after
+a quiet period can take 2–4 s more for the Cloud Run cold start.
+
+**Checked against the route chart.** For one route the road view and the route
+chart count the same riders, so they must agree segment by segment.
+`ops/checks/quality_checks.py` compares them on eight routes. The first run did
+not agree on four, and each difference had its own cause:
+
+| Cause | Symptom | Fix |
+|---|---|---|
+| A stop served twice (6411 passes 17104 on a loop) | 390 riders a day short on 92 segments of 6411, 50 on 48 of 302 | Legs carry TOPIS's stop sequence, and a stop that occurs twice on a path is matched by it |
+| TOPIS's virtual depot stop (ARS `00000`, sequence 0) | 448 riders a day of 143 had no place on the path | They ride from the first stored stop |
+| An ARS number now used by another stop (05170 is 복정파출소 on 302 and 452, but 어린이대공원역 in the stop table) | Riders put in the wrong district | `stop_location_fix` overrides both stop tables for 111 ARS |
+
+After the fixes:
+
+| Route | Segments compared | Riders matched | Largest difference | Riders not placed |
+|---|---|---|---|---|
+| 143 | 112 | 99.8% | 0.3 | 14.4 |
+| 302 | 123 | 97.9% | 0.7 | 1.8 |
+| 452 | 126 | 100.0% | 0.0 | 3.4 |
+| 470 | 82 | 96.2% | 1.9 | 12.7 |
+| 6411 | 114 | 100.0% | 4.4 | 5.4 |
+| 7016 | 103 | 97.3% | 0.6 | 5.9 |
+| 2312 | 104 | 100.0% | 1.1 | 0.8 |
+| 1711 | 63 | 99.9% | 0.5 | 6.1 |
+
+Riders not placed boarded or alighted at a stop the route no longer serves.
+`ops/stop_coords/check_stop_coords.sql` compares every stop's position in the
+stop tables with its position on the stored paths; 101 ARS on the paths were in
+neither table, and 12 stops with the same name more than 1 km apart are listed
+for a manual decision (Known gap 12).
+
 ## Key capabilities
 
 - Node-centered demand lookup around a coordinate radius.
@@ -293,6 +343,12 @@ times. More months make the profiles steadier; they do not add OD days.
 - Bus and subway mode filtering.
 - Weekday/day-type and hour filtering.
 - Route, node, and district-level demand summaries.
+- Route analysis on the representative OD: load along the route, where a stop's
+  riders go, demand inside and across a chosen segment.
+- District OD by rail and bus for a 행정동, its 구, Seoul, or districts picked on
+  the map together: where riders go, where they come from, bus routes boarding
+  there, riders on the road, and how far they travel (straight line between
+  districts, in distance bands).
 
 ## Deployed architecture
 
@@ -307,12 +363,12 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │                   │
                                         │   Cloud Scheduler ──> Workflows: transit-pipeline
                                         │     weekly                 ├─> Cloud Run Job: collector ──> Seoul Open API
+                                        │                            ├─> od-collect ──> TOPIS ──> Cloud Storage
+                                        │                            ├─> od-correct (new OD month) ──> Cloud Storage
+                                        │                            ├─> bus-route-path ──> Seoul bus route API
                                         │                            ├─> 8 rebuild, validate, publish Jobs (new month only)
-                                        │                            └─> Cloud Run Job: warehouse ──> BigQuery + dbt
-                                        │
-                                        │   Cloud Run Jobs: od-collect (daily check) ──> TOPIS ──> Cloud Storage
-                                        │                   od-correct (by hand) ──> Cloud Storage ──> BigQuery (warehouse)
-                                        │                   od-typical-load (by hand) <── Cloud Storage <── BigQuery (representative OD)
+                                        │                            ├─> Cloud Run Job: warehouse ──> BigQuery + dbt
+                                        │                            └─> od-typical-load, od-dong-load <── Cloud Storage <── BigQuery
                                         │   Cloud Scheduler ──> Workflows: transit-db-export ──> Cloud SQL export ──> Cloud Storage
                                         │     weekly
                                         │
@@ -493,7 +549,7 @@ later, with the same caveat as the slope values themselves.
 | Cache | Redis (local), Caffeine (deployed) |
 | Prediction service | Python, Flask, XGBoost |
 | Frontend | React, Vite, Leaflet (OpenStreetMap basemap) |
-| Pipelines | Python, Cloud Workflows, Airflow (local) |
+| Pipelines | Python 3.14, Cloud Workflows, Airflow (local) |
 | Multidimensional analysis | xarray, dask, netCDF |
 | Raster processing | GDAL/OGR, rasterio (in [geo-raster-pipeline](https://github.com/Ianx2933/geo-raster-pipeline)) |
 | Analytical warehouse | BigQuery, dbt (in [transit-bigquery](https://github.com/Ianx2933/transit-bigquery)) |
@@ -516,7 +572,9 @@ is the single best call, not a median or p95.
 
 Because the database path alone became sub-second, the deployed service does
 not need a shared cache: it runs Caffeine instead of Redis (see *No
-Memorystore*). Production latency on Cloud Run has not yet been measured.
+Memorystore*). Response times of the deployed service for the OD and road views
+are in [Bus riders on the road](#bus-riders-on-the-road); the slowest, a
+district's riders on the road, takes about 5 s.
 
 A precomputed node-to-district mapping table was considered and not built.
 Indexing was enough, and the table would have needed rebuilding whenever stop
@@ -755,8 +813,9 @@ restore took 22 minutes for 7.67 GB of SQL. Its only errors were two grants to r
 exist only in Cloud SQL, and the hourly table matched the BigQuery copy exactly: 31,739,712
 rows and 4,806,115,248 boardings, 2024-01 to 2026-10. The restored database replaced the
 local one, which is now a development copy refreshed the same way, and the local backup
-task is switched off. Cloud SQL exports leave out triggers and functions; the cloud
-database does not have the terrain guard functions in the first place (Known gap 7).
+task is switched off. Cloud SQL exports leave out triggers and functions, so after a
+restore the terrain guards are created again from `database/terrain/sql/01_terrain_schema.sql`
+and `06_fix_terrain_guard.sql`.
 
 ## Status
 
@@ -769,12 +828,15 @@ database does not have the terrain guard functions in the first place (Known gap
 | GCP deployment: serving path | Live, closed beta |
 | Weekly cloud pipeline (collect, rebuild, validate, publish) | Running weekly since 2026-11-10; forced full runs passed on 2026-11-07 and 2026-11-08 (1 h 31 min); failure alerts tested |
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
-| TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; checked for new months daily, not yet in the weekly workflow |
+| TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; checked by the weekly workflow, which corrects and loads a new month |
 | OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; runs as a cloud job, 102 days corrected with passengers conserved; loaded into BigQuery (`fct_od_stop`) |
-| Day-type representative OD | Weekday, Saturday and Sunday/holiday built in BigQuery from 12 months and scored by leaving each day out. Weekday loaded into Cloud SQL, served by the congestion and curated OD endpoints and allocated to hours; Saturday and Sunday/holiday not loaded yet |
+| Day-type representative OD | Weekday, Saturday and Sunday/holiday built in BigQuery from 12 months, scored by leaving each day out and loaded into Cloud SQL; only the weekday is allocated to hours |
+| District OD by mode | TOPIS district OD averaged per day type in BigQuery, exported and loaded by the weekly workflow (`transit-od-dong-load`); served for a 행정동, 구, Seoul or a chosen group |
+| Bus route paths and riders on the road | 672 stored paths for 666 TOPIS routes, refreshed weekly; road view checked against the route chart on 8 routes |
+| Route analysis view | Live in the map client |
 | Policy insights | Recomputed on the representative weekday (`pipelines/analysis/policy_insights_typical.py`); route 143 needs a peak-hour check |
 | Weekly database backup | Cloud SQL export every Sunday from 2026-11-15; the first export was restored and matched on 2026-11-10 |
-| Airflow orchestration | Local development only; correction and warehouse DAGs triggered by hand |
+| Airflow orchestration | Local development only; the warehouse DAG is triggered by hand (the correction DAG called the removed Java endpoints and went with them) |
 
 ## Quick start
 
@@ -785,7 +847,7 @@ database does not have the terrain guard functions in the first place (Known gap
    psql -h localhost -U postgres -d Seoul_Transit -f database/schema/run_all.sql
    ```
 2. **Start infrastructure.** Copy `.env.example` to `.env`, fill in
-   `DB_PASSWORD` and `ADMIN_API_TOKEN`, then `docker compose up -d`.
+   `DB_PASSWORD`, then `docker compose up -d`.
 3. **Run the API and frontend.** `mvn spring-boot:run` in
    `services/api-server`, `npm install && npm run dev` in `services/web-client`.
 
@@ -880,9 +942,9 @@ firebase.json           Hosting config and the /api/** rewrite to Cloud Run
 Secrets are never committed; `.env.example` holds placeholders only. In the
 deployed environment the database credentials and the collector's Seoul Open API key come
 from Secret Manager, and each secret is readable only by the service that uses
-it. `ADMIN_API_TOKEN` is left unset in deployment, so the
-`/api/od-correction/**` endpoints, which issue UPDATE and DELETE statements,
-reject every request instead of relying on a token staying secret.
+it. The API has no endpoint that writes data. The Java OD correction endpoints,
+which issued UPDATE and DELETE statements behind an admin token, were locked in
+deployment and then removed once correction ran as the `transit-od-correct` Job.
 
 **Runtime identities.** The API, prediction service, pipeline jobs and the
 workflow each run as a dedicated service account with only the access they
@@ -917,10 +979,7 @@ Problems that are known and not fixed yet.
 6. Temporary, election and substitute holidays are not asserted against an
    external source. A one-off holiday missing from the CSV would still pass
    unnoticed.
-7. The deployed schema differs from the local one: `pg_dump -t` did not carry the
-   terrain guard functions, so the four guard triggers do not exist in Cloud SQL.
-   Serving is unaffected because the API only reads those tables.
-8. Until November 2026 a key the API did not accept loaded zero rows and exited
+7. Until November 2026 a key the API did not accept loaded zero rows and exited
    successfully. The loader did check the result code, but only where a
    successful response puts it: inside the service element. Error responses
    (invalid key, no data) return `RESULT` as the document root, so the check
@@ -929,46 +988,49 @@ Problems that are known and not fixed yet.
    other than `INFO-000`, except `INFO-200` (month not published yet), which
    ends a scheduled run successfully with nothing loaded. Seven tests cover
    the cases.
-9. 0.75% of boarding and alighting stops in `analysis_table_final` (101,864 stop
+8. 0.75% of boarding and alighting stops in `analysis_table_final` (101,864 stop
     rows, 473 ARS numbers) appear in neither stop table, most likely stops that
     have since closed or moved. Their standard codes came from the same
     position-based join as the sixth defect in Data quality and cannot be
     checked. Four ARS numbers outside Seoul map to two nodes and were also left
     as they were.
-10. Hourly OD is an allocation of the representative weekday OD by stop boarding
+9. Hourly OD is an allocation of the representative weekday OD by stop boarding
     profiles (see [What the hourly OD is](#what-the-hourly-od-is)); Saturday and
-    Sunday/holiday are built in BigQuery but not loaded or allocated. OD
-    correction and the representative OD load are started by hand: the weekly
-    pipeline does not yet run them, so a new TOPIS month reaches Cloud SQL only
-    when they are run.
-11. `analysis_table_final_legacy` keeps the three inflated OD days in both
-    databases for reference. Only the locked Java correction endpoints and the
-    switched-off prediction features still point at it.
-12. The XGBoost day-of-week model was trained on the four days of
+    Sunday/holiday are loaded but not allocated to hours, because their hourly
+    tables would not fit the database disk limit.
+10. `analysis_table_final_legacy` keeps the three inflated OD days in both
+    databases for reference. Only the switched-off prediction features still
+    point at it.
+11. The XGBoost day-of-week model was trained on the four days of
     `analysis_table_final`, three of them inflated, and its 7- and 30-day lag
     features are almost always zero because OD days are months apart. It has no
     evidential basis; the prediction endpoint is switched off, and the model is
     to be rebuilt from the TOPIS daily district OD series and judged against the
     representative OD scaled to each day's total.
+12. 12 stops have the same name in the stop table and on the stored route path
+    but positions more than 1 km apart (`ops/stop_coords/stop_location_review_20261118.csv`).
+    Which one is right was not decided, so neither was changed.
+13. District OD has no breakdown outside Seoul: TOPIS gives one code for
+    everywhere outside the city. Only the bus routes tab, built from stop OD,
+    names the district outside Seoul where riders alight.
+14. Distance in the district "how far" view is the straight line between two
+    districts' points (`ST_PointOnSurface`), not the length of the trip; a ride
+    inside one district counts as 0 km.
 
 ## Next work
 
-1. Carry the terrain guard functions into Cloud SQL, or decide that
-   the cloud database stays read-only for pipeline writes.
-2. Extend OD analysis to trip chains: transfers and whole journeys instead of
+1. Extend OD analysis to trip chains: transfers and whole journeys instead of
    single boarding-to-alighting legs.
-3. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
+2. Re-publish terrain from a bare-earth DTM (Korea's national 5 m 수치표고모델)
    and compare the two snapshots, which is what the versioning was built for.
-4. Extend the warehouse with a district dimension, and keep the official route
+3. Extend the warehouse with a district dimension, and keep the official route
    type the source API returns (`TRFC_MNS_TYPE_NM`, such as 서울간선버스) to check
    the number-based `route_type` rules against it.
-5. Check the stops in Known gap 9 against an archived stop master from the
+4. Check the stops in Known gap 8 against an archived stop master from the
    year of each OD date.
-6. Run OD collection, correction, the warehouse and the representative OD load in
-   the weekly pipeline, and load Saturday and Sunday/holiday. Then look for OD
-   records that carry boarding times to test the allocation against.
-7. Rebuild the prediction model (Known gap 12).
-8. A route analysis view in the map client: per-stop boardings and alightings,
-   load along the route, and demand within and across a chosen segment.
+5. Look for OD records that carry boarding times to test the hourly allocation
+   against, and let users pick the period the representative OD is averaged over.
+6. Rebuild the prediction model (Known gap 11).
+7. Decide the 12 stops in Known gap 12.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.

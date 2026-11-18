@@ -94,6 +94,14 @@ class RoadLoadPostgisIntegrationTest {
                     승차_정류장순번 INTEGER, 승차_정류장ars VARCHAR, 하차_정류장순번 INTEGER,
                     하차_정류장ars VARCHAR, 승객수 DOUBLE PRECISION)""");
 
+        jdbc.execute("""
+                CREATE TABLE od_dong_typical (day_type VARCHAR, origin_cd VARCHAR, dest_cd VARCHAR,
+                    origin_name VARCHAR, dest_name VARCHAR,
+                    subway_rides DOUBLE PRECISION, bus_rides DOUBLE PRECISION, total_rides DOUBLE PRECISION)""");
+        jdbc.update("INSERT INTO od_dong_typical VALUES ('weekday', ?, ?, 'A동', 'A동', 0, 2, 2), "
+                + "('weekday', ?, ?, 'A동', 'B동', 1, 2, 3), ('weekday', ?, 'outside', 'A동', 'outside', 1, 0, 1)",
+                A, A, A, B, A);
+
         dong(A, "A동", 127.00, 127.01);
         dong(B, "B동", 127.01, 127.02);
         busStop("01001", 127.002);
@@ -238,5 +246,20 @@ class RoadLoadPostgisIntegrationTest {
         } finally {
             jdbc.update("DELETE FROM stop_location_fix");
         }
+    }
+
+    @Test
+    void reachMeasuresBetweenDistrictPointsAndKeepsOutsideApart() {
+        var rows = dongRepo.reachRows("weekday", DongArea.DONG, A, true);
+        var r = com.ian.transit.dongod.application.DongReach.summarize(rows);
+        assertThat(r.total()).isEqualTo(6.0);
+        assertThat(r.outside()).isEqualTo(1.0);
+        assertThat(r.bands().get(0).total()).isEqualTo(2.0);                 // same district
+        assertThat(r.bands().get(1).total()).isEqualTo(3.0);                 // A to B, about 0.9 km
+        assertThat(r.medianKm()).isEqualTo(0.9);
+        // a group of both districts: every ride inside the group's own districts
+        var g = com.ian.transit.dongod.application.DongReach.summarize(
+                dongRepo.reachRows("weekday", DongArea.GROUP, A + "," + B, true));
+        assertThat(g.total()).isEqualTo(6.0);
     }
 }

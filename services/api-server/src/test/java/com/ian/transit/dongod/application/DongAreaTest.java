@@ -54,4 +54,16 @@ class DongAreaTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> DongArea.GU.unitSql("1=1 OR origin_cd")).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void aGroupIsTwoToTwentyDongCodes() {
+        DongArea.GROUP.requireCode("11010530, 11010540");
+        assertThat(DongArea.GROUP.filterSql("origin_cd")).isEqualTo("origin_cd IN (:codes)");
+        assertThat(DongArea.GROUP.params("11010530,11010540,11010530")).containsEntry("codes", java.util.List.of("11010530", "11010540"));
+        assertThat(DongArea.parse("group", DongArea.DONG)).isEqualTo(DongArea.GROUP);
+        assertThatThrownBy(() -> DongArea.GROUP.requireCode("11010530")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DongArea.GROUP.requireCode("11010530,11010")).isInstanceOf(IllegalArgumentException.class);
+        String many = String.join(",", java.util.stream.IntStream.range(0, 21).mapToObj(i -> String.valueOf(11010500 + i)).toList());
+        assertThatThrownBy(() -> DongArea.GROUP.requireCode(many)).isInstanceOf(IllegalArgumentException.class);
+    }
 }

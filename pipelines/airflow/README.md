@@ -6,7 +6,6 @@ DAGs that schedule the data pipeline.
 
 | DAG | Schedule | Purpose |
 |---|---|---|
-| `od_correction` | 03:00 KST daily | Runs the four-step OD correction chain against api-server |
 | `warehouse` | Manual | Copies the local PostgreSQL source into BigQuery staging and rebuilds the dbt models |
 
 ## Running locally
@@ -79,28 +78,20 @@ The container reaches the host's PostgreSQL at `host.docker.internal`. If
 localhost only: set `listen_addresses = '*'` in `postgresql.conf` and allow the
 Docker subnet in `pg_hba.conf` with `scram-sha-256`.
 
-## `od_correction`
-
-Create the HTTP connection the DAG depends on, either in the UI
-(Admin → Connections) or on the command line:
-
-```bash
-docker exec seoul-transit-airflow-web airflow connections add transit_api \
-  --conn-type http --conn-host api-server --conn-port 8080
-```
-
-The api-server must be running too, so start the `app` profile as well.
-
 ## Migration notes
 
 Three DAGs existed in the predecessor project. Only one was migrated directly;
 the reasoning for each is recorded here so the omissions are deliberate rather
 than forgotten.
 
-### preprocessing_dag.py → `od_correction_dag.py` (migrated)
+### preprocessing_dag.py → `od_correction_dag.py` (migrated, then removed)
 
 Endpoint paths and HTTP methods changed when the API was rewritten under the
-`com.ian.transit` package. The task chain and its ordering are unchanged.
+`com.ian.transit` package; the task chain and its ordering stayed. The DAG
+called the Java OD correction endpoints, and was removed with them in November
+2026: OD correction now runs as the Cloud Run Job `transit-od-correct`
+(`pipelines/od_correction/src/od_correct_job.py`), started by the weekly
+workflow.
 
 ### daily_od_dag.py (not migrated)
 

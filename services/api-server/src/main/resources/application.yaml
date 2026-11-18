@@ -16,7 +16,6 @@
 #                      low connection limit, so this is held well below the Hikari
 #                      default of 10 and multiplied by Cloud Run max-instances.
 #   JPA_DDL_AUTO       default: validate; use 'none' to skip schema validation.
-#   ADMIN_API_TOKEN    token required by /api/od-correction/**; blank locks endpoints.
 #   CACHE_TYPE         default: redis. Deployment uses caffeine (no Memorystore).
 #   CACHE_TTL          Redis cache TTL, default: 10m.
 #   CAFFEINE_SPEC      Caffeine cache spec, default: maximumSize=1000,expireAfterWrite=10m.
@@ -92,12 +91,6 @@ management:
       # status, /actuator/health answers 503 DOWN even though the application is
       # serving correctly — which Cloud Run reads as an unhealthy container.
       enabled: ${REDIS_HEALTH_ENABLED:true}
-
-admin:
-  api:
-    # Requests to /api/od-correction/** must carry header "X-Admin-Token".
-    # When blank, those endpoints reject all requests.
-    token: ${ADMIN_API_TOKEN:}
 
 prediction:
   service:

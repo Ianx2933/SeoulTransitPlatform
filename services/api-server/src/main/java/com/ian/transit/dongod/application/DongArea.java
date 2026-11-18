@@ -1,16 +1,22 @@
 package com.ian.transit.dongod.application;
 
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Grouping level for district OD: one 행정동, one 구, or all of Seoul.
+ * Grouping level for district OD: one 행정동, one 구, all of Seoul, or a group
+ * of 행정동 the user picked (GROUP: 2 to 20 codes joined by commas).
  *
  * Codes: a 행정동 is its 8-digit adm_cd; a 구 is the first five digits
  * (11010 = 종로구); Seoul is "11". Everywhere outside Seoul stays 'outside' at
  * every level.
  */
 public enum DongArea {
-    DONG, GU, CITY;
+    DONG, GU, CITY, GROUP;
+
+    public static final int MAX_GROUP = 20;
 
     public static final String SEOUL = "11";
     public static final String OUTSIDE = "outside";
@@ -35,7 +41,8 @@ public enum DongArea {
             case "dong" -> DONG;
             case "gu" -> GU;
             case "city" -> CITY;
-            default -> throw new IllegalArgumentException("level must be dong, gu or city, got " + value);
+            case "group" -> GROUP;
+            default -> throw new IllegalArgumentException("level must be dong, gu, city or group, got " + value);
         };
     }
 
@@ -45,6 +52,10 @@ public enum DongArea {
             case DONG -> code != null && code.matches("11\\d{6}");
             case GU -> code != null && GU_NAMES.containsKey(code);
             case CITY -> SEOUL.equals(code);
+            case GROUP -> {
+                List<String> codes = groupCodes(code);
+                yield codes.size() >= 2 && codes.size() <= MAX_GROUP && codes.stream().allMatch(c -> c.matches("11\\d{6}"));
+            }
         };
         if (!ok) {
             throw new IllegalArgumentException("code " + code + " is not a " + name().toLowerCase() + " code");
@@ -55,7 +66,7 @@ public enum DongArea {
     public String unitSql(String column) {
         requireColumn(column);
         return switch (this) {
-            case DONG -> column;
+            case DONG, GROUP -> column;
             case GU -> "CASE WHEN " + column + " = 'outside' THEN 'outside' ELSE LEFT(" + column + ", 5) END";
             case CITY -> "CASE WHEN " + column + " = 'outside' THEN 'outside' ELSE '11' END";
         };
@@ -71,7 +82,29 @@ public enum DongArea {
             case DONG -> column + " = :code";
             case GU -> column + " >= :code AND " + column + " < :codeEnd";
             case CITY -> column + " <> 'outside'";
+            case GROUP -> column + " IN (:codes)";
         };
+    }
+
+    /** The 행정동 codes of a group code "11010530,11010540" (trimmed, unique, in order). */
+    public static List<String> groupCodes(String code) {
+        if (code == null) {
+            return List.of();
+        }
+        return Arrays.stream(code.split(",")).map(String::trim).filter(c -> !c.isEmpty()).distinct().toList();
+    }
+
+    /** The SQL parameters filterSql needs for a code of this level (:code, :codeEnd, :codes). */
+    public Map<String, Object> params(String code) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("code", code);
+        if (this == GU) {
+            p.put("codeEnd", codeEnd(code));
+        }
+        if (this == GROUP) {
+            p.put("codes", groupCodes(code));
+        }
+        return p;
     }
 
     /** Upper bound for the GU range: the next 5-digit code. */
@@ -85,7 +118,7 @@ public enum DongArea {
             return OUTSIDE;
         }
         return switch (this) {
-            case DONG -> dongName;
+            case DONG, GROUP -> dongName;
             case GU -> GU_NAMES.getOrDefault(code, code);
             case CITY -> "서울";
         };

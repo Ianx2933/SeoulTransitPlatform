@@ -17,6 +17,10 @@ import { findTurnaround } from "../utils/routeLoadChart.js";
 import { useRoadLoad } from "../hooks/useRoadLoad.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
 import useLatest from "../hooks/useLatest.js";
+import { useDistrictBoundaries } from "../hooks/useDistrictBoundaries.js";
+
+/** Route lines: thick enough to read over the map and district outlines. */
+const ROUTE_WEIGHT = 7;
 import { DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
 import RoadExploreCard from "./RoadExploreCard.jsx";
 import RoadPointsLayer from "./RoadPointsLayer.jsx";
@@ -57,6 +61,8 @@ export default function RouteAnalysisView({ busLines }) {
   const [query, setQuery] = useState({ dayType: "weekday", hour: null });
   const [roadPath, setRoadPath] = useState(null);
   const [dongOn, setDongOn] = useState(false);
+  const [boundaryOn, setBoundaryOn] = useState(false);
+  const boundaries = useDistrictBoundaries(boundaryOn);
   const [dongData, setDongData] = useState(null);
   const [dongState, setDongState] = useState("idle");
   const [dongSelected, setDongSelected] = useState(null);
@@ -226,6 +232,15 @@ export default function RouteAnalysisView({ busLines }) {
           />
           <FitRoute bounds={bounds} routeName={routeName} />
 
+          {boundaryOn && boundaries && (
+            <Pane name="district-outlines" style={{ zIndex: 340, pointerEvents: "none" }}>
+              <GeoJSON
+                data={boundaries}
+                interactive={false}
+                style={{ color: "#2b2f36", weight: 1.4, opacity: 0.7, fill: false }}
+              />
+            </Pane>
+          )}
           <Pane name="districts" style={{ zIndex: 350 }}>
             {/* The road view draws riders itself; district fills would hide it. */}
             {dongOn && !roadOn && dongFeatures.length > 0 && (
@@ -256,20 +271,20 @@ export default function RouteAnalysisView({ busLines }) {
             <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
           {!roadOn && hasRoad && variantPaths.length === 0 && (
-            <Polyline positions={roadPath.path} pathOptions={{ color: roadColor, weight: 5, opacity: 0.85 }} />
+            <Polyline positions={roadPath.path} pathOptions={{ color: roadColor, weight: ROUTE_WEIGHT, opacity: 0.9 }} />
           )}
           {/* A route stored as several runs (한강버스01, 8762 출근/퇴근): draw each. */}
           {!roadOn &&
             variantPaths.map((v) => (
-              <Polyline key={v.name} positions={v.path} pathOptions={{ color: roadColor, weight: 5, opacity: 0.85 }}>
+              <Polyline key={v.name} positions={v.path} pathOptions={{ color: roadColor, weight: ROUTE_WEIGHT, opacity: 0.9 }}>
                 <Tooltip sticky>{v.name}</Tooltip>
               </Polyline>
             ))}
           {!roadOn && !hasRoad && lines.up.length > 1 && (
-            <Polyline positions={lines.up} pathOptions={{ color: COLORS.up, weight: 5, opacity: 0.9 }} />
+            <Polyline positions={lines.up} pathOptions={{ color: COLORS.up, weight: ROUTE_WEIGHT, opacity: 0.9 }} />
           )}
           {!roadOn && !hasRoad && lines.down.length > 1 && (
-            <Polyline positions={lines.down} pathOptions={{ color: COLORS.down, weight: 5, opacity: 0.95 }} />
+            <Polyline positions={lines.down} pathOptions={{ color: COLORS.down, weight: ROUTE_WEIGHT, opacity: 0.95 }} />
           )}
           {roadOn && roadStyled && (
             <RouteLoadLayer
@@ -280,7 +295,7 @@ export default function RouteAnalysisView({ busLines }) {
           )}
           {roadOn && exploreLoad.result && <RoadPointsLayer result={exploreLoad.result} />}
           {reachPath.length > 1 && (
-            <Polyline positions={reachPath} pathOptions={{ color: COLORS.selected, weight: 8, opacity: 0.95 }} />
+            <Polyline positions={reachPath} pathOptions={{ color: COLORS.selected, weight: ROUTE_WEIGHT + 4, opacity: 0.95 }} />
           )}
 
           {placed.map((p) => {
@@ -350,6 +365,10 @@ export default function RouteAnalysisView({ busLines }) {
               }}
             />
           )}
+          <label className="check side-card">
+            <input type="checkbox" checked={boundaryOn} onChange={(e) => setBoundaryOn(e.target.checked)} />
+            {t("route.showBoundaries")}
+          </label>
           <DongCard
             on={dongOn}
             setOn={setDongOn}

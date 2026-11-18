@@ -1,10 +1,10 @@
-"""Cheap source-level guard for the Airflow DAG shipped in the repository."""
+"""Cheap source-level guard for the Airflow DAGs shipped in the repository."""
 
 from __future__ import annotations
 
 
-def test_od_correction_dag_source_compiles(project_root):
-    dag_path = project_root / "pipelines" / "airflow" / "dags" / "od_correction_dag.py"
-    source = dag_path.read_text(encoding="utf-8")
-
-    compile(source, str(dag_path), "exec")
+def test_every_dag_source_compiles(project_root):
+    dags = sorted((project_root / "pipelines" / "airflow" / "dags").glob("*.py"))
+    assert dags, "no DAG files found"
+    for dag_path in dags:
+        compile(dag_path.read_text(encoding="utf-8"), str(dag_path), "exec")

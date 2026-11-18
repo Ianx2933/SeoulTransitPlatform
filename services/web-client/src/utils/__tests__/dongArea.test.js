@@ -8,6 +8,7 @@ describe("district areas", () => {
     expect(areaCode("11010530", "dong")).toBe("11010530");
     expect(areaCode("11010530", "gu")).toBe("11010");
     expect(areaCode("11010530", "city")).toBe("11");
+    expect(areaCode("11010530", "group", ["11010530", "11010540"])).toBe("11010530,11010540");
   });
 
   test("names Seoul gu in both languages and nothing outside Seoul", () => {
