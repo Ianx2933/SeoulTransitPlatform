@@ -20,25 +20,28 @@ import java.util.Map;
 public class RoadLoadQueryRepository {
 
     private static final String LEGS_BY_ROUTES = """
-            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
+            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
+                   승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
             FROM od_typical_route_stop
             WHERE 기준일자 = :label AND 노선명 IN (:routes)
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4, 5
             """;
 
     /** Legs boarding at one stop; two fixed statements, no SQL built from strings. */
     private static final String LEGS_BOARDING_AT = """
-            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
+            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
+                   승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
             FROM od_typical_route_stop
             WHERE 기준일자 = :label AND 승차_정류장ars IN (:keys)
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4, 5
             """;
 
     private static final String LEGS_ALIGHTING_AT = """
-            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
+            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
+                   승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
             FROM od_typical_route_stop
             WHERE 기준일자 = :label AND 하차_정류장ars IN (:keys)
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4, 5
             """;
 
     private static final String ROUTES_THROUGH = """
@@ -61,7 +64,8 @@ public class RoadLoadQueryRepository {
     }
 
     private static RouteLoadCalculator.Leg leg(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new RouteLoadCalculator.Leg(rs.getString("route"), rs.getString("b"), rs.getString("a"), rs.getDouble("p"));
+        return new RouteLoadCalculator.Leg(rs.getString("route"), rs.getString("b"), rs.getString("a"), rs.getDouble("p"),
+                rs.getObject("bq", Integer.class), rs.getObject("aq", Integer.class));
     }
 
     public List<RouteLoadCalculator.Leg> legsByRoutes(String label, Collection<String> routes) {

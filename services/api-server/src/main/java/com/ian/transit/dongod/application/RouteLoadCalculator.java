@@ -14,6 +14,11 @@ import java.util.function.BiPredicate;
  * stored variant of its route that passes the boarding stop and then the
  * alighting stop; with several candidates (a stop served twice on a loop, or
  * a route stored as variants such as 2312A/2312B) the shortest span wins.
+ * When the leg carries TOPIS stop sequences and a stop occurs more than once
+ * on a variant, the occurrences closest to those sequences are used instead:
+ * on 6411 the stop 17104 is served twice, and riders who stay on through the
+ * loop were put on the short span (2026-11-18, 390 riders a day short over 92
+ * segments against the route chart).
  * Every segment from the boarding stop to the one before the alighting stop
  * carries the leg's passengers. Legs that no variant can hold (no stored
  * path, or a stop missing from it) are counted as unplaced by route.
@@ -29,7 +34,13 @@ public final class RouteLoadCalculator {
     private RouteLoadCalculator() {
     }
 
-    public record Leg(String route, String boardArs, String alightArs, double passengers) {
+    /** A route OD leg; boardSeq and alightSeq are TOPIS stop sequences, null when unknown. */
+    public record Leg(String route, String boardArs, String alightArs, double passengers,
+                      Integer boardSeq, Integer alightSeq) {
+
+        public Leg(String route, String boardArs, String alightArs, double passengers) {
+            this(route, boardArs, alightArs, passengers, null, null);
+        }
     }
 
     /** A stored station: TOPIS route, stored variant name, BIS sequence, ARS (any padding). */
@@ -114,20 +125,37 @@ public final class RouteLoadCalculator {
             Variant best = null;
             int bestFrom = -1;
             int bestTo = -1;
+            boolean withSeq = leg.boardSeq() != null && leg.alightSeq() != null;
             for (Variant v : variants.getOrDefault(leg.route(), List.of())) {
                 List<Integer> froms = v.positions().get(b);
                 List<Integer> tos = v.positions().get(a);
                 if (froms == null || tos == null) {
                     continue;
                 }
+                boolean bySeq = withSeq && (froms.size() > 1 || tos.size() > 1);
+                int vFrom = -1;
+                int vTo = -1;
+                long vScore = Long.MAX_VALUE;
                 for (int from : froms) {
                     for (int to : tos) {
-                        if (to > from && (best == null || to - from < bestTo - bestFrom)) {
-                            best = v;
-                            bestFrom = from;
-                            bestTo = to;
+                        if (to <= from) {
+                            continue;
+                        }
+                        long score = bySeq
+                                ? Math.abs((long) v.seqs().get(from) - leg.boardSeq())
+                                        + Math.abs((long) v.seqs().get(to) - leg.alightSeq())
+                                : to - from;
+                        if (score < vScore || (score == vScore && to - from < vTo - vFrom)) {
+                            vScore = score;
+                            vFrom = from;
+                            vTo = to;
                         }
                     }
+                }
+                if (vFrom >= 0 && (best == null || vTo - vFrom < bestTo - bestFrom)) {
+                    best = v;
+                    bestFrom = vFrom;
+                    bestTo = vTo;
                 }
             }
             if (best == null) {

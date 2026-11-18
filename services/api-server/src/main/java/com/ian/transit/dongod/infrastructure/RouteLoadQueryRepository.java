@@ -26,6 +26,7 @@ public class RouteLoadQueryRepository {
     /**
      * Stops inside the area, placed like the district demand query, as ARS
      * keys with and without leading zeros. %s is the area filter on adm_cd.
+     * stop_location_fix (database/schema/09) replaces both tables for its ARS.
      */
     private static final String AREA_STOPS = """
             WITH dong AS (
@@ -35,10 +36,16 @@ public class RouteLoadQueryRepository {
                 SELECT LPAD("정류장번호"::text, 5, '0') AS ars
                 FROM bus_stop_location b, dong
                 WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)))
+                  AND LPAD("정류장번호"::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
                 UNION
                 SELECT LPAD(b.ars_id::text, 5, '0')
                 FROM integrated_bus_stop_location b, dong
                 WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)))
+                  AND LPAD(b.ars_id::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
+                UNION
+                SELECT f.ars
+                FROM stop_location_fix f, dong
+                WHERE ST_Covers(dong.g, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326))
             ),
             stop_keys AS MATERIALIZED (
                 SELECT ars FROM stops WHERE ars <> '00000'
@@ -48,17 +55,19 @@ public class RouteLoadQueryRepository {
             """;
 
     private static final String BOARD = """
-            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
+            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
+                   승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
             FROM od_typical_route_stop
             WHERE 기준일자 = :label AND 승차_정류장ars IN (SELECT ars FROM stop_keys)
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4, 5
             """;
 
     private static final String ALIGHT = """
-            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
+            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
+                   승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
             FROM od_typical_route_stop
             WHERE 기준일자 = :label AND 하차_정류장ars IN (SELECT ars FROM stop_keys)
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4, 5
             """;
 
     private static final String STATIONS_SQL = """
@@ -115,7 +124,8 @@ public class RouteLoadQueryRepository {
             p.addValue("codeEnd", DongArea.codeEnd(code));
         }
         return jdbc.query(sql, p, (rs, i) -> new RouteLoadCalculator.Leg(
-                rs.getString("route"), rs.getString("b"), rs.getString("a"), rs.getDouble("p")));
+                rs.getString("route"), rs.getString("b"), rs.getString("a"), rs.getDouble("p"),
+                rs.getObject("bq", Integer.class), rs.getObject("aq", Integer.class)));
     }
 
     public List<RouteLoadCalculator.Station> stations(Collection<String> routes) {

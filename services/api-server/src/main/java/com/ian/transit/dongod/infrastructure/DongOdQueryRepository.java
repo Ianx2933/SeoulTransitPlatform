@@ -38,10 +38,16 @@ public class DongOdQueryRepository {
                 SELECT LPAD("정류장번호"::text, 5, '0') AS ars
                 FROM bus_stop_location b, dong
                 WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)))
+                  AND LPAD("정류장번호"::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
                 UNION
                 SELECT LPAD(b.ars_id::text, 5, '0')
                 FROM integrated_bus_stop_location b, dong
                 WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)))
+                  AND LPAD(b.ars_id::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
+                UNION
+                SELECT f.ars
+                FROM stop_location_fix f, dong
+                WHERE ST_Covers(dong.g, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326))
             ),
             stop_keys AS MATERIALIZED (
                 SELECT ars FROM stops WHERE ars <> '00000'
@@ -60,6 +66,10 @@ public class DongOdQueryRepository {
             alight_pts AS MATERIALIZED (
                 SELECT DISTINCT ON (ars) ars, g
                 FROM (
+                    SELECT f.ars, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326) AS g, 0 AS pri
+                    FROM stop_location_fix f
+                    WHERE f.ars IN (SELECT ars FROM alight)
+                    UNION ALL
                     SELECT LPAD(b."정류장번호"::text, 5, '0') AS ars,
                            COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)) AS g, 1 AS pri
                     FROM bus_stop_location b

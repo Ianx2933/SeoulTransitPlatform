@@ -43,6 +43,20 @@ class RouteLoadCalculatorTest {
     }
 
     @Test
+    void topisSequencesPickTheOccurrenceOfAStopServedTwice() {
+        // 6411-like: 01002 at seq 2 and 4. Boarding at seq 2 and alighting at
+        // 01005 rides the whole loop; without sequences the short span wins.
+        List<Station> loop = line("R", "R", "01001", "01002", "01003", "01002", "01005");
+        var withSeq = RouteLoadCalculator.compute(List.of(new Leg("R", "01002", "01005", 1, 2, 5)), loop);
+        assertThat(withSeq.loads()).containsOnlyKeys(new SegmentRef("R", 2), new SegmentRef("R", 3), new SegmentRef("R", 4));
+        var back = RouteLoadCalculator.compute(List.of(new Leg("R", "01002", "01005", 1, 4, 5)), loop);
+        assertThat(back.loads()).containsOnlyKeys(new SegmentRef("R", 4));
+        // sequences on a stop served once change nothing
+        var once = RouteLoadCalculator.compute(List.of(new Leg("R", "01001", "01003", 1, 9, 9)), loop);
+        assertThat(once.loads()).containsOnlyKeys(new SegmentRef("R", 1), new SegmentRef("R", 2));
+    }
+
+    @Test
     void variantsAreChosenByWhichOneServesBothStopsInOrder() {
         List<Station> stations = new ArrayList<>(line("2312", "2312|2312A", "00001", "00002", "00003"));
         stations.addAll(line("2312", "2312|2312B", "00003", "00002", "00001"));

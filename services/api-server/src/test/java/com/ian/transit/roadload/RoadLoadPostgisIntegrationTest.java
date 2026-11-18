@@ -79,6 +79,8 @@ class RoadLoadPostgisIntegrationTest {
         // The stored-path tables exactly as production creates them (Surefire runs from services/api-server).
         Path schema = Path.of("..", "..", "database", "schema", "08_bus_route_path.sql").toAbsolutePath().normalize();
         jdbc.execute(Files.readString(schema, StandardCharsets.UTF_8));
+        Path fix = Path.of("..", "..", "database", "schema", "09_stop_location_fix.sql").toAbsolutePath().normalize();
+        jdbc.execute(Files.readString(fix, StandardCharsets.UTF_8));
 
         jdbc.execute("CREATE TABLE admin_dong_boundary (adm_cd VARCHAR, adm_nm VARCHAR, geom geometry(MultiPolygon, 4326))");
         jdbc.execute("""
@@ -89,7 +91,8 @@ class RoadLoadPostgisIntegrationTest {
                     lat DOUBLE PRECISION, lng DOUBLE PRECISION, geom geometry(Point, 4326))""");
         jdbc.execute("""
                 CREATE TABLE od_typical_route_stop (기준일자 VARCHAR, 노선명 VARCHAR,
-                    승차_정류장ars VARCHAR, 하차_정류장ars VARCHAR, 승객수 DOUBLE PRECISION)""");
+                    승차_정류장순번 INTEGER, 승차_정류장ars VARCHAR, 하차_정류장순번 INTEGER,
+                    하차_정류장ars VARCHAR, 승객수 DOUBLE PRECISION)""");
 
         dong(A, "A동", 127.00, 127.01);
         dong(B, "B동", 127.01, 127.02);
@@ -147,7 +150,19 @@ class RoadLoadPostgisIntegrationTest {
     }
 
     private void od(String route, String board, String alight, double riders) {
-        jdbc.update("INSERT INTO od_typical_route_stop VALUES ('typical_weekday', ?, ?, ?, ?)", route, board, alight, riders);
+        // TOPIS sequence = position on the stored path (01001 = 1 ... 01004 = 4); null for a stop it lacks
+        jdbc.update("INSERT INTO od_typical_route_stop VALUES ('typical_weekday', ?, ?, ?, ?, ?, ?)",
+                route, seqOf(board), board, seqOf(alight), alight, riders);
+    }
+
+    private static Integer seqOf(String ars) {
+        return switch (ars.replaceFirst("^0+", "")) {
+            case "1001" -> 1;
+            case "1002" -> 2;
+            case "1003" -> 3;
+            case "1004" -> 4;
+            default -> null;
+        };
     }
 
     private static Map<String, Double> loads(List<DongRouteLoadResponse.Segment> segments) {
@@ -208,5 +223,20 @@ class RoadLoadPostgisIntegrationTest {
         double unknown = rows.stream().filter(row -> row.destCode() == null).mapToDouble(DongRouteFlows.Row::passengers).sum();
         assertThat(toB).isCloseTo(22.0, within(1e-9));                       // 10 + 5 (01004, integrated only) + 4 + 3
         assertThat(unknown).isZero();
+    }
+
+    @Test
+    void stopLocationFixWinsOverTheStopTables() {
+        // 01004 is in B per integrated_bus_stop_location; a fix row puts it in A
+        jdbc.update("INSERT INTO stop_location_fix (ars, stop_name, lat, lng, reason) VALUES ('01004', 'east', 37.005, 127.005, 'manual')");
+        try {
+            List<DongRouteFlows.Row> rows = dongRepo.routeRows("typical_weekday", DongArea.DONG, A);
+            double toA = rows.stream().filter(row -> A.equals(row.destCode())).mapToDouble(DongRouteFlows.Row::passengers).sum();
+            assertThat(toA).isCloseTo(7.0, within(1e-9));                    // 2 inside A + 5 to 01004
+            // alighting in A now: 2 ("1002") + 5 (01002->01004) + 7 (01003->01004)
+            assertThat(new DongRouteLoadService(routeRepo).load("weekday", "dong", A, "do").passengers()).isEqualTo(14.0);
+        } finally {
+            jdbc.update("DELETE FROM stop_location_fix");
+        }
     }
 }
