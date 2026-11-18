@@ -5,7 +5,14 @@ import { fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints } from "../api/r
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
-import { boundsOf, pathBetween, placeStops, seqOfArs, splitAtTurnaround } from "../utils/routeGeometry.js";
+import {
+  boundsOf,
+  pathBetween,
+  pathStopPoints,
+  placeStops,
+  seqOfArs,
+  splitAtTurnaround
+} from "../utils/routeGeometry.js";
 import { findTurnaround } from "../utils/routeLoadChart.js";
 import { useRoadLoad } from "../hooks/useRoadLoad.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
@@ -177,7 +184,11 @@ export default function RouteAnalysisView({ busLines }) {
   );
   const dongMax = Math.max(0, ...dongValues.values());
 
-  const placed = useMemo(() => placeStops(routeData?.stops || [], points), [routeData, points]);
+  // Demand-layer positions first; the stored route path fills the rest (piers, new stops).
+  const placed = useMemo(
+    () => placeStops(routeData?.stops || [], [...points, ...pathStopPoints(roadPath)]),
+    [routeData, points, roadPath]
+  );
   const effectiveTurnaround = turnaroundFromBis ?? turnaround;
   const lines = useMemo(() => splitAtTurnaround(placed, effectiveTurnaround), [placed, effectiveTurnaround]);
   const reachPath = useMemo(() => pathBetween(placed, stopSeq, reachSeq), [placed, stopSeq, reachSeq]);

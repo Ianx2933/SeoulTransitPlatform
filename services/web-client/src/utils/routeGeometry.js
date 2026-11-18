@@ -28,6 +28,15 @@ function validPoint(p) {
 }
 
 /** Stops with coordinates, in route order: [{ seq, name, ars, lat, lng }]. */
+/**
+ * Stops of a stored route path (RoutePathResponse.stops) in the shape
+ * placeStops reads, so stops the demand layer lacks (Han River boat piers)
+ * can still be placed. Put them after the demand points: those win on a tie.
+ */
+export function pathStopPoints(roadPath) {
+  return (roadPath?.stops || []).map((s) => ({ nodeId: s.ars, nodeName: s.name, lat: s.lat, lng: s.lng }));
+}
+
 export function placeStops(stops, points) {
   const usable = (points || []).filter(validPoint).map((p) => ({ ...p, lat: Number(p.lat), lng: Number(p.lng) }));
   const byId = new Map();

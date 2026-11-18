@@ -75,3 +75,29 @@ describe("seqOfArs", () => {
     expect(seqOfArs(route, "48028")).toBe(30);
   });
 });
+
+import { pathStopPoints } from "../routeGeometry.js";
+
+describe("pathStopPoints", () => {
+  test("stored route stops place what the demand layer lacks; demand points win", () => {
+    const roadPath = {
+      stops: [
+        { ars: "90001", name: "마곡 선착장", lat: 37.57, lng: 126.83 },
+        { ars: "01001", name: "stored", lat: 1, lng: 1 }
+      ]
+    };
+    const demand = [{ nodeId: "01001", nodeName: "demand", lat: 37.5, lng: 127.0 }];
+    const placed = placeStops(
+      [
+        { seq: 1, ars: "90001", name: "마곡 선착장" },
+        { seq: 2, ars: "01001", name: "x" }
+      ],
+      [...demand, ...pathStopPoints(roadPath)]
+    );
+    expect(placed.map((p) => [p.ars, p.lat])).toEqual([
+      ["90001", 37.57],
+      ["01001", 37.5]
+    ]);
+    expect(pathStopPoints(null)).toEqual([]);
+  });
+});

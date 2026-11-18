@@ -140,7 +140,7 @@ public class RouteLoadQueryRepository {
     }
 
     /** [lat, lng] pairs of a WKT LINESTRING, rounded to 6 decimals; empty for anything else. */
-    static List<double[]> parseLineString(String wkt) {
+    public static List<double[]> parseLineString(String wkt) {
         List<double[]> out = new ArrayList<>();
         if (wkt == null || !wkt.startsWith("LINESTRING(") || !wkt.endsWith(")")) {
             return out;
