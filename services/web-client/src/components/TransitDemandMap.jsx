@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n/I18nProvider.jsx";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CircleMarker,
   GeoJSON,
@@ -23,13 +23,9 @@ import { colorOf, DEMAND_COLORS, dongDayType, quantileBreaks } from "../utils/do
 import DongOdPanel from "./DongOdPanel.jsx";
 import DistrictDemandPanel from "./DistrictDemandPanel.jsx";
 import NodeDetailPanel from "./NodeDetailPanel.jsx";
-import RouteLoadLayer from "./RouteLoadLayer.jsx";
-import RouteLoadLegend from "./RouteLoadLegend.jsx";
 import RoadExploreCard from "./RoadExploreCard.jsx";
-import RoadPointsLayer from "./RoadPointsLayer.jsx";
-import { useRoadLoad } from "../hooks/useRoadLoad.js";
-import { DEFAULT_MIN_LOAD } from "../utils/routeLoad.js";
-import { styleSegments } from "../utils/routeLoad.js";
+import { RoadLegendOverlay, RoadMapLayers } from "./RoadMapLayers.jsx";
+import { useRoadLayer } from "../hooks/useRoadLayer.js";
 
 const SEOUL_CENTER = [37.5665, 126.9780];
 
@@ -215,26 +211,9 @@ export default function TransitDemandMap({
   const [dongColorBy, setDongColorBy] = useState("departures");
   const [dongColorMode, setDongColorMode] = useState("all");
   const [dongSummary, setDongSummary] = useState(null);
-  // { result, minLoad, routes } from the district panel's road view, or null.
-  const [routeLoad, setRouteLoad] = useState(null);
-  const [roadBoundaries, setRoadBoundaries] = useState(true);
-  const handleRouteLoad = useCallback((value) => setRouteLoad(value), []);
-  // Select link: who passes one clicked segment (all routes, not only this area).
-  const [explore, setExplore] = useState(null);
-  const exploreLoad = useRoadLoad(explore);
-  const exploreSegment = useCallback(
-    (s) => setExplore({ kind: "segment", from: s.fromArs, to: s.toArs, dayType: routeLoad?.result?.dayType }),
-    [routeLoad]
-  );
-  const roadStyled = useMemo(() => {
-    if (exploreLoad.result) {
-      return styleSegments(exploreLoad.result.segments, { minLoad: routeLoad?.minLoad ?? DEFAULT_MIN_LOAD });
-    }
-    return routeLoad
-      ? styleSegments(routeLoad.result.segments, { minLoad: routeLoad.minLoad, routes: routeLoad.routes })
-      : null;
-  }, [routeLoad, exploreLoad.result]);
-  const roadMinLoad = routeLoad?.minLoad ?? DEFAULT_MIN_LOAD;
+  // Road layer: the district panel's road view and stop/segment look-ups.
+  const road = useRoadLayer();
+  const routeLoad = road.routeLoad;
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [nodeDetail, setNodeDetail] = useState(null);
   const [nodeCatchment, setNodeCatchment] = useState(null);
@@ -792,7 +771,7 @@ export default function TransitDemandMap({
             url={tileLayer.url}
           />
 
-          {showAdminBoundary && adminDongGeoJson && (!routeLoad || roadBoundaries) && (
+          {showAdminBoundary && adminDongGeoJson && (!routeLoad || road.boundariesOn) && (
             <GeoJSON
               key={`${selectedDistricts.map(getDistrictCode).join("-") || "all"}-${dongColorKey}-${routeLoad ? "road" : ""}`}
               data={adminDongGeoJson}
@@ -801,14 +780,7 @@ export default function TransitDemandMap({
             />
           )}
 
-          {roadStyled && (exploreLoad.result || showAdminBoundary) && (
-            <RouteLoadLayer
-              result={exploreLoad.result || routeLoad?.result}
-              segments={roadStyled.segments}
-              onSegmentClick={exploreSegment}
-            />
-          )}
-          {exploreLoad.result && <RoadPointsLayer result={exploreLoad.result} />}
+          <RoadMapLayers road={road} boundariesShown={showAdminBoundary} />
 
           {visiblePoints.map((point) => {
             const color = getRouteColor(point.mode, point.serviceId);
@@ -929,20 +901,16 @@ export default function TransitDemandMap({
               </CircleMarker>
             )}
         </MapContainer>
-        {roadStyled && (exploreLoad.result || showAdminBoundary) && roadStyled.shown > 0 && (
-          <div className="map-legend-overlay">
-            <RouteLoadLegend styled={roadStyled} minLoad={roadMinLoad} />
-          </div>
-        )}
+        <RoadLegendOverlay road={road} boundariesShown={showAdminBoundary} />
       </section>
 
       <aside className="map-side">
       <RoadExploreCard
-        request={explore}
-        state={exploreLoad.state}
-        error={exploreLoad.error}
-        result={exploreLoad.result}
-        onClose={() => setExplore(null)}
+        request={road.explore}
+        state={road.exploreLoad.state}
+        error={road.exploreLoad.error}
+        result={road.exploreLoad.result}
+        onClose={road.closeExplore}
       />
       {showAdminBoundary && lastDistrict && (
         <DongOdPanel
@@ -950,9 +918,9 @@ export default function TransitDemandMap({
           name={getDistrictName(lastDistrict, tx)}
           initialDayType={dongDay}
           onPickDistrict={pickDistrictByCode}
-          onRouteLoad={handleRouteLoad}
-          boundariesOn={roadBoundaries}
-          onBoundariesChange={setRoadBoundaries}
+          onRouteLoad={road.setRouteLoad}
+          boundariesOn={road.boundariesOn}
+          onBoundariesChange={road.setBoundariesOn}
         />
       )}
       {filters && !loading && points.length > 0 && (
@@ -1034,7 +1002,7 @@ export default function TransitDemandMap({
         selectedSubwayLines={selectedSubwayLines}
         selectedBusLines={selectedBusLines}
         onAddRouteFromNode={onAddRouteFromNode}
-        onRoadLookup={(ars, direction) => setExplore({ kind: "stop", ars, direction, dayType: dongDay })}
+        onRoadLookup={(ars, direction) => road.exploreStop(ars, direction, dongDay)}
       />
 
       </aside>

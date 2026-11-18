@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { areaCode, fetchDongOd, fetchDongRouteLoad, fetchDongRoutes } from "../api/dongOdApi.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
-import { busRouteStyle } from "../utils/busRouteType.js";
 import { csvFileName } from "../utils/roadCsv.js";
 import { busiestRoutes, DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
 import { guName } from "../utils/seoulGu.js";
-import CsvButton from "./CsvButton.jsx";
-import RouteLoadLegend from "./RouteLoadLegend.jsx";
+import RoadLoadControls from "./RoadLoadControls.jsx";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
 const DAY_NAMES = { weekday: "Weekday", saturday: "Saturday", sunday_holiday: "Sunday & holiday" };
@@ -60,21 +58,26 @@ export default function DongOdPanel({
   const area = areaCode(code, level);
   const requestKey = [activeView, level, dest, area, dayType, activeView === "road" ? loadDirection : ""].join("|");
 
+  // The request runs when its key changes; its parameters are read from a ref.
+  const paramsRef = useRef(null);
+  paramsRef.current = { activeView, area, level, dest, dayType, loadDirection };
+
   useEffect(() => {
     if (!code) return undefined;
+    const p = paramsRef.current;
     let ignore = false;
     setState("loading");
     setError("");
     const request =
-      activeView === "routes"
-        ? fetchDongRoutes({ code: area, level, dayType })
-        : activeView === "road"
-          ? fetchDongRouteLoad({ code: area, level, dayType, direction: loadDirection })
-          : fetchDongOd({ code: area, level, dest, dayType, direction: activeView, limit: 15 });
+      p.activeView === "routes"
+        ? fetchDongRoutes({ code: p.area, level: p.level, dayType: p.dayType })
+        : p.activeView === "road"
+          ? fetchDongRouteLoad({ code: p.area, level: p.level, dayType: p.dayType, direction: p.loadDirection })
+          : fetchDongOd({ code: p.area, level: p.level, dest: p.dest, dayType: p.dayType, direction: p.activeView, limit: 15 });
     request
       .then((result) => {
         if (ignore) return;
-        setAnswer({ key: requestKey, view: activeView, result });
+        setAnswer({ key: requestKey, view: p.activeView, result });
         setState("done");
       })
       .catch((e) => {
@@ -86,30 +89,26 @@ export default function DongOdPanel({
     return () => {
       ignore = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey]);
+  }, [code, requestKey]);
 
   const current = answer && answer.key === requestKey ? answer : null;
   const roadResult = current && current.view === "road" ? current.result : null;
   const roadRoutes = useMemo(() => (roadResult ? busiestRoutes(roadResult.segments) : []), [roadResult]);
   // Ticks only count for routes this result has; a new area keeps the ones it shares.
-  const activeRoutes = pickedRoutes.filter((r) => roadRoutes.some((x) => x.route === r));
-  const activeRoutesKey = activeRoutes.join(",");
+  const activeRoutes = useMemo(
+    () => pickedRoutes.filter((r) => roadRoutes.some((x) => x.route === r)),
+    [pickedRoutes, roadRoutes]
+  );
   const styled = useMemo(
     () => (roadResult ? styleSegments(roadResult.segments, { minLoad, routes: activeRoutes }) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roadResult, minLoad, activeRoutesKey]
+    [roadResult, minLoad, activeRoutes]
   );
 
   // The map draws the road layer only while this view shows its result.
   useEffect(() => {
     onRouteLoad?.(roadResult ? { result: roadResult, minLoad, routes: activeRoutes } : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roadResult, minLoad, activeRoutesKey, onRouteLoad]);
+  }, [roadResult, minLoad, activeRoutes, onRouteLoad]);
   useEffect(() => () => onRouteLoad?.(null), [onRouteLoad]);
-
-  const toggleRoute = (route) =>
-    setPickedRoutes((prev) => (prev.includes(route) ? prev.filter((r) => r !== route) : [...prev, route]));
 
   const areaTitle =
     level === "city" ? tx("Seoul") : level === "gu" ? guName(area, lang) || area : name || code;
@@ -251,73 +250,22 @@ export default function DongOdPanel({
                 ? tx("Only bus riders who get off in this area, on every segment they ride. Routes on the same road are added up.")
                 : tx("Only bus riders who board or get off in this area (a trip inside it counts once). Riders just passing through are left out.")}
           </p>
-          <div className="road-controls">
-            <label className="field-inline">
-              {tx("Hide segments under")}
-              <input
-                type="number"
-                min="0"
-                step="1"
-                inputMode="numeric"
-                value={minLoad}
-                onChange={(e) => setMinLoad(Math.max(0, Number(e.target.value) || 0))}
-              />
-              {tx("riders")}
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={boundariesOn} onChange={(e) => onBoundariesChange?.(e.target.checked)} />
-              {tx("Show district boundaries")}
-            </label>
-          </div>
-          <p className="note num">
-            {tx("{riders} riders a day; {shown} segments shown, {hidden} under the minimum hidden", {
-              riders: fmt(roadResult.passengers),
-              shown: styled.shown.toLocaleString(),
-              hidden: styled.hidden.toLocaleString()
-            })}
-          </p>
-          <RouteLoadLegend styled={styled} minLoad={minLoad} />
-          <CsvButton result={roadResult} fileName={csvFileName("road", areaTitle, roadResult.direction, roadResult.dayType)} />
-          {styled.shown === 0 && <p className="note">{tx("No bus riders on the road for this choice.")}</p>}
-
-          {roadRoutes.length > 0 && (
-            <fieldset className="route-picks">
-              <legend className="flow-title">
-                {activeRoutes.length === 0
-                  ? tx("Routes ({count}) — tick to show only those", { count: roadRoutes.length })
-                  : tx("Showing {picked} of {count} routes", { picked: activeRoutes.length, count: roadRoutes.length })}
-              </legend>
-              <button
-                type="button"
-                className="link-button"
-                disabled={activeRoutes.length === 0}
-                onClick={() => setPickedRoutes([])}
-              >
-                {tx("Clear all")}
-              </button>
-              <ul className="route-picks__list">
-                {roadRoutes.map((r) => (
-                  <li key={r.route}>
-                    <label className="check">
-                      <input type="checkbox" checked={activeRoutes.includes(r.route)} onChange={() => toggleRoute(r.route)} />
-                      <span className="route-chip__dot" style={{ background: busRouteStyle(r.route).bg }} aria-hidden="true" />
-                      <span className="label-strong">{r.route}</span>
-                    </label>
-                    <span className="num note">{tx("busiest {riders}", { riders: fmt(r.load) })}</span>
-                  </li>
-                ))}
-              </ul>
-            </fieldset>
-          )}
-
-          {roadResult.unplacedPassengers > 0 && (
-            <p className="note num">
-              {tx("Not drawn: {riders} riders on routes without a stored path ({routes})", {
-                riders: fmt(roadResult.unplacedPassengers),
-                routes: roadResult.unplacedRoutes.map((u) => u.route).join(", ")
-              })}
-            </p>
-          )}
+          <RoadLoadControls
+            result={roadResult}
+            styled={styled}
+            minLoad={minLoad}
+            onMinLoad={setMinLoad}
+            routes={roadRoutes}
+            picked={activeRoutes}
+            onPicked={setPickedRoutes}
+            csvName={csvFileName("road", areaTitle, roadResult.direction, roadResult.dayType)}
+            extra={
+              <label className="check">
+                <input type="checkbox" checked={boundariesOn} onChange={(e) => onBoundariesChange?.(e.target.checked)} />
+                {tx("Show district boundaries")}
+              </label>
+            }
+          />
         </>
       )}
     </section>

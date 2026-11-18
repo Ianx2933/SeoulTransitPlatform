@@ -46,4 +46,12 @@ class DongAreaTest {
         assertThat(DongArea.placeName("23010510", "신포동")).isEqualTo("인천 신포동");
         assertThat(DongArea.placeName(null, "x")).isEqualTo("x");
     }
+
+    @Test
+    void columnNamesMustBePlainIdentifiers() {
+        assertThat(DongArea.GU.filterSql("origin_cd")).isEqualTo("origin_cd >= :code AND origin_cd < :codeEnd");
+        assertThatThrownBy(() -> DongArea.DONG.filterSql("adm_cd; DROP TABLE x"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DongArea.GU.unitSql("1=1 OR origin_cd")).isInstanceOf(IllegalArgumentException.class);
+    }
 }

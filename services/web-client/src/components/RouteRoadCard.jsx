@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider.jsx";
-import { busRouteStyle } from "../utils/busRouteType.js";
-import { busiestRoutes } from "../utils/routeLoad.js";
 import { csvFileName } from "../utils/roadCsv.js";
-import CsvButton from "./CsvButton.jsx";
-import RouteLoadLegend from "./RouteLoadLegend.jsx";
+import { busiestRoutes } from "../utils/routeLoad.js";
+import RoadLoadControls from "./RoadLoadControls.jsx";
 
 /** Routes one road-load request may add up (RoadLoadService.MAX_ROUTES). */
 export const MAX_COMBINED_ROUTES = 20;
@@ -14,7 +12,8 @@ export const MAX_COMBINED_ROUTES = 20;
  * Route analysis map in demand colours: the route (and any routes added to
  * it) drawn by riders on board, segment by segment, summed where routes share
  * a road. Routes can be ticked to show only those; a chosen stop can be looked
- * up across every route that serves it. All state lives in RouteAnalysisView.
+ * up across every route that serves it. All state lives in RouteAnalysisView;
+ * the shared parts are RoadLoadControls.
  */
 export default function RouteRoadCard({
   routeName,
@@ -33,11 +32,10 @@ export default function RouteRoadCard({
   stop,
   onStopLookup
 }) {
-  const { tx, lang } = useI18n();
+  const { tx } = useI18n();
   const [draft, setDraft] = useState(extraRoutes.join(", "));
   // Routes added from outside (a segment look-up) show up in the box too.
   useEffect(() => setDraft(extraRoutes.join(", ")), [extraRoutes]);
-  const fmt = (v) => Number(v || 0).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });
   const routes = result ? busiestRoutes(result.segments) : [];
   const applyDraft = () =>
     setExtraRoutes(
@@ -47,7 +45,6 @@ export default function RouteRoadCard({
         .filter((s) => s && s !== routeName)
         .slice(0, MAX_COMBINED_ROUTES - 1)
     );
-  const toggle = (r) => setPicked((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
 
   return (
     <section className="dong-card" aria-labelledby="road-card-title">
@@ -78,65 +75,22 @@ export default function RouteRoadCard({
             </label>
             <button type="submit" className="chip">{tx("Apply")}</button>
           </form>
-          <label className="field-inline">
-            {tx("Hide segments under")}
-            <input
-              type="number"
-              min="0"
-              step="1"
-              inputMode="numeric"
-              value={minLoad}
-              onChange={(e) => setMinLoad(Math.max(0, Number(e.target.value) || 0))}
-            />
-            {tx("riders")}
-          </label>
           {state === "loading" && <p className="note">{tx("Loading…")}</p>}
           {state === "error" && <p className="field-error">{error}</p>}
           {result && styled && (
-            <>
-              <p className="note num">
-                {tx("{riders} riders a day; {shown} segments shown, {hidden} under the minimum hidden", {
-                  riders: fmt(result.placedPassengers),
-                  shown: styled.shown.toLocaleString(),
-                  hidden: styled.hidden.toLocaleString()
-                })}
-              </p>
-              <RouteLoadLegend styled={styled} minLoad={minLoad} />
-              <CsvButton result={result} fileName={csvFileName("routes", (result.routes || []).join("_"), result.dayType)} />
+            <RoadLoadControls
+              result={result}
+              styled={styled}
+              minLoad={minLoad}
+              onMinLoad={setMinLoad}
+              routes={routes}
+              picked={picked}
+              onPicked={setPicked}
+              csvName={csvFileName("routes", (result.routes || []).join("_"), result.dayType)}
+              minRoutesToPick={2}
+            >
               <p className="note">{tx("Click a segment on the map to see who passes it on every route.")}</p>
-              {routes.length > 1 && (
-                <fieldset className="route-picks">
-                  <legend className="flow-title">
-                    {picked.length === 0
-                      ? tx("Routes ({count}) — tick to show only those", { count: routes.length })
-                      : tx("Showing {picked} of {count} routes", { picked: picked.length, count: routes.length })}
-                  </legend>
-                  <button type="button" className="link-button" disabled={picked.length === 0} onClick={() => setPicked([])}>
-                    {tx("Clear all")}
-                  </button>
-                  <ul className="route-picks__list">
-                    {routes.map((r) => (
-                      <li key={r.route}>
-                        <label className="check">
-                          <input type="checkbox" checked={picked.includes(r.route)} onChange={() => toggle(r.route)} />
-                          <span className="route-chip__dot" style={{ background: busRouteStyle(r.route).bg }} aria-hidden="true" />
-                          <span className="label-strong">{r.route}</span>
-                        </label>
-                        <span className="num note">{tx("busiest {riders}", { riders: fmt(r.load) })}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </fieldset>
-              )}
-              {result.unplacedPassengers > 0 && (
-                <p className="note num">
-                  {tx("Not drawn: {riders} riders on routes without a stored path ({routes})", {
-                    riders: fmt(result.unplacedPassengers),
-                    routes: result.unplacedRoutes.map((u) => u.route).join(", ")
-                  })}
-                </p>
-              )}
-            </>
+            </RoadLoadControls>
           )}
           {stop?.ars && (
             <div className="road-stop">

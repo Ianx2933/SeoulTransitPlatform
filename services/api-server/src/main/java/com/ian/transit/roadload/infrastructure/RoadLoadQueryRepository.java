@@ -26,11 +26,18 @@ public class RoadLoadQueryRepository {
             GROUP BY 1, 2, 3
             """;
 
-    /** %s is the stop column, 승차_정류장ars or 하차_정류장ars. */
-    private static final String LEGS_BY_STOP = """
+    /** Legs boarding at one stop; two fixed statements, no SQL built from strings. */
+    private static final String LEGS_BOARDING_AT = """
             SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
             FROM od_typical_route_stop
-            WHERE 기준일자 = :label AND %s IN (:keys)
+            WHERE 기준일자 = :label AND 승차_정류장ars IN (:keys)
+            GROUP BY 1, 2, 3
+            """;
+
+    private static final String LEGS_ALIGHTING_AT = """
+            SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a, SUM(승객수) AS p
+            FROM od_typical_route_stop
+            WHERE 기준일자 = :label AND 하차_정류장ars IN (:keys)
             GROUP BY 1, 2, 3
             """;
 
@@ -71,8 +78,7 @@ public class RoadLoadQueryRepository {
         String unpadded = paddedArs.replaceFirst("^0+", "");
         MapSqlParameterSource p = new MapSqlParameterSource().addValue("label", label)
                 .addValue("keys", List.of(paddedArs, unpadded));
-        String sql = LEGS_BY_STOP.formatted(alighting ? "하차_정류장ars" : "승차_정류장ars");
-        return jdbc.query(sql, p, (rs, i) -> leg(rs));
+        return jdbc.query(alighting ? LEGS_ALIGHTING_AT : LEGS_BOARDING_AT, p, (rs, i) -> leg(rs));
     }
 
     /** TOPIS routes with a stored segment from one stop to the next. */

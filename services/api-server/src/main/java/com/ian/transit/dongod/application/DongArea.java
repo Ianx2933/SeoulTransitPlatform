@@ -53,6 +53,7 @@ public enum DongArea {
 
     /** SQL expression giving the unit code of a district code column. */
     public String unitSql(String column) {
+        requireColumn(column);
         return switch (this) {
             case DONG -> column;
             case GU -> "CASE WHEN " + column + " = 'outside' THEN 'outside' ELSE LEFT(" + column + ", 5) END";
@@ -65,6 +66,7 @@ public enum DongArea {
      * Written as a range so the primary key (day_type, origin_cd, …) is used.
      */
     public String filterSql(String column) {
+        requireColumn(column);
         return switch (this) {
             case DONG -> column + " = :code";
             case GU -> column + " >= :code AND " + column + " < :codeEnd";
@@ -105,5 +107,16 @@ public enum DongArea {
             return "경기 " + dongName;
         }
         return dongName;
+    }
+
+    /**
+     * unitSql and filterSql put the column name into SQL text, so it must be a
+     * plain identifier written in the code (origin_cd, dest_cd, adm_cd), never
+     * anything from a request. Values always go in as :code / :codeEnd.
+     */
+    static void requireColumn(String column) {
+        if (column == null || !column.matches("[a-z_][a-z0-9_]*")) {
+            throw new IllegalArgumentException("not a column name: " + column);
+        }
     }
 }
