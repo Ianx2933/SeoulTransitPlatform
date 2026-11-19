@@ -1,5 +1,6 @@
 package com.ian.transit.dongod.infrastructure;
 
+import com.ian.transit.dongod.application.BusOutside;
 import com.ian.transit.dongod.application.DongArea;
 import com.ian.transit.dongod.application.DongReach;
 import com.ian.transit.dongod.application.DongRouteFlows;
@@ -31,30 +32,8 @@ public class DongOdQueryRepository {
      * looked up in bus_stop_location only, so riders alighting at stops only
      * integrated_bus_stop_location knows (452, 2026-11-17) had no district.
      */
-    private static final String ROUTES_SQL = """
-            WITH dong AS (
-                SELECT ST_Union(geom) AS g FROM public.admin_dong_boundary WHERE %s
-            ),
-            stops AS MATERIALIZED (
-                SELECT LPAD("정류장번호"::text, 5, '0') AS ars
-                FROM bus_stop_location b, dong
-                WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)))
-                  AND LPAD("정류장번호"::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
-                UNION
-                SELECT LPAD(b.ars_id::text, 5, '0')
-                FROM integrated_bus_stop_location b, dong
-                WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)))
-                  AND LPAD(b.ars_id::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
-                UNION
-                SELECT f.ars
-                FROM stop_location_fix f, dong
-                WHERE ST_Covers(dong.g, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326))
-            ),
-            stop_keys AS MATERIALIZED (
-                SELECT ars FROM stops WHERE ars <> '00000'
-                UNION
-                SELECT LTRIM(ars, '0') FROM stops WHERE ars <> '00000'
-            ),
+    private static final String ROUTES_SQL = RouteLoadQueryRepository.AREA_STOPS + """
+            ,
             legs AS MATERIALIZED (
                 SELECT o.노선명 AS route, o.하차_정류장ars AS alight_ars, o.승객수 AS passengers
                 FROM od_typical_route_stop o
@@ -99,6 +78,94 @@ public class DongOdQueryRepository {
             FROM legs l
             LEFT JOIN alight_dong ad ON ad.ars = LPAD(l.alight_ars, 5, '0')
             GROUP BY l.route, ad.adm_cd, ad.adm_nm
+            """;
+
+    /**
+     * Bus riders between the area's stops and stops outside Seoul (route stop
+     * OD), by the 행정동 of the stop at the other end, with the straight-line km
+     * between the two districts' points (as reachRows). %1$s = area filter on
+     * adm_cd, %2$s = this end's ARS column, %3$s = the other end's (both fixed
+     * in code). The other end is placed like the bus routes tab (fix row first,
+     * then bus_stop_location, then integrated_bus_stop_location; lowest adm_cd
+     * on a boundary). This end's district is the area district holding its
+     * stop, else the area's own point. Rows with adm_cd null are riders whose
+     * other stop could not be placed; rows inside Seoul are left out.
+     */
+    private static final String BUS_OUTSIDE_SQL = """
+            ,
+            area_dongs AS (
+                SELECT adm_cd, ST_Union(geom) AS g, ST_PointOnSurface(ST_Union(geom)) AS c
+                FROM public.admin_dong_boundary WHERE %1$s
+                GROUP BY adm_cd
+            ),
+            legs AS MATERIALIZED (
+                SELECT LPAD(o.%2$s, 5, '0') AS here_ars, LPAD(o.%3$s, 5, '0') AS there_ars,
+                       SUM(o.승객수) AS passengers
+                FROM od_typical_route_stop o
+                WHERE o.기준일자 = :label
+                  AND o.%2$s IN (SELECT ars FROM stop_keys)
+                  AND o.%3$s NOT IN (SELECT ars FROM stop_keys)
+                GROUP BY 1, 2
+            ),
+            wanted AS MATERIALIZED (
+                SELECT here_ars AS ars FROM legs UNION SELECT there_ars FROM legs
+            ),
+            pts AS MATERIALIZED (
+                SELECT DISTINCT ON (ars) ars, g
+                FROM (
+                    SELECT f.ars, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326) AS g, 0 AS pri
+                    FROM stop_location_fix f
+                    WHERE f.ars IN (SELECT ars FROM wanted)
+                    UNION ALL
+                    SELECT LPAD(b."정류장번호"::text, 5, '0') AS ars,
+                           COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)) AS g, 1 AS pri
+                    FROM bus_stop_location b
+                    WHERE LPAD(b."정류장번호"::text, 5, '0') IN (SELECT ars FROM wanted)
+                    UNION ALL
+                    SELECT LPAD(b.ars_id::text, 5, '0'),
+                           COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)), 2
+                    FROM integrated_bus_stop_location b
+                    WHERE LPAD(b.ars_id::text, 5, '0') IN (SELECT ars FROM wanted)
+                ) x
+                WHERE g IS NOT NULL
+                ORDER BY ars, pri
+            ),
+            here_dong AS (
+                SELECT DISTINCT ON (p.ars) p.ars, a.c
+                FROM pts p
+                JOIN area_dongs a ON ST_Covers(a.g, p.g)
+                WHERE p.ars IN (SELECT here_ars FROM legs)
+                ORDER BY p.ars, a.adm_cd
+            ),
+            there_dong AS (
+                SELECT p.ars, d.adm_cd, d.adm_nm
+                FROM pts p
+                JOIN LATERAL (
+                    SELECT x.adm_cd, x.adm_nm
+                    FROM public.admin_dong_boundary x
+                    WHERE ST_Covers(x.geom, p.g)
+                    ORDER BY x.adm_cd
+                    LIMIT 1
+                ) d ON true
+                WHERE p.ars IN (SELECT there_ars FROM legs)
+            ),
+            there_pts AS (
+                SELECT adm_cd, ST_PointOnSurface(ST_Union(geom)) AS c
+                FROM public.admin_dong_boundary
+                WHERE adm_cd IN (SELECT adm_cd FROM there_dong WHERE adm_cd NOT LIKE '11%%')
+                GROUP BY adm_cd
+            )
+            SELECT td.adm_cd, td.adm_nm,
+                   CASE WHEN tp.c IS NULL THEN NULL
+                        ELSE ST_DistanceSphere(COALESCE(hd.c, ST_PointOnSurface(dong.g)), tp.c) / 1000.0 END AS km,
+                   SUM(l.passengers) AS passengers
+            FROM legs l
+            CROSS JOIN dong
+            LEFT JOIN here_dong hd ON hd.ars = l.here_ars
+            LEFT JOIN there_dong td ON td.ars = l.there_ars
+            LEFT JOIN there_pts tp ON tp.adm_cd = td.adm_cd
+            WHERE td.adm_cd IS NULL OR td.adm_cd NOT LIKE '11%%'
+            GROUP BY 1, 2, 3
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -208,6 +275,24 @@ public class DongOdQueryRepository {
         return jdbc.query(sql, params(dayType, level, code), (rs, i) -> new DongReach.Row(
                 rs.getObject("km", Double.class), rs.getBoolean("outside"),
                 rs.getDouble("subway_rides"), rs.getDouble("bus_rides"), rs.getDouble("total_rides")));
+    }
+
+    /**
+     * Bus rows between the area and districts outside Seoul (BUS_OUTSIDE_SQL).
+     * from = boarding in the area, otherwise alighting in it. Not for all of
+     * Seoul: every stop would be an area stop.
+     */
+    public List<BusOutside.Row> busOutsideRows(String label, DongArea level, String code, boolean from) {
+        if (level == DongArea.CITY) {
+            throw new IllegalArgumentException("bus outside Seoul is for a dong, a gu or a group, not all of Seoul");
+        }
+        String here = from ? "승차_정류장ars" : "하차_정류장ars";
+        String there = from ? "하차_정류장ars" : "승차_정류장ars";
+        String filter = level.filterSql("adm_cd");
+        String sql = RouteLoadQueryRepository.AREA_STOPS.formatted(filter) + BUS_OUTSIDE_SQL.formatted(filter, here, there);
+        MapSqlParameterSource p = params(null, level, code).addValue("label", label);
+        return jdbc.query(sql, p, (rs, i) -> new BusOutside.Row(rs.getString("adm_cd"), rs.getString("adm_nm"),
+                rs.getObject("km", Double.class), rs.getDouble("passengers")));
     }
 
     /** Bus routes boarding inside a 행정동 or a 구 (not all of Seoul: too many stops). */

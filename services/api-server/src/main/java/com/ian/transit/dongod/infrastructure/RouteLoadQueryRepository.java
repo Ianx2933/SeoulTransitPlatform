@@ -27,8 +27,9 @@ public class RouteLoadQueryRepository {
      * Stops inside the area, placed like the district demand query, as ARS
      * keys with and without leading zeros. %s is the area filter on adm_cd.
      * stop_location_fix (database/schema/09) replaces both tables for its ARS.
+     * Shared with DongOdQueryRepository (bus routes tab, bus reach outside Seoul).
      */
-    private static final String AREA_STOPS = """
+    static final String AREA_STOPS = """
             WITH dong AS (
                 SELECT ST_Union(geom) AS g FROM public.admin_dong_boundary WHERE %s
             ),

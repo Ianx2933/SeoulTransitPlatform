@@ -37,3 +37,13 @@ CREATE TABLE IF NOT EXISTS public.od_typical_route_stop (
 
 CREATE INDEX IF NOT EXISTS idx_od_typical_route_stop_route_seq
 ON public.od_typical_route_stop (기준일자, 노선명, 승차_정류장순번);
+
+-- Stop look-ups of an area (행정동 "on the road", bus routes tab, bus reach outside
+-- Seoul): the primary key has the boarding ARS third, so a stop was found by
+-- skipping over every route name, and alighting stops had no index at all.
+-- Sajik-dong route load 4.9 s -> about 1 s, 2026-11-19.
+CREATE INDEX IF NOT EXISTS idx_od_typical_route_stop_board
+ON public.od_typical_route_stop (기준일자, 승차_정류장ars);
+
+CREATE INDEX IF NOT EXISTS idx_od_typical_route_stop_alight
+ON public.od_typical_route_stop (기준일자, 하차_정류장ars);

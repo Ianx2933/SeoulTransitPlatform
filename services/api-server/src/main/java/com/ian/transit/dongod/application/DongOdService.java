@@ -68,7 +68,10 @@ public class DongOdService {
         return repository.summary(dayType(date), level);
     }
 
-    /** How far the area's riders travel (direction from) or its arrivals come from (to). */
+    /**
+     * How far the area's riders travel (direction from) or its arrivals come
+     * from (to), with bus riders outside Seoul from route stop OD.
+     */
     public DongReachResponse reach(String date, String levelName, String code, String direction) {
         DongArea level = DongArea.parse(levelName, DongArea.DONG);
         level.requireCode(code);
@@ -81,7 +84,10 @@ public class DongOdService {
         if (r.total() == 0) {
             throw new NotFoundException("No district OD for " + code + " on " + dayType);
         }
-        return DongReachResponse.of(level.name().toLowerCase(), code, dayType, from ? "from" : "to", r);
+        // All of Seoul has no area stops to start from (every stop would be one).
+        BusOutside.Result bus = level == DongArea.CITY ? null
+                : BusOutside.summarize(repository.busOutsideRows(TypicalDay.label(date), level, code, from));
+        return DongReachResponse.of(level.name().toLowerCase(), code, dayType, from ? "from" : "to", r, bus);
     }
 
     public DongRoutesResponse routes(String date, String levelName, String code) {

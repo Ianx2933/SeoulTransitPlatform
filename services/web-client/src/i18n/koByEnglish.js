@@ -208,5 +208,10 @@ export const koByEnglish = {
   "20 km or more": "20 km 이상",
   "Half the riders go {km} km or less (rail {rail} km · bus {bus} km), straight line between districts.": "이용객 절반이 {km} km 이내로 이동합니다(철도 {rail} km · 버스 {bus} km, 동 사이 직선거리).",
   "Outside Seoul {outside} a day, not measured: TOPIS gives one code for everywhere outside Seoul.": "서울 외 지역 하루 {outside}명은 거리에서 뺐습니다. TOPIS가 서울 밖을 한 코드로 주기 때문입니다.",
-  "Failed to fetch how far riders go": "이동 거리를 불러오지 못했습니다"
+  "Failed to fetch how far riders go": "이동 거리를 불러오지 못했습니다",
+  "Outside Seoul by bus": "서울 외 지역 (버스)",
+  "Bus only, counted from route stop OD: a separate source, so it does not equal the outside figure above.": "버스만, 노선별 정류소 OD로 센 값입니다. 출처가 달라 위의 서울 외 지역 숫자와 정확히 같지 않습니다.",
+  "{total} riders a day, half within {km} km (straight line between districts).": "하루 {total}명, 절반이 {km} km 이내입니다(동 사이 직선거리).",
+  "Cities and counties with the most riders": "이용객이 많은 시·군·구",
+  "Stop at the other end not located: {riders} a day (may be in Seoul).": "반대쪽 정류소 위치를 못 찾음: 하루 {riders}명(서울 안일 수도 있음)"
 };

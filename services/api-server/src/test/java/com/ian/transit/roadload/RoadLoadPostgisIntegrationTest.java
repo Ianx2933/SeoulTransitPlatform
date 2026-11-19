@@ -1,5 +1,6 @@
 package com.ian.transit.roadload;
 
+import com.ian.transit.dongod.application.BusOutside;
 import com.ian.transit.dongod.application.DongArea;
 import com.ian.transit.dongod.application.DongRouteFlows;
 import com.ian.transit.dongod.application.DongRouteLoadService;
@@ -48,6 +49,11 @@ import static org.assertj.core.api.Assertions.within;
  *   OD (typical_weekday): 100 01001->01003 10, 100 01002->01004 5,
  *   100 "1001"->"1002" 2 (unpadded ARS, a trip inside A), 100 01003->01004 7,
  *   200 01002->01003 4, 999 01001->01003 3
+ *
+ * Outside Seoul (bus reach), on typical_saturday so the rows above stay as they are:
+ *   district C = 31191510 (Gyeonggi, 용인시) east of B, stop 31001 in C
+ *   (integrated_bus_stop_location only), stop 23999 with no location anywhere
+ *   300 01001->31001 6, 300 01002->23999 1, 300 31001->01002 8, 300 01001->01003 4
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -60,6 +66,7 @@ class RoadLoadPostgisIntegrationTest {
 
     private static final String A = "11010530";
     private static final String B = "11010540";
+    private static final String C = "31191510";
 
     JdbcTemplate jdbc;
     RouteLoadQueryRepository routeRepo;
@@ -119,6 +126,19 @@ class RoadLoadPostgisIntegrationTest {
         od("100", "01003", "01004", 7);
         od("200", "01002", "01003", 4);
         od("999", "01001", "01003", 3);
+
+        dong(C, "C동", 127.02, 127.03);
+        jdbc.update("INSERT INTO integrated_bus_stop_location VALUES ('31001', 'gyeonggi', 37.005, 127.025, "
+                + "ST_SetSRID(ST_MakePoint(127.025, 37.005), 4326))");
+        saturday("01001", "31001", 6);
+        saturday("01002", "23999", 1);
+        saturday("31001", "01002", 8);
+        saturday("01001", "01003", 4);
+    }
+
+    private void saturday(String board, String alight, double riders) {
+        jdbc.update("INSERT INTO od_typical_route_stop VALUES ('typical_saturday', '300', NULL, ?, NULL, ?, ?)",
+                board, alight, riders);
     }
 
     private void dong(String code, String name, double west, double east) {
@@ -261,5 +281,24 @@ class RoadLoadPostgisIntegrationTest {
         var g = com.ian.transit.dongod.application.DongReach.summarize(
                 dongRepo.reachRows("weekday", DongArea.GROUP, A + "," + B, true));
         assertThat(g.total()).isEqualTo(6.0);
+    }
+
+    @Test
+    void busOutsideSeoulPlacesTheOtherStopInItsDistrictAndMeasuresFromTheAreaDistrict() {
+        BusOutside.Result from = BusOutside.summarize(dongRepo.busOutsideRows("typical_saturday", DongArea.DONG, A, true));
+        assertThat(from.total()).isEqualTo(6.0);                              // 01001 -> 31001 in C
+        assertThat(from.unlocated()).isEqualTo(1.0);                          // 23999 has no location
+        assertThat(from.medianKm()).isEqualTo(1.8);                           // A's point to C's point, 0.02 degrees east
+        assertThat(from.areas()).extracting(BusOutside.Area::code).containsExactly("3119");
+        assertThat(from.areas().get(0).name()).isEqualTo("경기 용인시");
+
+        BusOutside.Result to = BusOutside.summarize(dongRepo.busOutsideRows("typical_saturday", DongArea.DONG, A, false));
+        assertThat(to.total()).isEqualTo(8.0);                                // 31001 -> 01002
+        assertThat(to.unlocated()).isZero();
+
+        // The gu holds A and B: the ride to 01003 (B) stays inside Seoul and is left out
+        BusOutside.Result gu = BusOutside.summarize(dongRepo.busOutsideRows("typical_saturday", DongArea.GU, "11010", true));
+        assertThat(gu.total()).isEqualTo(6.0);
+        assertThat(gu.unlocated()).isEqualTo(1.0);
     }
 }

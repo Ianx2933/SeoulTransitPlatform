@@ -234,7 +234,7 @@ export default function DongOdPanel({
         </p>
       )}
 
-      {current && current.view === "reach" && <ReachCard result={current.result} fmt={fmt} tx={tx} />}
+      {current && current.view === "reach" && <ReachCard result={current.result} fmt={fmt} tx={tx} lang={lang} />}
 
       {current && current.view !== "routes" && current.view !== "road" && current.view !== "reach" && (
         <>
@@ -336,8 +336,10 @@ export default function DongOdPanel({
 /**
  * Riders by straight-line distance between districts: one bar per band
  * (share of riders with a distance), rail and bus apart, and the medians.
+ * Below it, bus riders outside Seoul from route stop OD (busOutside), which
+ * district OD cannot measure.
  */
-function ReachCard({ result, fmt, tx }) {
+function ReachCard({ result, fmt, tx, lang }) {
   const measured = result.total - result.outside - result.unknown;
   const max = Math.max(...result.bands.map((b) => b.total), 1);
   const pct = (v) => (measured > 0 ? `${((v / measured) * 100).toFixed(1)}%` : "-");
@@ -369,6 +371,66 @@ function ReachCard({ result, fmt, tx }) {
           outside: fmt(result.outside)
         })}
       </p>
+      {result.busOutside && <BusOutsideCard bus={result.busOutside} fmt={fmt} tx={tx} lang={lang} />}
+    </>
+  );
+}
+
+/**
+ * Bus riders between the area and the capital area outside Seoul, counted
+ * from route stop OD: a second source, so its total is not the outside
+ * figure above. Bands as in ReachCard, then the cities and counties.
+ */
+function BusOutsideCard({ bus, fmt, tx, lang }) {
+  if (!(bus.total > 0) && !(bus.unlocated > 0)) return null;
+  const max = Math.max(...bus.bands.map((b) => b.total), 1);
+  const pct = (v) => (bus.total > 0 ? `${((v / bus.total) * 100).toFixed(1)}%` : "-");
+  const areaName = (a) => (lang === "ko" ? a.name : a.nameEn) || a.name || a.code;
+  return (
+    <>
+      <h3 className="label-strong">{tx("Outside Seoul by bus")}</h3>
+      <p className="note">{tx("Bus only, counted from route stop OD: a separate source, so it does not equal the outside figure above.")}</p>
+      <p className="note num">
+        {tx("{total} riders a day, half within {km} km (straight line between districts).", {
+          total: fmt(bus.total),
+          km: bus.medianKm ?? "-"
+        })}
+      </p>
+      {bus.total > 0 && (
+        <ol className="flow-list reach-list">
+          {bus.bands.map((b) => (
+            <li key={b.key}>
+              <span>{tx(REACH_NAMES[b.key] || b.key)}</span>
+              <span className="num">
+                {fmt(b.total)} <span className="note">({pct(b.total)})</span>
+              </span>
+              <span className="reach-bar" aria-hidden="true">
+                <span className="reach-bar__fill" style={{ width: `${(b.total / max) * 100}%` }} />
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {bus.areas.length > 0 && (
+        <>
+          <p className="note">{tx("Cities and counties with the most riders")}</p>
+          <ol className="flow-list">
+            {bus.areas.map((a) => (
+              <li key={a.code}>
+                <span>{areaName(a)}</span>
+                <span className="num">
+                  {fmt(a.passengers)} <span className="note">({pct(a.passengers)})</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      {bus.unlocated > 0 && (
+        <p className="note num">
+          {tx("Stop at the other end not located: {riders} a day (may be in Seoul).", { riders: fmt(bus.unlocated) })}
+        </p>
+      )}
     </>
   );
 }
