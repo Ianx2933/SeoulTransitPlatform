@@ -23,6 +23,7 @@ class DongReachTest {
                 new DongReach.Row(null, false, 0, 1, 1)));  // no boundary
         assertThat(r.total()).isEqualTo(106.0);
         assertThat(r.outside()).isEqualTo(5.0);
+        assertThat(r.outsideBus()).isEqualTo(2.0);                   // the bus part of the outside row
         assertThat(r.unknown()).isEqualTo(1.0);
         assertThat(r.bands()).extracting(DongReach.Band::key)
                 .containsExactly("same", "0-1", "1-3", "3-5", "5-10", "10-20", "20+");

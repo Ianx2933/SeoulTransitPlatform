@@ -209,9 +209,11 @@ export const koByEnglish = {
   "Half the riders go {km} km or less (rail {rail} km · bus {bus} km), straight line between districts.": "이용객 절반이 {km} km 이내로 이동합니다(철도 {rail} km · 버스 {bus} km, 동 사이 직선거리).",
   "Outside Seoul {outside} a day, not measured: TOPIS gives one code for everywhere outside Seoul.": "서울 외 지역 하루 {outside}명은 거리에서 뺐습니다. TOPIS가 서울 밖을 한 코드로 주기 때문입니다.",
   "Failed to fetch how far riders go": "이동 거리를 불러오지 못했습니다",
-  "Outside Seoul by bus": "서울 외 지역 (버스)",
-  "Bus only, counted from route stop OD: a separate source, so it does not equal the outside figure above.": "버스만, 노선별 정류소 OD로 센 값입니다. 출처가 달라 위의 서울 외 지역 숫자와 정확히 같지 않습니다.",
+  "Outside Seoul by Seoul city bus": "서울 외 지역 (서울 시내버스)",
+  "Seoul city buses only, from route stop OD: Gyeonggi and Incheon buses are not in it, so this is less than the outside figure above.": "서울 시내버스만 노선별 정류소 OD로 셉니다. 경기·인천 버스는 이 자료에 없어서 위의 서울 외 지역 숫자보다 적습니다.",
   "{total} riders a day, half within {km} km (straight line between districts).": "하루 {total}명, 절반이 {km} km 이내입니다(동 사이 직선거리).",
   "Cities and counties with the most riders": "이용객이 많은 시·군·구",
+  "Seoul city buses only, from route stop OD (Gyeonggi and Incheon buses are not in it): {part} of the {all} bus riders outside Seoul in district OD ({share}).": "서울 시내버스만 노선별 정류소 OD로 셉니다(경기·인천 버스는 이 자료에 없음). 행정동 OD의 서울 외 버스 {all}명 중 {part}명({share})입니다.",
+  "Gyeonggi's general gu are grouped into their city (Suji, Giheung, Cheoin → Yongin); Incheon gu names are those before the July 2026 reorganisation.": "경기 일반구는 시로 묶었습니다(수지·기흥·처인구 → 용인시). 인천은 2026년 7월 개편 전 구 이름입니다.",
   "Stop at the other end not located: {riders} a day (may be in Seoul).": "반대쪽 정류소 위치를 못 찾음: 하루 {riders}명(서울 안일 수도 있음)"
 };

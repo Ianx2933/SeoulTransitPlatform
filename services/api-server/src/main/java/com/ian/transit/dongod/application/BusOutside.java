@@ -13,9 +13,11 @@ import java.util.Map;
  * in its 행정동 (stop tables + stop_location_fix, like the bus routes tab);
  * the distance is between the two districts' points, as in DongReach.
  *
- * Bus only: rail OD by station covers one weekday a month. A second source,
- * so it does not add up exactly to district OD's outside figure (the two
- * differ by about 0.14% a day citywide).
+ * Seoul city buses only: route stop OD holds Seoul's own routes, not the
+ * Gyeonggi or Incheon buses that also carry riders across the border (no
+ * M-bus or Gyeonggi route numbers in it), so this is a part of district OD's
+ * outside bus figure, not all of it (Sajik-dong weekday: 666.7 riders,
+ * 2026-11-19). Rail OD by station covers one weekday a month and is left out.
  */
 public final class BusOutside {
 

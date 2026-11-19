@@ -28,16 +28,17 @@ public final class DongReach {
     public record Band(String key, double minKm, Double maxKm, double subway, double bus, double total) {
     }
 
+    /** outsideBus = the bus part of outside (BusOutside counts part of it by district). */
     public record Result(double total, double subway, double bus, double outside, double unknown,
                          Double medianKm, Double meanKm, Double subwayMedianKm, Double busMedianKm,
-                         List<Band> bands) {
+                         List<Band> bands, double outsideBus) {
     }
 
     /** Upper edges of the bands after "same district"; the last band is open. */
     static final double[] EDGES = {1, 3, 5, 10, 20};
 
     public static Result summarize(List<Row> rows) {
-        double total = 0, subway = 0, bus = 0, outside = 0, unknown = 0;
+        double total = 0, subway = 0, bus = 0, outside = 0, unknown = 0, outsideBus = 0;
         List<Row> known = new ArrayList<>();
         for (Row r : rows) {
             total += r.total();
@@ -47,6 +48,7 @@ public final class DongReach {
                 known.add(r);
             } else if (r.outside()) {
                 outside += r.total();
+                outsideBus += r.bus();
             } else {
                 unknown += r.total();
             }
@@ -65,7 +67,7 @@ public final class DongReach {
         double weight = known.stream().mapToDouble(Row::total).sum();
         Double mean = weight > 0 ? round1(known.stream().mapToDouble(r -> r.km() * r.total()).sum() / weight) : null;
         return new Result(total, subway, bus, outside, unknown,
-                median(known, Row::total), mean, median(known, Row::subway), median(known, Row::bus), bands);
+                median(known, Row::total), mean, median(known, Row::subway), median(known, Row::bus), bands, outsideBus);
     }
 
     private static String key(double lo, Double hi) {

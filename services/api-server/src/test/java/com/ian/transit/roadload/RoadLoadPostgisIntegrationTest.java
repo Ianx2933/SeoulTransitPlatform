@@ -274,6 +274,7 @@ class RoadLoadPostgisIntegrationTest {
         var r = com.ian.transit.dongod.application.DongReach.summarize(rows);
         assertThat(r.total()).isEqualTo(6.0);
         assertThat(r.outside()).isEqualTo(1.0);
+        assertThat(r.outsideBus()).isZero();                                // A -> outside is rail 1, bus 0
         assertThat(r.bands().get(0).total()).isEqualTo(2.0);                 // same district
         assertThat(r.bands().get(1).total()).isEqualTo(3.0);                 // A to B, about 0.9 km
         assertThat(r.medianKm()).isEqualTo(0.9);

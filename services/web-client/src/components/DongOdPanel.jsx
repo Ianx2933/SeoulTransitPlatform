@@ -377,9 +377,10 @@ function ReachCard({ result, fmt, tx, lang }) {
 }
 
 /**
- * Bus riders between the area and the capital area outside Seoul, counted
- * from route stop OD: a second source, so its total is not the outside
- * figure above. Bands as in ReachCard, then the cities and counties.
+ * Seoul city bus riders between the area and the capital area outside
+ * Seoul, counted from route stop OD, which holds Seoul city bus routes only
+ * (no Gyeonggi or Incheon buses): a part of the outside figure above, shown
+ * as a share of district OD's bus riders outside Seoul (districtOdBus). Bands as in ReachCard, then the cities and counties.
  */
 function BusOutsideCard({ bus, fmt, tx, lang }) {
   if (!(bus.total > 0) && !(bus.unlocated > 0)) return null;
@@ -388,8 +389,16 @@ function BusOutsideCard({ bus, fmt, tx, lang }) {
   const areaName = (a) => (lang === "ko" ? a.name : a.nameEn) || a.name || a.code;
   return (
     <>
-      <h3 className="label-strong">{tx("Outside Seoul by bus")}</h3>
-      <p className="note">{tx("Bus only, counted from route stop OD: a separate source, so it does not equal the outside figure above.")}</p>
+      <h3 className="label-strong">{tx("Outside Seoul by Seoul city bus")}</h3>
+      <p className="note">
+        {bus.districtOdBus > 0
+          ? tx("Seoul city buses only, from route stop OD (Gyeonggi and Incheon buses are not in it): {part} of the {all} bus riders outside Seoul in district OD ({share}).", {
+              part: fmt(bus.total),
+              all: fmt(bus.districtOdBus),
+              share: `${((bus.total / bus.districtOdBus) * 100).toFixed(1)}%`
+            })
+          : tx("Seoul city buses only, from route stop OD: Gyeonggi and Incheon buses are not in it, so this is less than the outside figure above.")}
+      </p>
       <p className="note num">
         {tx("{total} riders a day, half within {km} km (straight line between districts).", {
           total: fmt(bus.total),
@@ -424,6 +433,9 @@ function BusOutsideCard({ bus, fmt, tx, lang }) {
               </li>
             ))}
           </ol>
+          <p className="note">
+            {tx("Gyeonggi's general gu are grouped into their city (Suji, Giheung, Cheoin → Yongin); Incheon gu names are those before the July 2026 reorganisation.")}
+          </p>
         </>
       )}
       {bus.unlocated > 0 && (

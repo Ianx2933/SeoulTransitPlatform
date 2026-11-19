@@ -36,9 +36,13 @@ public record DongReachResponse(
     public record Band(String key, double minKm, Double maxKm, Double subway, Double bus, Double total) {
     }
 
-    /** source = "route_stop_od": not TOPIS district OD, so not equal to outside above. */
+    /**
+     * source = "route_stop_od": Seoul city bus routes only, so part of the bus
+     * riders outside Seoul in district OD; districtOdBus is that whole (the
+     * bus part of outside above), for the share.
+     */
     public record Bus(String source, Double total, Double unlocated, Double medianKm, Double meanKm,
-                      List<Band> bands, List<Area> areas) {
+                      List<Band> bands, List<Area> areas, Double districtOdBus) {
     }
 
     /** code = first four digits of the 행정동 code; name null when unlisted. */
@@ -52,7 +56,7 @@ public record DongReachResponse(
                 .toList();
     }
 
-    public static Bus bus(BusOutside.Result r) {
+    public static Bus bus(BusOutside.Result r, double districtOdBus) {
         if (r == null) {
             return null;
         }
@@ -60,7 +64,7 @@ public record DongReachResponse(
                 .map(a -> new Area(a.code(), a.name(), a.nameEn(), TypicalDay.round(a.passengers())))
                 .toList();
         return new Bus("route_stop_od", TypicalDay.round(r.total()), TypicalDay.round(r.unlocated()),
-                r.medianKm(), r.meanKm(), bands(r.bands()), areas);
+                r.medianKm(), r.meanKm(), bands(r.bands()), areas, TypicalDay.round(districtOdBus));
     }
 
     public static DongReachResponse of(String level, String code, String dayType, String direction,
@@ -68,6 +72,6 @@ public record DongReachResponse(
         return new DongReachResponse(level, code, dayType, direction, TypicalDay.round(r.total()),
                 TypicalDay.round(r.subway()), TypicalDay.round(r.bus()), TypicalDay.round(r.outside()),
                 TypicalDay.round(r.unknown()), r.medianKm(), r.meanKm(), r.subwayMedianKm(), r.busMedianKm(),
-                bands(r.bands()), bus(busOutside));
+                bands(r.bands()), bus(busOutside, r.outsideBus()));
     }
 }
