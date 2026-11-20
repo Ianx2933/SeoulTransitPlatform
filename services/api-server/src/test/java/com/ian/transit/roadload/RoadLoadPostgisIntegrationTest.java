@@ -199,7 +199,7 @@ class RoadLoadPostgisIntegrationTest {
 
     @Test
     void districtBothCountsATripInsideTheAreaOnceAndSumsSharedSegments() {
-        DongRouteLoadResponse r = new DongRouteLoadService(routeRepo).load("weekday", "dong", A, "both");
+        DongRouteLoadResponse r = new DongRouteLoadService(routeRepo, null).load("weekday", "dong", A, "both");
         // boarding in A: 10 + 5 + 2 + 4 + 3; the 2 inside A also alights in A but counts once
         assertThat(r.passengers()).isEqualTo(24.0);
         assertThat(r.unplacedPassengers()).isEqualTo(3.0);                    // route 999 has no path
@@ -216,7 +216,7 @@ class RoadLoadPostgisIntegrationTest {
 
     @Test
     void districtDirectionsPickBoardingOrAlightingLegs() {
-        var service = new DongRouteLoadService(routeRepo);
+        var service = new DongRouteLoadService(routeRepo, null);
         assertThat(service.load("weekday", "dong", A, "od").passengers()).isEqualTo(24.0);
         assertThat(service.load("weekday", "dong", A, "do").passengers()).isEqualTo(2.0);      // only the trip inside A
         // B: boards 01003->01004 (7); alights 10 + 5 + 4 + 3 + 7 (the 7 counted once)
@@ -225,7 +225,7 @@ class RoadLoadPostgisIntegrationTest {
 
     @Test
     void segmentLookUpEqualsTheRoutesAddedUpOnThatSegment() {
-        var service = new RoadLoadService(roadRepo, routeRepo);
+        var service = new RoadLoadService(roadRepo, routeRepo, null);
         RoadLoadResponse x = service.segment("weekday", "01002", "01003");
         assertThat(x.routes()).containsExactly("100", "200");
         assertThat(x.placedPassengers()).isEqualTo(19.0);                    // 10 + 5 + 4
@@ -238,7 +238,7 @@ class RoadLoadPostgisIntegrationTest {
 
     @Test
     void stopLookUpMatchesPaddedAndUnpaddedArs() {
-        RoadLoadResponse r = new RoadLoadService(roadRepo, routeRepo).stop("weekday", "1001", "board");
+        RoadLoadResponse r = new RoadLoadService(roadRepo, routeRepo, null).stop("weekday", "1001", "board");
         assertThat(r.passengers()).isEqualTo(15.0);                           // 10 + 2 ("1001") + 3 (999)
         assertThat(r.placedPassengers()).isEqualTo(12.0);
         assertThat(r.title()).isEqualTo("stop 01001 (01001)");
@@ -262,7 +262,7 @@ class RoadLoadPostgisIntegrationTest {
             double toA = rows.stream().filter(row -> A.equals(row.destCode())).mapToDouble(DongRouteFlows.Row::passengers).sum();
             assertThat(toA).isCloseTo(7.0, within(1e-9));                    // 2 inside A + 5 to 01004
             // alighting in A now: 2 ("1002") + 5 (01002->01004) + 7 (01003->01004)
-            assertThat(new DongRouteLoadService(routeRepo).load("weekday", "dong", A, "do").passengers()).isEqualTo(14.0);
+            assertThat(new DongRouteLoadService(routeRepo, null).load("weekday", "dong", A, "do").passengers()).isEqualTo(14.0);
         } finally {
             jdbc.update("DELETE FROM stop_location_fix");
         }

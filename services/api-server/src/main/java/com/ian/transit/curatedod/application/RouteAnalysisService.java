@@ -6,10 +6,12 @@ import com.ian.transit.curatedod.dto.RouteSegmentResponse;
 import com.ian.transit.curatedod.dto.RouteStopDetailResponse;
 import com.ian.transit.curatedod.dto.RouteStopsResponse;
 import com.ian.transit.curatedod.infrastructure.CuratedOdQueryRepository;
-import com.ian.transit.curatedod.infrastructure.HourlyOdQueryRepository;
 import com.ian.transit.curatedod.infrastructure.StopDistrictQueryRepository;
 import com.ian.transit.curatedod.infrastructure.StopDistrictQueryRepository.StopDistrict;
 import com.ian.transit.curatedod.infrastructure.TypicalOdRecord;
+import com.ian.transit.period.OdBasis;
+import com.ian.transit.period.application.PeriodOdService;
+import com.ian.transit.period.infrastructure.PeriodOdRepository.PeriodLeg;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -25,35 +27,41 @@ import java.util.Set;
  * {@link RouteOdAnalyzer}. Rows without a boarding or alighting sequence cannot
  * be placed on the route and are left out.
  *
- * With an hour, the same OD pairs are taken from estimated_hourly_od for the
- * riders who boarded in that hour, keeping the sequences of the typical day.
+ * A period (BigQuery) or boarding hours go through PeriodOdService: legs of
+ * the period or the typical day, cut to the boarding hours by the boarding
+ * stop's profile (hourly_profile, the rules of estimate_hourly_od.py). Until
+ * 2026-11 one weekday hour was read from estimated_hourly_od on Cloud SQL;
+ * that query ran past the statement timeout (no index on route and hour), and
+ * the split gives the same rule for every day type and hour range.
  */
 @Service
 @RequiredArgsConstructor
 public class RouteAnalysisService {
 
     private final CuratedOdQueryRepository queryRepository;
-    private final HourlyOdQueryRepository hourlyRepository;
     private final StopDistrictQueryRepository districtRepository;
+    private final PeriodOdService periodService;
 
-    public RouteStopsResponse stops(String 기준일자, String 노선명, Integer hour) {
-        return analyzer(기준일자, 노선명, hour).stops();
+    public RouteStopsResponse stops(OdBasis basis, String 노선명) {
+        return analyzer(basis, 노선명).stops();
     }
 
-    public RouteSegmentResponse segment(String 기준일자, String 노선명, Integer hour, int from, int to) {
-        return analyzer(기준일자, 노선명, hour).segment(from, to);
+    public RouteSegmentResponse segment(OdBasis basis, String 노선명, int from, int to) {
+        return analyzer(basis, 노선명).segment(from, to);
     }
 
-    public RouteStopDetailResponse stop(String 기준일자, String 노선명, Integer hour, int seq, List<Double> reach) {
-        return analyzer(기준일자, 노선명, hour).stop(seq, reach);
+    public RouteStopDetailResponse stop(OdBasis basis, String 노선명, int seq, List<Double> reach) {
+        return analyzer(basis, 노선명).stop(seq, reach);
     }
 
     /**
      * The route's OD by administrative district: stop pairs summed into
      * boarding-to-alighting district pairs, with each district's boundary.
      */
-    public RouteDongOdResponse dongOd(String 기준일자, String 노선명, Integer hour) {
-        Loaded loaded = load(기준일자, 노선명, hour);
+    public RouteDongOdResponse dongOd(OdBasis basis, String 노선명) {
+        String 기준일자 = basis.label();
+        Integer hour = basis.hours() != null && basis.hours().single() ? basis.hours().from() : null;
+        Loaded loaded = load(basis, 노선명);
         Set<String> ars = new LinkedHashSet<>();
         for (RouteOdAnalyzer.Leg leg : loaded.legs()) {
             ars.add(RouteDongOd.padArs(leg.boardArs()));
@@ -77,19 +85,23 @@ public class RouteAnalysisService {
                 result.total(), result.unplaced(), districts, result.flows());
     }
 
-    private RouteOdAnalyzer analyzer(String 기준일자, String 노선명, Integer hour) {
-        Loaded loaded = load(기준일자, 노선명, hour);
-        return new RouteOdAnalyzer(기준일자, 노선명, loaded.nDays(), loaded.legs());
+    private RouteOdAnalyzer analyzer(OdBasis basis, String 노선명) {
+        Loaded loaded = load(basis, 노선명);
+        return new RouteOdAnalyzer(basis.label(), 노선명, loaded.nDays(), loaded.legs());
     }
 
     private record Loaded(List<RouteOdAnalyzer.Leg> legs, Integer nDays) {
     }
 
-    private Loaded load(String 기준일자, String 노선명, Integer hour) {
-        if (hour != null && (hour < 0 || hour > 23)) {
-            throw new IllegalArgumentException("hour must be 0 to 23, got " + hour);
+    private Loaded load(OdBasis basis, String 노선명) {
+        if (basis.typical() && basis.hours() == null) {
+            return typicalLegs(queryRepository.findAllBy기준일자And노선명(basis.label(), 노선명),
+                    노선명, basis.label());
         }
-        List<TypicalOdRecord> records = queryRepository.findAllBy기준일자And노선명(기준일자, 노선명);
+        return loadSplit(basis, 노선명);
+    }
+
+    private static Loaded typicalLegs(List<TypicalOdRecord> records, String 노선명, String 기준일자) {
         List<RouteOdAnalyzer.Leg> legs = new ArrayList<>(records.size());
         Integer nDays = null;
         for (TypicalOdRecord r : records) {
@@ -105,13 +117,37 @@ public class RouteAnalysisService {
         if (legs.isEmpty()) {
             throw new NotFoundException("No OD for route " + 노선명 + " on " + 기준일자);
         }
-        if (hour != null) {
-            Map<String, Double> byPair = hourlyRepository.passengersByPair(기준일자, 노선명, hour);
-            legs = RouteOdAnalyzer.withPassengers(legs, byPair);
-            if (legs.isEmpty()) {
-                throw new NotFoundException("No hourly OD for route " + 노선명 + " on " + 기준일자
-                        + " at hour " + hour + " (hourly OD covers weekdays only)");
+        return new Loaded(legs, nDays);
+    }
+
+    /** A period and/or boarding hours: legs from Cloud SQL or BigQuery, then cut to the hours. */
+    private Loaded loadSplit(OdBasis basis, String 노선명) {
+        List<RouteOdAnalyzer.Leg> legs;
+        Integer nDays;
+        if (basis.typical()) {
+            Loaded typical = typicalLegs(queryRepository.findAllBy기준일자And노선명(basis.label(), 노선명),
+                    노선명, basis.label());
+            legs = typical.legs();
+            nDays = typical.nDays();
+        } else {
+            legs = new ArrayList<>();
+            for (PeriodLeg l : periodService.legsByRoutes(basis, List.of(노선명))) {
+                if (l.boardSeq() != null && l.alightSeq() != null) {
+                    legs.add(new RouteOdAnalyzer.Leg(l.boardSeq(), l.boardArs(), l.boardName(),
+                            l.alightSeq(), l.alightArs(), l.alightName(), l.passengers()));
+                }
             }
+            nDays = periodService.busDays(basis.period(), basis.dayType()).size();
+            if (legs.isEmpty()) {
+                throw new NotFoundException("No OD for route " + 노선명 + " in " + basis);
+            }
+        }
+        legs = periodService.splitByHours(legs, basis.dayType(), basis.hours(),
+                l -> 노선명, RouteOdAnalyzer.Leg::boardArs, RouteOdAnalyzer.Leg::passengers,
+                (l, p) -> new RouteOdAnalyzer.Leg(l.boardSeq(), l.boardArs(), l.boardName(),
+                        l.alightSeq(), l.alightArs(), l.alightName(), p));
+        if (legs.isEmpty()) {
+            throw new NotFoundException("No riders on route " + 노선명 + " in " + basis);
         }
         return new Loaded(legs, nDays);
     }

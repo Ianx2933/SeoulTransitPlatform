@@ -1,5 +1,6 @@
 package com.ian.transit.common.exception;
 
+import com.ian.transit.period.PeriodUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,26 @@ public class GlobalExceptionHandler {
     private static final String INTERNAL_ERROR_MESSAGE = "Internal server error";
 
     private static final String NOT_FOUND_MESSAGE = "Resource not found";
+
+    static final String PERIOD_UNAVAILABLE_MESSAGE = "PERIOD_UNAVAILABLE: period and hourly views are unavailable right now; the typical day still works";
+
+    /**
+     * A period or hourly view could not reach BigQuery. 503 with a fixed
+     * message (the cause stays in the log): the page offers the typical day,
+     * which does not need BigQuery.
+     */
+    @ExceptionHandler(PeriodUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handlePeriodUnavailable(
+            PeriodUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Period query unavailable at {}: {}", request.getRequestURI(), exception.getMessage());
+        return buildResponse(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                PERIOD_UNAVAILABLE_MESSAGE,
+                request
+        );
+    }
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(

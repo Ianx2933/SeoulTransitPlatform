@@ -30,6 +30,7 @@
 		<java.version>21</java.version>
 		<google-auth-library.version>1.46.0</google-auth-library.version>
 		<cloud-sql-socket-factory.version>1.28.4</cloud-sql-socket-factory.version>
+		<google-cloud-bigquery.version>2.68.0</google-cloud-bigquery.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -81,6 +82,17 @@
 			<groupId>com.google.auth</groupId>
 			<artifactId>google-auth-library-oauth2-http</artifactId>
 			<version>${google-auth-library.version}</version>
+		</dependency>
+
+		<!--
+			Period (month range) and hourly views read transit-bigquery's marts
+			(period package). Pinned like the auth library: Spring Boot does not
+			manage it. Authenticates with Application Default Credentials.
+		-->
+		<dependency>
+			<groupId>com.google.cloud</groupId>
+			<artifactId>google-cloud-bigquery</artifactId>
+			<version>${google-cloud-bigquery.version}</version>
 		</dependency>
 
 		<!--

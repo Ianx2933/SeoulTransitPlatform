@@ -11,7 +11,8 @@ import java.util.List;
  * kind is routes, stop or segment. For a stop or a segment, origins and
  * destinations are the stops those riders boarded and alighted at (busiest
  * first, capped), so the map can show where they come from and go to.
- * segments has the same shape as the district road view.
+ * segments has the same shape as the district road view. legendMax: see
+ * DongRouteLoadResponse (only with boarding hours).
  */
 public record RoadLoadResponse(
     String kind,
@@ -24,12 +25,14 @@ public record RoadLoadResponse(
     List<DongRouteLoadResponse.Segment> segments,
     List<Point> origins,
     List<Point> destinations,
-    List<DongRouteLoadResponse.Unplaced> unplacedRoutes
+    List<DongRouteLoadResponse.Unplaced> unplacedRoutes,
+    Double legendMax
 ) {
     public RoadLoadResponse {
         passengers = TypicalDay.round(passengers);
         placedPassengers = TypicalDay.round(placedPassengers);
         unplacedPassengers = TypicalDay.round(unplacedPassengers);
+        legendMax = TypicalDay.round(legendMax);
     }
 
     public record Point(String ars, String name, double lat, double lng, Double riders) {

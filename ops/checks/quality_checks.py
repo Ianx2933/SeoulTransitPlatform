@@ -9,6 +9,13 @@
    when a loop passes the same pair twice.
 2. Response times of the main endpoints (each called --repeat times; the
    first call may hit a cold Cloud Run instance, so min and median are shown).
+3. Period and hours (R1, BigQuery). a) A period equal to the typical window
+   (the last twelve months with data) should give the typical numbers: route
+   bar chart totals and the district OD departures. b) Splitting a day into
+   0-23 h should keep the day (less the stops the hourly profile cannot split:
+   ferry piers, '00000'). c) One weekday hour, route analysis against road
+   load: both split the typical day by the boarding profile, so they should
+   agree (route analysis leaves out rows without a stop sequence). Skipped with --no-period, or reported as off when the API answers 503.
 
 Writes quality_checks.md (summary) and quality_bar_vs_colour.csv (every
 compared pair) to --out. Standard library only.
@@ -118,6 +125,72 @@ def time_endpoint(base: str, name: str, path: str, params: dict, repeat: int, ti
     return data
 
 
+def months_back(ym: str, n: int) -> str:
+    y, m = int(ym[:4]), int(ym[5:7])
+    m -= n
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
+
+
+def pct(a: float | None, b: float | None) -> str:
+    if a is None or b is None or not b:
+        return "-"
+    return f"{100 * (a - b) / b:+.2f}%"
+
+
+def period_checks(base: str, routes: list[str], dong: str, timings: dict) -> list[str]:
+    rng, _, status = get_json(base, "/api/period/range", {})
+    if rng is None:
+        return ["", "## Period and hours", "", f"Off or failing: /api/period/range answered {status}."]
+    last = rng["last"]
+    window = f"{months_back(last, 11)}..{last}"
+    lines = ["", "## Period and hours", "",
+             f"Data {rng['first']}..{last}; typical window taken as {window}.", "",
+             "### a) Period = typical window", "",
+             "| what | typical | period | diff |", "|---|---|---|---|"]
+    for route in routes[:3]:
+        enc = urllib.parse.quote(route, safe="")
+        t, _, _ = get_json(base, f"/api/curated-od/routes/{enc}/stops", {"date": "weekday"})
+        p, e1, s1 = get_json(base, f"/api/curated-od/routes/{enc}/stops", {"date": "weekday", "period": window})
+        timings.setdefault("period route stops (12 months)", []).append(e1 if s1 == 200 else float("nan"))
+        tv = t.get("totalPassengers") if t else None
+        pv = p.get("totalPassengers") if p else None
+        lines.append(f"| route {route} riders | {tv} | {pv if p else s1} | {pct(pv, tv)} |")
+    t, _, _ = get_json(base, f"/api/dong-od/{dong}", {"date": "weekday"})
+    p, e2, s2 = get_json(base, f"/api/dong-od/{dong}", {"date": "weekday", "period": window})
+    timings.setdefault("period dong OD (12 months)", []).append(e2 if s2 == 200 else float("nan"))
+    for key in ("departures", "subwayDepartures", "busDepartures", "arrivals"):
+        tv = t.get(key) if t else None
+        pv = p.get(key) if p else None
+        lines.append(f"| dong {dong} {key} | {tv} | {pv if p else s2} | {pct(pv, tv)} |")
+
+    lines += ["", "### b) 0-23 h = the day (saturday road load)", "",
+              "| route | day | 0-23 h | diff |", "|---|---|---|---|"]
+    for route in routes[:3]:
+        d, _, _ = get_json(base, "/api/road-load/routes", {"date": "saturday", "routes": route})
+        h, e3, s3 = get_json(base, "/api/road-load/routes", {"date": "saturday", "routes": route, "hours": "0-23"})
+        timings.setdefault("hours road-load (saturday)", []).append(e3 if s3 == 200 else float("nan"))
+        dv = d.get("passengers") if d else None
+        hv = h.get("passengers") if h else None
+        lines.append(f"| {route} | {dv} | {hv if h else s3} | {pct(hv, dv)} |")
+
+    lines += ["", "### c) Weekday 8 h: route analysis vs road load", "",
+              "| route | route analysis hours=8 | road load hours=8 | diff | legendMax |", "|---|---|---|---|---|"]
+    for route in routes[:3]:
+        enc = urllib.parse.quote(route, safe="")
+        old, _, _ = get_json(base, f"/api/curated-od/routes/{enc}/stops", {"date": "weekday", "hours": "8"})
+        new, _, s4 = get_json(base, "/api/road-load/routes", {"date": "weekday", "routes": route, "hours": "8"})
+        ov = old.get("totalPassengers") if old else None
+        nv = new.get("passengers") if new else None
+        lines.append(f"| {route} | {ov} | {nv if new else s4} | {pct(nv, ov)} | {new.get('legendMax') if new else ''} |")
+    p2, e5, s5 = get_json(base, f"/api/dong-od/{dong}/route-load",
+                          {"date": "weekday", "direction": "both", "period": window})
+    timings.setdefault("period dong road load (12 months)", []).append(e5 if s5 == 200 else float("nan"))
+    return lines
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=DEFAULT_BASE)
@@ -126,6 +199,7 @@ def main() -> None:
     ap.add_argument("--day", default="weekday")
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--out", default=".")
+    ap.add_argument("--no-period", action="store_true", help="skip the period and hours checks (BigQuery)")
     args = ap.parse_args()
 
     out = Path(args.out).expanduser()
@@ -154,6 +228,9 @@ def main() -> None:
         time_endpoint(args.base, "road-load stop (boarding)", "/api/road-load/stop",
                       {**day, "ars": busiest["fromArs"], "direction": "board"}, args.repeat, timings)
 
+    period_lines = [] if args.no_period else period_checks(
+        args.base, [r.strip() for r in args.routes.split(",") if r.strip()], dong, timings)
+
     with open(out / "quality_bar_vs_colour.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=["route", "from_ars", "to_ars", "bar", "colour", "diff"])
         w.writeheader()
@@ -176,6 +253,7 @@ def main() -> None:
             lines.append(f"| {name} | {len(ts)} | failed | | |")
             continue
         lines.append(f"| {name} | {len(ts)} | {min(ok):.2f} | {statistics.median(ok):.2f} | {max(ok):.2f} |")
+    lines += period_lines
     (out / "quality_checks.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 

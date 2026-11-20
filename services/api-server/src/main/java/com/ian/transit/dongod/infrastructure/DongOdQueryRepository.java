@@ -11,7 +11,10 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reads district OD (od_dong_typical) and the bus routes boarding in an area
@@ -293,6 +296,90 @@ public class DongOdQueryRepository {
         MapSqlParameterSource p = params(null, level, code).addValue("label", label);
         return jdbc.query(sql, p, (rs, i) -> new BusOutside.Row(rs.getString("adm_cd"), rs.getString("adm_nm"),
                 rs.getObject("km", Double.class), rs.getDouble("passengers")));
+    }
+
+    /**
+     * The 행정동 of each stop (padded ARS), placed as the bus routes tab places
+     * alighting stops: stop_location_fix first, then bus_stop_location, then
+     * integrated_bus_stop_location; the lowest adm_cd on a boundary. Stops
+     * without a location or district are missing from the map.
+     */
+    private static final String STOP_DONG_SQL = """
+            WITH pts AS MATERIALIZED (
+                SELECT DISTINCT ON (ars) ars, g
+                FROM (
+                    SELECT f.ars, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326) AS g, 0 AS pri
+                    FROM stop_location_fix f
+                    WHERE f.ars IN (:ars)
+                    UNION ALL
+                    SELECT LPAD(b."정류장번호"::text, 5, '0') AS ars,
+                           COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)) AS g, 1 AS pri
+                    FROM bus_stop_location b
+                    WHERE LPAD(b."정류장번호"::text, 5, '0') IN (:ars)
+                    UNION ALL
+                    SELECT LPAD(b.ars_id::text, 5, '0'),
+                           COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)), 2
+                    FROM integrated_bus_stop_location b
+                    WHERE LPAD(b.ars_id::text, 5, '0') IN (:ars)
+                ) x
+                WHERE g IS NOT NULL
+                ORDER BY ars, pri
+            )
+            SELECT p.ars, d.adm_cd, d.adm_nm
+            FROM pts p
+            JOIN LATERAL (
+                SELECT x.adm_cd, x.adm_nm
+                FROM public.admin_dong_boundary x
+                WHERE ST_Covers(x.geom, p.g)
+                ORDER BY x.adm_cd
+                LIMIT 1
+            ) d ON true
+            """;
+
+    public record StopDong(String code, String name) {
+    }
+
+    /** [lat, lng] of each district's point (ST_PointOnSurface of its boundary), as reachRows uses. */
+    public Map<String, double[]> dongPoints(Collection<String> codes) {
+        Map<String, double[]> out = new HashMap<>();
+        if (codes.isEmpty()) {
+            return out;
+        }
+        String sql = """
+                SELECT adm_cd, ST_Y(p) AS lat, ST_X(p) AS lng
+                FROM (
+                    SELECT adm_cd, ST_PointOnSurface(ST_Union(geom)) AS p
+                    FROM public.admin_dong_boundary
+                    WHERE adm_cd IN (:codes)
+                    GROUP BY adm_cd
+                ) x
+                """;
+        jdbc.query(sql, new MapSqlParameterSource("codes", List.copyOf(codes)), rs -> {
+            out.put(rs.getString("adm_cd"), new double[] {rs.getDouble("lat"), rs.getDouble("lng")});
+        });
+        return out;
+    }
+
+    /** [lat, lng] of the area's point (ST_PointOnSurface of the union), the fallback in BUS_OUTSIDE_SQL. */
+    public double[] areaPoint(DongArea level, String code) {
+        String sql = """
+                SELECT ST_Y(p) AS lat, ST_X(p) AS lng
+                FROM (SELECT ST_PointOnSurface(ST_Union(geom)) AS p FROM public.admin_dong_boundary WHERE %s) x
+                """.formatted(level.filterSql("adm_cd"));
+        List<double[]> r = jdbc.query(sql, params(null, level, code),
+                (rs, i) -> new double[] {rs.getDouble("lat"), rs.getDouble("lng")});
+        return r.isEmpty() ? null : r.get(0);
+    }
+
+    public Map<String, StopDong> stopDongs(Collection<String> paddedArs) {
+        Map<String, StopDong> out = new HashMap<>();
+        if (paddedArs.isEmpty()) {
+            return out;
+        }
+        jdbc.query(STOP_DONG_SQL, new MapSqlParameterSource("ars", List.copyOf(paddedArs)), rs -> {
+            out.put(rs.getString("ars"), new StopDong(rs.getString("adm_cd"), rs.getString("adm_nm")));
+        });
+        return out;
     }
 
     /** Bus routes boarding inside a 행정동 or a 구 (not all of Seoul: too many stops). */

@@ -126,6 +126,15 @@ public class RouteLoadQueryRepository {
                 rs.getObject("bq", Integer.class), rs.getObject("aq", Integer.class)));
     }
 
+    /** The area's stop keys (AREA_STOPS), for a period query in BigQuery. */
+    public List<String> areaStopKeys(DongArea level, String code) {
+        if (level == DongArea.CITY) {
+            throw new IllegalArgumentException("route load is for a dong or a gu, not all of Seoul");
+        }
+        String sql = AREA_STOPS.formatted(level.filterSql("adm_cd")) + " SELECT ars FROM stop_keys ORDER BY ars";
+        return jdbc.queryForList(sql, new MapSqlParameterSource().addValues(level.params(code)), String.class);
+    }
+
     public List<RouteLoadCalculator.Station> stations(Collection<String> routes) {
         if (routes.isEmpty()) {
             return List.of();

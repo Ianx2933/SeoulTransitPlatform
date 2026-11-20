@@ -17,6 +17,10 @@ import java.util.TreeMap;
  * toName are the stop names (null when the stored path has none).
  * unplacedPassengers are riders on routes without a stored path (closed
  * routes) or whose stops the path lacks.
+ *
+ * legendMax, only with boarding hours: the busiest segment of the busiest
+ * single hour of the day, so the map can keep one colour scale while the
+ * hours change. null for the whole day.
  */
 public record DongRouteLoadResponse(
     String level,
@@ -27,12 +31,14 @@ public record DongRouteLoadResponse(
     Double placedPassengers,
     Double unplacedPassengers,
     List<Segment> segments,
-    List<Unplaced> unplacedRoutes
+    List<Unplaced> unplacedRoutes,
+    Double legendMax
 ) {
     public DongRouteLoadResponse {
         passengers = TypicalDay.round(passengers);
         placedPassengers = TypicalDay.round(placedPassengers);
         unplacedPassengers = TypicalDay.round(unplacedPassengers);
+        legendMax = TypicalDay.round(legendMax);
     }
 
     public record Segment(String fromArs, String toArs, Double load, List<String> routes,

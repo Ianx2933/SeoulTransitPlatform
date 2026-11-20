@@ -1,6 +1,5 @@
 package com.ian.transit.curatedod.api;
 
-import com.ian.transit.common.TypicalDay;
 import com.ian.transit.curatedod.application.RouteAnalysisService;
 import com.ian.transit.curatedod.application.RoutePathService;
 import com.ian.transit.curatedod.dto.RouteDongOdResponse;
@@ -8,6 +7,7 @@ import com.ian.transit.curatedod.dto.RoutePathResponse;
 import com.ian.transit.curatedod.dto.RouteSegmentResponse;
 import com.ian.transit.curatedod.dto.RouteStopDetailResponse;
 import com.ian.transit.curatedod.dto.RouteStopsResponse;
+import com.ian.transit.period.OdBasis;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,8 +29,10 @@ import java.util.List;
  *   GET /api/curated-od/routes/{route}/dong-od?date=weekday
  *   GET /api/curated-od/routes/{route}/path        road path and turnaround (Seoul bus route API)
  *
- * Every endpoint takes an optional hour (0-23): the riders who boarded in that
- * hour of the typical day, from estimated_hourly_od (weekdays only). The stop
+ * Every endpoint takes an optional period (period=2026-03..2026-05, whole months,
+ * BigQuery) instead of the typical day of the last twelve months, and optional
+ * boarding hours (hours=8 or hours=7-9; the older hour=8 still works), for any
+ * day type. The stop
  * endpoint takes optional reach levels, e.g. reach=30 or reach=30,80; without
  * them it reports 25, 50, 100 and 200.
  */
@@ -46,9 +48,11 @@ public class RouteAnalysisController {
     public ResponseEntity<RouteStopsResponse> stops(
         @PathVariable("routeName") String 노선명,
         @RequestParam(value = "date", required = false) String 기준일자,
-        @RequestParam(value = "hour", required = false) Integer hour
+        @RequestParam(value = "hour", required = false) Integer hour,
+        @RequestParam(value = "hours", required = false) String hours,
+        @RequestParam(value = "period", required = false) String period
     ) {
-        return ResponseEntity.ok(service.stops(TypicalDay.label(기준일자), 노선명, hour));
+        return ResponseEntity.ok(service.stops(OdBasis.of(기준일자, period, hours, hour), 노선명));
     }
 
     @GetMapping("/stops/{seq}")
@@ -57,9 +61,11 @@ public class RouteAnalysisController {
         @PathVariable("seq") int seq,
         @RequestParam(value = "date", required = false) String 기준일자,
         @RequestParam(value = "hour", required = false) Integer hour,
+        @RequestParam(value = "hours", required = false) String hours,
+        @RequestParam(value = "period", required = false) String period,
         @RequestParam(value = "reach", required = false) List<Double> reach
     ) {
-        return ResponseEntity.ok(service.stop(TypicalDay.label(기준일자), 노선명, hour, seq, reach));
+        return ResponseEntity.ok(service.stop(OdBasis.of(기준일자, period, hours, hour), 노선명, seq, reach));
     }
 
     @GetMapping("/segment")
@@ -68,9 +74,11 @@ public class RouteAnalysisController {
         @RequestParam("from") int from,
         @RequestParam("to") int to,
         @RequestParam(value = "date", required = false) String 기준일자,
-        @RequestParam(value = "hour", required = false) Integer hour
+        @RequestParam(value = "hour", required = false) Integer hour,
+        @RequestParam(value = "hours", required = false) String hours,
+        @RequestParam(value = "period", required = false) String period
     ) {
-        return ResponseEntity.ok(service.segment(TypicalDay.label(기준일자), 노선명, hour, from, to));
+        return ResponseEntity.ok(service.segment(OdBasis.of(기준일자, period, hours, hour), 노선명, from, to));
     }
 
     /** The route's OD grouped by administrative district (행정동), with boundaries. */
@@ -78,9 +86,11 @@ public class RouteAnalysisController {
     public ResponseEntity<RouteDongOdResponse> dongOd(
         @PathVariable("routeName") String 노선명,
         @RequestParam(value = "date", required = false) String 기준일자,
-        @RequestParam(value = "hour", required = false) Integer hour
+        @RequestParam(value = "hour", required = false) Integer hour,
+        @RequestParam(value = "hours", required = false) String hours,
+        @RequestParam(value = "period", required = false) String period
     ) {
-        return ResponseEntity.ok(service.dongOd(TypicalDay.label(기준일자), 노선명, hour));
+        return ResponseEntity.ok(service.dongOd(OdBasis.of(기준일자, period, hours, hour), 노선명));
     }
 
     /** Road path of the route and the stop it turns at, from the Seoul bus route API (cached a day). */

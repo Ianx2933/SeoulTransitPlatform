@@ -26,6 +26,12 @@
 #   REDIS_HEALTH_ENABLED
 #                      default: true. Set false wherever CACHE_TYPE=caffeine and no
 #                      Redis exists, or /actuator/health reports DOWN forever.
+#   BQ_ENABLED         default: false. true turns on period and hourly views (BigQuery);
+#                      off, they answer 503 and the typical day still works.
+#   BQ_PROJECT         default: project-9c77d932-f0d2-47bb-947 (transit-bigquery marts)
+#   BQ_MAX_BYTES       bytes billed cap per query (checked on the upper-bound
+#                      estimate), default: 3000000000 (3 GB)
+#   BQ_TIMEOUT         per-query timeout, default: 20s
 #   PREDICTION_SERVICE_BASE_URL  default: http://localhost:5000
 #   PREDICTION_SERVICE_AUTH_ENABLED
 #                      default: false. Set true on Cloud Run, where the prediction
@@ -37,6 +43,7 @@
 #   REDIS_HEALTH_ENABLED=false
 #   PREDICTION_SERVICE_AUTH_ENABLED=true
 #   DB_POOL_MAX=3
+#   BQ_ENABLED=true
 
 server:
   port: ${PORT:8080}
@@ -91,6 +98,14 @@ management:
       # status, /actuator/health answers 503 DOWN even though the application is
       # serving correctly — which Cloud Run reads as an unhealthy container.
       enabled: ${REDIS_HEALTH_ENABLED:true}
+
+bigquery:
+  enabled: ${BQ_ENABLED:false}
+  project: ${BQ_PROJECT:project-9c77d932-f0d2-47bb-947}
+  dataset: ${BQ_DATASET:transit_marts}
+  location: ${BQ_LOCATION:asia-northeast3}
+  max-bytes-billed: ${BQ_MAX_BYTES:3000000000}
+  timeout: ${BQ_TIMEOUT:20s}
 
 prediction:
   service:

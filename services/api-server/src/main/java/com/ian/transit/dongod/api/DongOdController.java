@@ -2,6 +2,7 @@ package com.ian.transit.dongod.api;
 
 import com.ian.transit.dongod.application.DongOdService;
 import com.ian.transit.dongod.application.DongRouteLoadService;
+import com.ian.transit.period.OdBasis;
 import com.ian.transit.dongod.dto.DongRouteLoadResponse;
 import com.ian.transit.dongod.dto.DongOdResponse;
 import com.ian.transit.dongod.dto.DongOdSummaryRow;
@@ -29,6 +30,12 @@ import java.util.List;
  *   GET /api/dong-od/{code}/reach?date=weekday&level=dong|gu|city|group&direction=from|to
  *
  * level=group takes 2 to 20 행정동 codes joined by commas as {code}.
+ *
+ * Every endpoint takes period=2026-03..2026-05 (months, BigQuery) instead of
+ * the typical day. routes and route-load also take hours=8 or hours=7-9
+ * (boarding hours, any day type; with hours, route-load adds legendMax for a
+ * colour scale fixed over the day). The district OD endpoints (summary,
+ * {code}, reach) have no hours: TOPIS district OD is a day's total.
  */
 @RestController
 @RequestMapping("/api/dong-od")
@@ -41,9 +48,10 @@ public class DongOdController {
     @GetMapping("/summary")
     public ResponseEntity<List<DongOdSummaryRow>> summary(
         @RequestParam(value = "date", required = false) String date,
-        @RequestParam(value = "level", required = false) String level
+        @RequestParam(value = "level", required = false) String level,
+        @RequestParam(value = "period", required = false) String period
     ) {
-        return ResponseEntity.ok(service.summary(date, level));
+        return ResponseEntity.ok(service.summary(OdBasis.of(date, period, null, null), level));
     }
 
     @GetMapping("/{code}")
@@ -53,18 +61,21 @@ public class DongOdController {
         @RequestParam(value = "level", required = false) String level,
         @RequestParam(value = "dest", required = false) String dest,
         @RequestParam(value = "direction", required = false) String direction,
-        @RequestParam(value = "limit", defaultValue = "15") int limit
+        @RequestParam(value = "limit", defaultValue = "15") int limit,
+        @RequestParam(value = "period", required = false) String period
     ) {
-        return ResponseEntity.ok(service.flows(date, level, code, dest, direction, limit));
+        return ResponseEntity.ok(service.flows(OdBasis.of(date, period, null, null), level, code, dest, direction, limit));
     }
 
     @GetMapping("/{code}/routes")
     public ResponseEntity<DongRoutesResponse> routes(
         @PathVariable("code") String code,
         @RequestParam(value = "date", required = false) String date,
-        @RequestParam(value = "level", required = false) String level
+        @RequestParam(value = "level", required = false) String level,
+        @RequestParam(value = "period", required = false) String period,
+        @RequestParam(value = "hours", required = false) String hours
     ) {
-        return ResponseEntity.ok(service.routes(date, level, code));
+        return ResponseEntity.ok(service.routes(OdBasis.of(date, period, hours, null), level, code));
     }
 
     @GetMapping("/{code}/route-load")
@@ -72,9 +83,11 @@ public class DongOdController {
         @PathVariable("code") String code,
         @RequestParam(value = "date", required = false) String date,
         @RequestParam(value = "level", required = false) String level,
-        @RequestParam(value = "direction", required = false) String direction
+        @RequestParam(value = "direction", required = false) String direction,
+        @RequestParam(value = "period", required = false) String period,
+        @RequestParam(value = "hours", required = false) String hours
     ) {
-        return ResponseEntity.ok(routeLoadService.load(date, level, code, direction));
+        return ResponseEntity.ok(routeLoadService.load(OdBasis.of(date, period, hours, null), level, code, direction));
     }
 
     @GetMapping("/{code}/reach")
@@ -82,8 +95,9 @@ public class DongOdController {
         @PathVariable("code") String code,
         @RequestParam(value = "date", required = false) String date,
         @RequestParam(value = "level", required = false) String level,
-        @RequestParam(value = "direction", required = false) String direction
+        @RequestParam(value = "direction", required = false) String direction,
+        @RequestParam(value = "period", required = false) String period
     ) {
-        return ResponseEntity.ok(service.reach(date, level, code, direction));
+        return ResponseEntity.ok(service.reach(OdBasis.of(date, period, null, null), level, code, direction));
     }
 }
