@@ -165,6 +165,7 @@ export const messages = {
         "노선 분석은 대표일 OD를 씁니다. 요일 유형(평일, 토요일, 일요일·공휴일)마다 최근 12개월 보정 TOPIS 노선 OD에서 승차·하차 정류소 쌍의 하루 평균을 냅니다. 특수일은 뺍니다. 하루씩 빼고 나머지로 맞혀 보면 평일 기준 정류소 단위 약 6%, 노선 단위 약 3% 안에 들고, 정류소 쌍 하나는 더 흔들립니다(약 26%).",
         "기간을 고르면 그 달들에 공개된 같은 요일 유형의 날을 평균합니다(BigQuery). TOPIS 노선 OD는 요일 유형마다 한 달에 하루 안팎이라, 짧은 기간은 표본 날이 적습니다. 화면에 표본 날짜를 함께 보여 줍니다.",
         "시간대를 고르면 승차 정류소의 시간대 비율(34개월 승하차 시간대 자료)로 하루 OD를 나눈 추정값을 씁니다. 그 시간에 탄 사람만 세며, 평일·토요일·일요일·공휴일 모두 됩니다. 범례 고정을 켜면 도로 위 색은 하루 중 가장 붐빈 한 시간을 기준으로 고정됩니다.",
+        "시간대 배분은 한 정류소에서 탄 사람이 행선지와 상관없이 같은 시간대 모양을 따른다고 가정합니다. 이 가정으로 하차 시간대를 다시 만들어(정류소당 1.5분 이동) 실제 시간대 하차와 비교하면 오차(WAPE)가 노선×시간 7.6%, 정류소×시간 21.7%입니다. 같은 방식으로 본 승차 쪽은 6.9%, 17.3%라, 가정 때문에 더해지는 오차는 노선 단위 약 1%p, 정류소 단위 약 4%p입니다(2025-10~2026-09, 버스 658개 노선).",
         "재차 인원은 하루 동안 그 정류소를 지나간 사람의 합이지 버스 한 대의 혼잡도가 아닙니다. 혼잡도는 배차와 차량 정원을 함께 봐야 하며 앞으로 붙일 계획입니다."
       ]
     }
@@ -326,6 +327,7 @@ export const messages = {
         "Route analysis uses typical-day OD: for each day type (weekday, Saturday, Sunday and public holiday), the mean daily passengers of every boarding-to-alighting stop pair over the last twelve months of corrected TOPIS route OD, special days left out. Predicting each day from the others, it is within about 6% by stop and 3% by route on weekdays; single stop pairs are noisier (about 26%).",
         "With months chosen, the mean is taken over the published days of this type in those months (BigQuery). TOPIS route OD has about one day of each type a month, so a short period rests on few days; the sample days are shown with it.",
         "With hours chosen, the daily OD is split by the boarding stop's hourly profile (34 months of hourly boarding counts). Only riders who boarded in those hours are counted, on any day type. With the fixed scale on, the road colours are fixed to the busiest hour of the day.",
+        "The hourly split assumes riders boarding at a stop share one time profile whatever their destination. Rebuilding hourly alightings from it (1.5 minutes a stop) and comparing them with counted hourly alightings gives a WAPE of 7.6% by route and hour and 21.7% by stop and hour; boardings checked the same way give 6.9% and 17.3%, so the assumption adds about 1 point by route and 4 points by stop (2025-10 to 2026-09, 658 bus routes).",
         "On-board figures are daily totals passing each stop, not the load of one bus. Crowding needs service frequency and vehicle capacity as well and is planned for later."
       ]
     }

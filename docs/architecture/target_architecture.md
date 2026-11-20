@@ -1,5 +1,7 @@
 # 01. Target Architecture
 
+> **Historical (2026-11).** This plan predates the removal of the Java `odcorrection` package. OD correction now runs in the Python pipeline (`pipelines/od_correction/`), and the API has no `/api/od-correction` endpoint or admin token. Kept as a record of the refactoring; the package layout of `services/api-server` is the current reference.
+
 ## Goal
 
 Refactor the current Spring application into domain-oriented packages while keeping a familiar Spring structure:

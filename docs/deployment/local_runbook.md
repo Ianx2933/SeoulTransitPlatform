@@ -77,7 +77,7 @@ instead. Both are documented below; they do not conflict.
 copy .env.example .env
 ```
 
-Fill in `DB_PASSWORD` and `ADMIN_API_TOKEN`, and update the password inside
+Fill in `DB_PASSWORD`, and update the password inside
 `PIPELINE_DB_URL` to match.
 
 Keep `PIPELINE_DB_URL` on one line. Notepad's word wrap makes it look wrapped,
@@ -162,11 +162,13 @@ first.
 | Variable | Local value | Purpose |
 |---|---|---|
 | `DB_PASSWORD` | your local Postgres password | Required; no default |
-| `ADMIN_API_TOKEN` | `local-dev-token` | Required; guards admin endpoints |
 | `JPA_DDL_AUTO` | `validate` | Schema validation mode |
 | `CACHE_TYPE` | `redis` | Cache provider |
 | `REDIS_HOST` | `localhost` | |
 | `REDIS_PORT` | `6379` | |
+| `BQ_ENABLED` | `false` | `true` turns on months and boarding hours (BigQuery); off, those answer 503 and the typical day still works |
+| `BQ_PROJECT`, `BQ_DATASET`, `BQ_LOCATION` | defaults in `application.yaml` | Where the period marts are |
+| `BQ_MAX_BYTES` | `3000000000` | Bytes-billed cap per query, checked on BigQuery's upper-bound estimate |
 
 Full variable list and defaults are in
 `services/api-server/src/main/resources/application.yaml`. Placeholders are in
@@ -178,7 +180,6 @@ PowerShell:
 cd services\api-server
 
 $env:DB_PASSWORD='your-local-postgres-password'
-$env:ADMIN_API_TOKEN='local-dev-token'
 $env:JPA_DDL_AUTO='validate'
 $env:CACHE_TYPE='redis'
 $env:REDIS_HOST='localhost'
@@ -193,7 +194,6 @@ CMD:
 cd services\api-server
 
 set "DB_PASSWORD=your-local-postgres-password"
-set "ADMIN_API_TOKEN=local-dev-token"
 set "JPA_DDL_AUTO=validate"
 set "CACHE_TYPE=redis"
 set "REDIS_HOST=localhost"
@@ -208,7 +208,6 @@ bash:
 cd services/api-server
 
 export DB_PASSWORD='your-local-postgres-password'
-export ADMIN_API_TOKEN='local-dev-token'
 export JPA_DDL_AUTO='validate'
 export CACHE_TYPE='redis'
 export REDIS_HOST='localhost'
@@ -361,7 +360,6 @@ cd services\api-server
 
 $env:SPRING_PROFILES_ACTIVE='local-simple'
 $env:DB_PASSWORD='your-local-postgres-password'
-$env:ADMIN_API_TOKEN='local-dev-token'
 $env:JPA_DDL_AUTO='validate'
 
 mvn spring-boot:run

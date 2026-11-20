@@ -26,7 +26,6 @@ cd services\api-server
 
 $env:SPRING_PROFILES_ACTIVE='local-simple'
 $env:DB_PASSWORD='your-local-postgres-password'
-$env:ADMIN_API_TOKEN='local-dev-token'
 $env:JPA_DDL_AUTO='validate'
 
 mvn spring-boot:run
