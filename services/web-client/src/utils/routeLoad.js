@@ -1,3 +1,4 @@
+import { fixedBreaks } from "./basis.js";
 import { classOf, quantileBreaks } from "./dongColor.js";
 
 /** Ten steps from dark green (few riders) to dark red (many), ColorBrewer RdYlGn reversed. */
@@ -25,15 +26,22 @@ export function loadOn(segment, routes) {
  * loads (so every colour is used) and drawn thicker for more riders. Returned
  * low first so the busiest segments are drawn on top. Pure, for tests.
  *
- * @returns {{segments: object[], breaks: number[], shown: number, hidden: number, max: number}}
+ * With fixedMax (boarding hours with a fixed legend, see fixedScaleMax) the
+ * steps are fixed on a log scale up to fixedMax instead, so the same colour
+ * means the same riders whichever hours are shown.
+ *
+ * @returns {{segments: object[], breaks: number[], shown: number, hidden: number, max: number, fixed: boolean}}
  */
-export function styleSegments(segments, { minLoad = 0, routes = [] } = {}) {
+export function styleSegments(segments, { minLoad = 0, routes = [], fixedMax = null } = {}) {
   const drawable = (segments || [])
     .filter((s) => Array.isArray(s.path) && s.path.length >= 2)
     .map((s) => (routes.length ? { ...s, load: loadOn(s, routes), routes: s.routes.filter((r) => routes.includes(r)) } : s))
     .filter((s) => s.load > 0);
   const kept = drawable.filter((s) => s.load >= minLoad);
-  const breaks = quantileBreaks(kept.map((s) => s.load), LOAD_COLORS.length);
+  const fixed = fixedMax > 0;
+  const breaks = fixed
+    ? fixedBreaks(fixedMax, LOAD_COLORS.length, minLoad)
+    : quantileBreaks(kept.map((s) => s.load), LOAD_COLORS.length);
   const styled = kept
     .map((s) => {
       const k = Math.max(0, classOf(s.load, breaks));
@@ -45,19 +53,21 @@ export function styleSegments(segments, { minLoad = 0, routes = [] } = {}) {
     breaks,
     shown: styled.length,
     hidden: drawable.length - styled.length,
-    max: styled.length ? styled[styled.length - 1].load : 0
+    max: fixed ? Math.max(fixedMax, styled.length ? styled[styled.length - 1].load : 0) : styled.length ? styled[styled.length - 1].load : 0,
+    fixed
   };
 }
 
 /**
  * Legend steps: colour and the rider range it stands for (from inclusive, to
  * exclusive except the last). Steps with an empty range, which appear when many
- * segments share one load, are left out.
+ * segments share one load, are left out. A fixed scale keeps every step, even
+ * with nothing shown, so the legend stays put while the hours change.
  */
 export function legendSteps(styled, minLoad = 0) {
-  const { breaks, max, shown } = styled;
-  if (!shown) return [];
-  const lowest = styled.segments[0].load;
+  const { breaks, max, shown, fixed } = styled;
+  if (!shown && !fixed) return [];
+  const lowest = fixed ? Math.max(minLoad, 1) : styled.segments[0].load;
   const steps = [];
   for (let k = 0; k <= breaks.length; k += 1) {
     const from = k === 0 ? Math.max(minLoad, lowest) : breaks[k - 1];

@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n/I18nProvider.jsx";
+import { hoursRange } from "../utils/basis.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
 import CsvButton from "./CsvButton.jsx";
 import RouteLoadLegend from "./RouteLoadLegend.jsx";
@@ -10,7 +11,8 @@ import RouteLoadLegend from "./RouteLoadLegend.jsx";
  *
  * extra sits next to the minimum (the district view's boundary switch);
  * children sit between the scale and the routes (a view's own hint). Route
- * ticks show when there are at least minRoutesToPick routes.
+ * ticks show when there are at least minRoutesToPick routes. hours (from the
+ * view's basis) turns "a day" into the boarding hours.
  */
 export default function RoadLoadControls({
   result,
@@ -23,6 +25,7 @@ export default function RoadLoadControls({
   csvName,
   extra,
   minRoutesToPick = 1,
+  hours = null,
   children
 }) {
   const { tx, lang } = useI18n();
@@ -47,13 +50,20 @@ export default function RoadLoadControls({
         {extra}
       </div>
       <p className="note num">
-        {tx("{riders} riders a day; {shown} segments shown, {hidden} under the minimum hidden", {
-          riders: fmt(result.placedPassengers ?? result.passengers),
-          shown: styled.shown.toLocaleString(),
-          hidden: styled.hidden.toLocaleString()
-        })}
+        {hours
+          ? tx("{riders} riders boarding {hours}; {shown} segments shown, {hidden} under the minimum hidden", {
+              riders: fmt(result.placedPassengers ?? result.passengers),
+              hours: hoursRange(hours),
+              shown: styled.shown.toLocaleString(),
+              hidden: styled.hidden.toLocaleString()
+            })
+          : tx("{riders} riders a day; {shown} segments shown, {hidden} under the minimum hidden", {
+              riders: fmt(result.placedPassengers ?? result.passengers),
+              shown: styled.shown.toLocaleString(),
+              hidden: styled.hidden.toLocaleString()
+            })}
       </p>
-      <RouteLoadLegend styled={styled} minLoad={minLoad} />
+      <RouteLoadLegend styled={styled} minLoad={minLoad} hours={hours} />
       <CsvButton result={result} fileName={csvName} />
       {styled.shown === 0 && <p className="note">{tx("No bus riders on the road for this choice.")}</p>}
       {children}

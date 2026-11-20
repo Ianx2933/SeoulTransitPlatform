@@ -1,17 +1,22 @@
+import { appendBasis } from "../utils/basis.js";
 import { fetchJson } from "./mapDemandApi.js";
 
 /**
  * District OD on the typical day by rail and bus (DongOdController), for a
  * 행정동 (level dong, 8-digit code), a 구 (level gu, 5 digits) or Seoul
  * (level city, code 11). dayType is weekday, saturday or sunday_holiday.
+ * basis (utils/basis.js) adds a period of months; boarding hours only go to
+ * the bus routes and road views, the others are whole days.
  */
-export function fetchDongOdSummary({ dayType, level = "dong" }) {
-  const params = new URLSearchParams({ date: dayType, level });
+export function fetchDongOdSummary({ dayType, level = "dong", basis = null }) {
+  const params = appendBasis(new URLSearchParams({ date: dayType, level }), basis, { withHours: false });
   return fetchJson(`/api/dong-od/summary?${params}`, { defaultMessage: "Failed to fetch district OD" });
 }
 
-export function fetchDongOd({ code, level = "dong", dest, dayType, direction = "from", limit = 15 }) {
-  const params = new URLSearchParams({ date: dayType, level, direction, limit: String(limit) });
+export function fetchDongOd({ code, level = "dong", dest, dayType, direction = "from", limit = 15, basis = null }) {
+  const params = appendBasis(new URLSearchParams({ date: dayType, level, direction, limit: String(limit) }), basis, {
+    withHours: false
+  });
   if (dest) params.set("dest", dest);
   return fetchJson(`/api/dong-od/${encodeURIComponent(code)}?${params}`, {
     defaultMessage: "Failed to fetch district OD",
@@ -19,8 +24,8 @@ export function fetchDongOd({ code, level = "dong", dest, dayType, direction = "
   });
 }
 
-export function fetchDongRoutes({ code, level = "dong", dayType }) {
-  const params = new URLSearchParams({ date: dayType, level });
+export function fetchDongRoutes({ code, level = "dong", dayType, basis = null }) {
+  const params = appendBasis(new URLSearchParams({ date: dayType, level }), basis);
   return fetchJson(`/api/dong-od/${encodeURIComponent(code)}/routes?${params}`, {
     defaultMessage: "Failed to fetch routes in the area"
   });
@@ -31,8 +36,8 @@ export function fetchDongRoutes({ code, level = "dong", dayType }) {
  * boarding there (od), alighting there (do) or either (both), summed over
  * routes and kept by route (byRoute).
  */
-export function fetchDongRouteLoad({ code, level = "dong", dayType, direction = "both" }) {
-  const params = new URLSearchParams({ date: dayType, level, direction });
+export function fetchDongRouteLoad({ code, level = "dong", dayType, direction = "both", basis = null }) {
+  const params = appendBasis(new URLSearchParams({ date: dayType, level, direction }), basis);
   return fetchJson(`/api/dong-od/${encodeURIComponent(code)}/route-load?${params}`, {
     defaultMessage: "Failed to fetch bus riders on the road"
   });
@@ -42,8 +47,8 @@ export function fetchDongRouteLoad({ code, level = "dong", dayType, direction = 
  * How far an area's riders go (direction from) or come from (to): riders by
  * straight-line distance band between districts, by rail and bus.
  */
-export function fetchDongReach({ code, level = "dong", dayType, direction = "from" }) {
-  const params = new URLSearchParams({ date: dayType, level, direction });
+export function fetchDongReach({ code, level = "dong", dayType, direction = "from", basis = null }) {
+  const params = appendBasis(new URLSearchParams({ date: dayType, level, direction }), basis, { withHours: false });
   return fetchJson(`/api/dong-od/${encodeURIComponent(code)}/reach?${params}`, {
     defaultMessage: "Failed to fetch how far riders go"
   });

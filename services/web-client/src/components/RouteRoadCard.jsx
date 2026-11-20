@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider.jsx";
+import { basisFileTag, isPeriodUnavailable } from "../utils/basis.js";
 import { csvFileName } from "../utils/roadCsv.js";
 import { busiestRoutes } from "../utils/routeLoad.js";
 import RoadLoadControls from "./RoadLoadControls.jsx";
@@ -30,7 +31,8 @@ export default function RouteRoadCard({
   picked,
   setPicked,
   stop,
-  onStopLookup
+  onStopLookup,
+  basis = null
 }) {
   const { tx } = useI18n();
   const [draft, setDraft] = useState(extraRoutes.join(", "));
@@ -76,7 +78,11 @@ export default function RouteRoadCard({
             <button type="submit" className="chip">{tx("Apply")}</button>
           </form>
           {state === "loading" && <p className="note">{tx("Loading…")}</p>}
-          {state === "error" && <p className="field-error">{error}</p>}
+          {state === "error" && (
+            <p className="field-error">
+              {isPeriodUnavailable(error) ? tx("Months and hours could not be loaded right now.") : error}
+            </p>
+          )}
           {result && styled && (
             <RoadLoadControls
               result={result}
@@ -86,8 +92,9 @@ export default function RouteRoadCard({
               routes={routes}
               picked={picked}
               onPicked={setPicked}
-              csvName={csvFileName("routes", (result.routes || []).join("_"), result.dayType)}
+              csvName={csvFileName("routes", (result.routes || []).join("_"), result.dayType, basisFileTag(basis))}
               minRoutesToPick={2}
+              hours={basis?.hours || null}
             >
               <p className="note">{tx("Click a segment on the map to see who passes it on every route.")}</p>
             </RoadLoadControls>

@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n/I18nProvider.jsx";
+import { hoursRange, isPeriodUnavailable } from "../utils/basis.js";
 import { csvFileName } from "../utils/roadCsv.js";
 import CsvButton from "./CsvButton.jsx";
 
@@ -6,8 +7,9 @@ import CsvButton from "./CsvButton.jsx";
  * Summary of a stop or segment look-up (select link): who they are, where
  * they board and where they get off. onClose ends the look-up; with
  * onCombineRoutes (route analysis) the routes found can be added up on the map.
+ * hours: the boarding hours the look-up is cut to, if any.
  */
-export default function RoadExploreCard({ request, state, error, result, onClose, onCombineRoutes }) {
+export default function RoadExploreCard({ request, state, error, result, onClose, onCombineRoutes, hours = null }) {
   const { tx, lang } = useI18n();
   if (!request) return null;
   const fmt = (v) => Number(v || 0).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });
@@ -25,15 +27,23 @@ export default function RoadExploreCard({ request, state, error, result, onClose
         <button type="button" className="chip" onClick={onClose}>{tx("Close")}</button>
       </div>
       {state === "loading" && <p className="note">{tx("Loading…")}</p>}
-      {state === "error" && <p className="field-error">{error}</p>}
+      {state === "error" && (
+        <p className="field-error">{isPeriodUnavailable(error) ? tx("Months and hours could not be loaded right now.") : error}</p>
+      )}
       {result && (
         <>
           <p className="label-strong">{result.title}</p>
           <p className="note num">
-            {tx("{riders} riders a day on {count} routes", {
-              riders: fmt(result.placedPassengers),
-              count: (result.routes || []).length
-            })}
+            {hours
+              ? tx("{riders} riders boarding {hours} on {count} routes", {
+                  riders: fmt(result.placedPassengers),
+                  hours: hoursRange(hours),
+                  count: (result.routes || []).length
+                })
+              : tx("{riders} riders a day on {count} routes", {
+                  riders: fmt(result.placedPassengers),
+                  count: (result.routes || []).length
+                })}
           </p>
           <p className="note">{tx("Blue circles: where they board. Red circles: where they get off. Lines: the road they ride.")}</p>
           {onCombineRoutes && (result.routes || []).length > 0 && (

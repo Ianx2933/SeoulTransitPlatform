@@ -20,10 +20,10 @@ export function RoadMapLayers({ road, boundariesShown }) {
 /** The ten-step scale over the map's lower left corner, outside MapContainer. */
 export function RoadLegendOverlay({ road, boundariesShown }) {
   const { styled } = road;
-  if (!styled || styled.shown === 0 || !(road.exploreLoad.result || boundariesShown)) return null;
+  if (!styled || (styled.shown === 0 && !styled.fixed) || !(road.exploreLoad.result || boundariesShown)) return null;
   return (
     <div className="map-legend-overlay">
-      <RouteLoadLegend styled={styled} minLoad={road.minLoad} />
+      <RouteLoadLegend styled={styled} minLoad={road.minLoad} hours={road.hours} />
     </div>
   );
 }

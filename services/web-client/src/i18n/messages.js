@@ -61,9 +61,11 @@ export const messages = {
       enterRoute: "버스 노선 번호를 입력하세요. 예: 302, 452",
       showBoundaries: "행정동 경계 보이기",
       notFound: "{route}번 노선의 이 요일 OD가 없습니다.",
-      notFoundHour: "{route}번 노선의 이 시간대 OD가 없습니다. 시간대별 값은 평일만 있습니다.",
+      notFoundHour: "{route}번 노선의 이 시간대 OD가 없습니다.",
+      notFoundBasis: "{route}번 노선의 이 기간·시간대 OD가 없습니다.",
       summary: "하루 {total}명 · 정류소 {stops}곳 · 대표일 {days}일 평균",
       summaryHour: "{hour} 승차 {total}명 · 정류소 {stops}곳",
+      summaryPeriod: "하루 {total}명 · 정류소 {stops}곳 · {period} 표본 {days}일 평균",
       unordered: "노선 위에 놓을 수 없는 승객 {value}명",
       empty: "노선 번호를 입력하면 정류소마다 버스 안에 몇 명이 타고 있는지 보여 줍니다.",
       dong: {
@@ -161,7 +163,8 @@ export const messages = {
         "지도 수요는 고른 수단, 노선, 요일 유형, 시간대의 승차 수요를 합한 값입니다.",
         "행정동 필터는 지도에 보이는 지점이 고른 행정동 경계 안에 있는지로 계산합니다.",
         "노선 분석은 대표일 OD를 씁니다. 요일 유형(평일, 토요일, 일요일·공휴일)마다 최근 12개월 보정 TOPIS 노선 OD에서 승차·하차 정류소 쌍의 하루 평균을 냅니다. 특수일은 뺍니다. 하루씩 빼고 나머지로 맞혀 보면 평일 기준 정류소 단위 약 6%, 노선 단위 약 3% 안에 들고, 정류소 쌍 하나는 더 흔들립니다(약 26%).",
-        "시간대를 고르면 승차 정류소의 시간대 비율로 하루 OD를 나눈 추정값을 씁니다. 그 시간에 탄 사람만 세며, 평일만 있습니다.",
+        "기간을 고르면 그 달들에 공개된 같은 요일 유형의 날을 평균합니다(BigQuery). TOPIS 노선 OD는 요일 유형마다 한 달에 하루 안팎이라, 짧은 기간은 표본 날이 적습니다. 화면에 표본 날짜를 함께 보여 줍니다.",
+        "시간대를 고르면 승차 정류소의 시간대 비율(34개월 승하차 시간대 자료)로 하루 OD를 나눈 추정값을 씁니다. 그 시간에 탄 사람만 세며, 평일·토요일·일요일·공휴일 모두 됩니다. 범례 고정을 켜면 도로 위 색은 하루 중 가장 붐빈 한 시간을 기준으로 고정됩니다.",
         "재차 인원은 하루 동안 그 정류소를 지나간 사람의 합이지 버스 한 대의 혼잡도가 아닙니다. 혼잡도는 배차와 차량 정원을 함께 봐야 하며 앞으로 붙일 계획입니다."
       ]
     }
@@ -219,9 +222,11 @@ export const messages = {
       enterRoute: "Enter a bus route number, for example 302 or 452.",
       showBoundaries: "Show district boundaries",
       notFound: "No OD for route {route} on this day type.",
-      notFoundHour: "No OD for route {route} in this hour. Hourly values exist for weekdays only.",
+      notFoundHour: "No OD for route {route} in this hour.",
+      notFoundBasis: "No OD for route {route} in these months or hours.",
       summary: "{total} riders a day · {stops} stops · mean of {days} sample days",
       summaryHour: "{total} riders boarding {hour} · {stops} stops",
+      summaryPeriod: "{total} riders a day · {stops} stops · mean of {days} sample days in {period}",
       unordered: "{value} riders could not be placed on the route",
       empty: "Enter a route number to see how many riders are on board as the bus leaves each stop.",
       dong: {
@@ -319,7 +324,8 @@ export const messages = {
         "The demand map sums boarding demand for the chosen mode, routes, day type and hours.",
         "The district filter checks whether each visible point falls inside the chosen district boundaries.",
         "Route analysis uses typical-day OD: for each day type (weekday, Saturday, Sunday and public holiday), the mean daily passengers of every boarding-to-alighting stop pair over the last twelve months of corrected TOPIS route OD, special days left out. Predicting each day from the others, it is within about 6% by stop and 3% by route on weekdays; single stop pairs are noisier (about 26%).",
-        "With an hour chosen, the daily OD is split by the boarding stop's hourly profile. Only riders who boarded in that hour are counted, and only weekdays have hourly values.",
+        "With months chosen, the mean is taken over the published days of this type in those months (BigQuery). TOPIS route OD has about one day of each type a month, so a short period rests on few days; the sample days are shown with it.",
+        "With hours chosen, the daily OD is split by the boarding stop's hourly profile (34 months of hourly boarding counts). Only riders who boarded in those hours are counted, on any day type. With the fixed scale on, the road colours are fixed to the busiest hour of the day.",
         "On-board figures are daily totals passing each stop, not the load of one bus. Crowding needs service frequency and vehicle capacity as well and is planned for later."
       ]
     }

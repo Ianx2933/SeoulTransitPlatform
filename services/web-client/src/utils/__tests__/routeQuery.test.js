@@ -4,10 +4,10 @@ import { routeQuery } from "../../api/routeAnalysisApi.js";
 import { viewFromHash } from "../../hooks/useHashView.js";
 
 describe("routeQuery", () => {
-  test("sends the hour on weekdays only", () => {
-    expect(routeQuery({ dayType: "weekday", hour: 8 })).toBe("date=weekday&hour=8");
-    expect(routeQuery({ dayType: "saturday", hour: 8 })).toBe("date=saturday");
-    expect(routeQuery({ dayType: "weekday", hour: 0 })).toBe("date=weekday&hour=0");
+  test("sends boarding hours on any day type", () => {
+    expect(routeQuery({ dayType: "weekday", basis: { hours: { from: 8, to: 8 } } })).toBe("date=weekday&hours=8");
+    expect(routeQuery({ dayType: "saturday", basis: { hours: { from: 0, to: 0 } } })).toBe("date=saturday&hours=0");
+    expect(routeQuery({ dayType: "weekday" })).toBe("date=weekday");
   });
 
   test("joins reach levels and adds a section", () => {

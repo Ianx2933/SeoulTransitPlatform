@@ -412,3 +412,9 @@
 .reach-bar { grid-column: 1 / -1; height: 6px; background: #e6e8eb; border-radius: 3px; overflow: hidden; }
 .reach-bar__fill { display: block; height: 100%; background: #2f6fb3; }
 .reach-list li > .note:last-child { grid-column: 1 / -1; }
+
+/* Period and hours (BasisControls) */
+.basis-controls { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.basis-hours { display: grid; gap: 6px; }
+.basis-note { margin: 0; }
+.error-box .chip { margin-top: 6px; }

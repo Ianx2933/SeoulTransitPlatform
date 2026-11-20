@@ -68,4 +68,16 @@ describe("routeLoad", () => {
     expect(routeBreakdown(s, String, 1)).toBe("440 40 · +2");
     expect(routeBreakdown(seg(5, ["a"]))).toBe("a");
   });
+
+  test("a fixed scale keeps its steps whatever the hour shows", () => {
+    const quiet = styleSegments([seg(5), seg(10)], { minLoad: 1, fixedMax: 500 });
+    const busy = styleSegments([seg(50), seg(480)], { minLoad: 1, fixedMax: 500 });
+    expect(quiet.fixed).toBe(true);
+    expect(quiet.breaks).toEqual(busy.breaks);
+    expect(quiet.max).toBe(500);
+    expect(quiet.segments[1].level).toBeLessThan(busy.segments[1].level);
+    expect(legendSteps(quiet, 1)).toHaveLength(10);
+    expect(legendSteps(styleSegments([], { fixedMax: 500 }), 1)).toHaveLength(10);
+    expect(legendSteps(styleSegments([]), 1)).toEqual([]);
+  });
 });

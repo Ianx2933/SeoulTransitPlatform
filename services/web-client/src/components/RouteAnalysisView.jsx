@@ -22,6 +22,7 @@ import { useDistrictBoundaries } from "../hooks/useDistrictBoundaries.js";
 /** Route lines: thick enough to read over the map and district outlines. */
 const ROUTE_WEIGHT = 7;
 import { DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
+import { basisKey, fixedScaleMax, TYPICAL } from "../utils/basis.js";
 import RoadExploreCard from "./RoadExploreCard.jsx";
 import RoadPointsLayer from "./RoadPointsLayer.jsx";
 import RouteAnalysisPanel from "./RouteAnalysisPanel.jsx";
@@ -58,7 +59,10 @@ export default function RouteAnalysisView({ busLines }) {
   const [segment, setSegment] = useState(null);
   const [points, setPoints] = useState([]);
   const [pointsState, setPointsState] = useState("idle");
-  const [query, setQuery] = useState({ dayType: "weekday", hour: null });
+  const [query, setQuery] = useState({ dayType: "weekday", basis: TYPICAL });
+  const queryBasisKey = basisKey(query.basis);
+  // The district effect runs when the basis key changes and reads the basis here.
+  const queryBasis = useLatest(query.basis);
   const [roadPath, setRoadPath] = useState(null);
   const [dongOn, setDongOn] = useState(false);
   const [boundaryOn, setBoundaryOn] = useState(false);
@@ -82,18 +86,29 @@ export default function RouteAnalysisView({ busLines }) {
     setExplore(null);
   }, [routeName]);
   const roadRequest =
-    roadOn && routeName ? { kind: "routes", routes: [routeName, ...extraRoutes], dayType: query.dayType } : null;
+    roadOn && routeName
+      ? { kind: "routes", routes: [routeName, ...extraRoutes], dayType: query.dayType, basis: query.basis }
+      : null;
   const roadLoad = useRoadLoad(roadRequest);
-  const exploreLoad = useRoadLoad(roadOn ? explore : null);
+  // A look-up follows the panel's day type, months and hours.
+  const exploreLoad = useRoadLoad(
+    roadOn && explore ? { ...explore, dayType: query.dayType, basis: query.basis } : null
+  );
   const roadStyled = useMemo(() => {
-    if (exploreLoad.result) return styleSegments(exploreLoad.result.segments, { minLoad: roadMinLoad });
+    if (exploreLoad.result) {
+      return styleSegments(exploreLoad.result.segments, {
+        minLoad: roadMinLoad,
+        fixedMax: fixedScaleMax(exploreLoad.result, query.basis)
+      });
+    }
     if (!roadLoad.result) return null;
     const known = new Set((roadLoad.result.routes || []));
     return styleSegments(roadLoad.result.segments, {
       minLoad: roadMinLoad,
-      routes: roadPicked.filter((r) => known.has(r))
+      routes: roadPicked.filter((r) => known.has(r)),
+      fixedMax: fixedScaleMax(roadLoad.result, query.basis)
     });
-  }, [roadLoad.result, exploreLoad.result, roadMinLoad, roadPicked]);
+  }, [roadLoad.result, exploreLoad.result, roadMinLoad, roadPicked, query.basis]);
 
   useEffect(() => {
     if (!routeName) {
@@ -156,7 +171,7 @@ export default function RouteAnalysisView({ busLines }) {
     fetchRouteDongOd({
       route: routeName,
       dayType: query.dayType,
-      hour: query.hour,
+      basis: queryBasis.current,
       messages: { defaultMessage: tr("route.dong.error"), notFoundMessage: tr("route.dong.error") }
     })
       .then((data) => {
@@ -173,7 +188,7 @@ export default function RouteAnalysisView({ busLines }) {
     return () => {
       ignore = true;
     };
-  }, [translate, dongOn, routeName, query.dayType, query.hour]);
+  }, [translate, queryBasis, dongOn, routeName, query.dayType, queryBasisKey]);
 
   const dongFeatures = useMemo(
     () =>
@@ -245,7 +260,7 @@ export default function RouteAnalysisView({ busLines }) {
             {/* The road view draws riders itself; district fills would hide it. */}
             {dongOn && !roadOn && dongFeatures.length > 0 && (
               <GeoJSON
-                key={`${dongData.노선명}-${dongData.기준일자}-${dongData.hour}-${dongSelected}-${dongDirection}`}
+                key={`${dongData.노선명}-${dongData.기준일자}-${queryBasisKey}-${dongSelected}-${dongDirection}`}
                 data={{ type: "FeatureCollection", features: dongFeatures }}
                 style={(feature) => {
                   const code = feature.properties.code;
@@ -290,7 +305,7 @@ export default function RouteAnalysisView({ busLines }) {
             <RouteLoadLayer
               result={exploreLoad.result || roadLoad.result}
               segments={roadStyled.segments}
-              onSegmentClick={(s) => setExplore({ kind: "segment", from: s.fromArs, to: s.toArs, dayType: query.dayType })}
+              onSegmentClick={(s) => setExplore({ kind: "segment", from: s.fromArs, to: s.toArs })}
             />
           )}
           {roadOn && exploreLoad.result && <RoadPointsLayer result={exploreLoad.result} />}
@@ -346,9 +361,10 @@ export default function RouteAnalysisView({ busLines }) {
             picked={roadPicked}
             setPicked={setRoadPicked}
             stop={routeData?.stops?.find((s) => s.seq === stopSeq) || null}
+            basis={query.basis}
             onStopLookup={(direction) => {
               const stop = routeData?.stops?.find((s) => s.seq === stopSeq);
-              if (stop?.ars) setExplore({ kind: "stop", ars: String(stop.ars), direction, dayType: query.dayType });
+              if (stop?.ars) setExplore({ kind: "stop", ars: String(stop.ars), direction });
             }}
           />
           {roadOn && (
@@ -357,6 +373,7 @@ export default function RouteAnalysisView({ busLines }) {
               state={exploreLoad.state}
               error={exploreLoad.error}
               result={exploreLoad.result}
+              hours={query.basis.hours}
               onClose={() => setExplore(null)}
               onCombineRoutes={(routes) => {
                 setExtraRoutes(routes.filter((r) => r !== routeName).slice(0, MAX_COMBINED_ROUTES - 1));

@@ -1,23 +1,22 @@
+import { appendBasis } from "../utils/basis.js";
 import { fetchJson, fetchMapDemand } from "./mapDemandApi.js";
 
 /**
- * Route analysis on the typical-day OD (served by RouteAnalysisController).
+ * Route analysis (served by RouteAnalysisController).
  *
- * dayType is weekday, saturday or sunday_holiday. hour (0-23) limits the view
- * to riders who boarded in that hour; the server has hourly OD for weekdays
- * only, so the hour is dropped for other day types. reach is a list of rider
- * thresholds for the stop endpoint.
+ * dayType is weekday, saturday or sunday_holiday. basis (utils/basis.js) picks
+ * the typical day or a period of months, and boarding hours (any day type:
+ * the server splits the day by the boarding stop's hourly profile). reach is
+ * a list of rider thresholds for the stop endpoint.
  */
 function base(route) {
   return `/api/curated-od/routes/${encodeURIComponent(route)}`;
 }
 
 /** Query string for the route analysis endpoints. Kept pure for tests. */
-export function routeQuery({ dayType, hour = null, reach = null, from = null, to = null }) {
+export function routeQuery({ dayType, basis = null, reach = null, from = null, to = null }) {
   const params = new URLSearchParams({ date: dayType });
-  if (hour !== null && hour !== undefined && dayType === "weekday") {
-    params.set("hour", String(hour));
-  }
+  appendBasis(params, basis);
   if (Array.isArray(reach) && reach.length > 0) {
     params.set("reach", reach.join(","));
   }
@@ -26,16 +25,16 @@ export function routeQuery({ dayType, hour = null, reach = null, from = null, to
   return params.toString();
 }
 
-export function fetchRouteStops({ route, dayType, hour, messages }) {
-  return fetchJson(`${base(route)}/stops?${routeQuery({ dayType, hour })}`, messages);
+export function fetchRouteStops({ route, dayType, basis, messages }) {
+  return fetchJson(`${base(route)}/stops?${routeQuery({ dayType, basis })}`, messages);
 }
 
-export function fetchRouteStop({ route, dayType, hour, seq, reach, messages }) {
-  return fetchJson(`${base(route)}/stops/${seq}?${routeQuery({ dayType, hour, reach })}`, messages);
+export function fetchRouteStop({ route, dayType, basis, seq, reach, messages }) {
+  return fetchJson(`${base(route)}/stops/${seq}?${routeQuery({ dayType, basis, reach })}`, messages);
 }
 
-export function fetchRouteSegment({ route, dayType, hour, from, to, messages }) {
-  return fetchJson(`${base(route)}/segment?${routeQuery({ dayType, hour, from, to })}`, messages);
+export function fetchRouteSegment({ route, dayType, basis, from, to, messages }) {
+  return fetchJson(`${base(route)}/segment?${routeQuery({ dayType, basis, from, to })}`, messages);
 }
 
 const ALL_HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -55,8 +54,8 @@ export function fetchRouteStopPoints({ route }) {
 }
 
 /** The route's OD grouped by administrative district, with boundaries. */
-export function fetchRouteDongOd({ route, dayType, hour, messages }) {
-  return fetchJson(`${base(route)}/dong-od?${routeQuery({ dayType, hour })}`, messages);
+export function fetchRouteDongOd({ route, dayType, basis, messages }) {
+  return fetchJson(`${base(route)}/dong-od?${routeQuery({ dayType, basis })}`, messages);
 }
 
 /** Road path of the route ([lat, lng] points) and the stop it turns at, from the city's bus API. */

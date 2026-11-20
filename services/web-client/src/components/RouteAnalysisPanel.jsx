@@ -9,11 +9,12 @@ import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle, busRouteType } from "../utils/busRouteType.js";
 import { buildBarChart, findTurnaround, percent } from "../utils/routeLoadChart.js";
 import { csvFileName, routeStopsCsv } from "../utils/roadCsv.js";
+import { basisFileTag, basisKey, isPeriodUnavailable, isPlain, periodParam, TYPICAL } from "../utils/basis.js";
+import BasisControls, { PeriodUnavailable } from "./BasisControls.jsx";
 import CsvButton from "./CsvButton.jsx";
 import useLatest from "../hooks/useLatest.js";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
-const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const CHART = { width: 440, height: 200 };
 const DEFAULT_REACH = "100";
 const REACH_DELAY_MS = 400;
@@ -21,10 +22,10 @@ const REACH_DELAY_MS = 400;
 const pad2 = (h) => String(h).padStart(2, "0");
 
 /**
- * Route analysis on the typical-day OD.
+ * Route analysis on the typical day or a period of months.
  *
- * Pick a route and a day type (and, on weekdays, an hour) to see riders on
- * board along the route. Click a stop for where its riders go and come from
+ * Pick a route and a day type (and, if wanted, months and boarding hours:
+ * BasisControls) to see riders on board along the route. Click a stop for where its riders go and come from
  * and how far its load carries past a threshold you type; pick two stops for
  * the demand inside the section and crossing its ends.
  */
@@ -47,7 +48,7 @@ export default function RouteAnalysisPanel({
 
   const [route, setRoute] = useState("");
   const [dayType, setDayType] = useState("weekday");
-  const [hour, setHour] = useState(null);
+  const [basis, setBasis] = useState(TYPICAL);
   const [routeData, setRouteData] = useState(null);
   const setStopSeq = onStopSeqChange;
   const [stopDetail, setStopDetail] = useState(null);
@@ -58,14 +59,14 @@ export default function RouteAnalysisPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const hourOk = dayType === "weekday";
-  const activeHour = hourOk ? hour : null;
+  const hours = basis.hours;
+  const basisId = basisKey(basis);
   const reachValue = Number(reachText);
   const reachValid = reachText.trim() !== "" && Number.isFinite(reachValue) && reachValue >= 1;
 
   const messagesFor = (name) => ({
     defaultMessage: t("route.failed"),
-    notFoundMessage: activeHour !== null ? t("route.notFoundHour", { route: name }) : t("route.notFound", { route: name })
+    notFoundMessage: isPlain(basis) ? t("route.notFound", { route: name }) : t("route.notFoundBasis", { route: name })
   });
 
   const chart = useMemo(() => buildBarChart(routeData?.stops || [], CHART), [routeData]);
@@ -78,8 +79,8 @@ export default function RouteAnalysisPanel({
   const callbacks = useLatest({ onQuery, onRouteData, onTurnaround, onReach, onSegment });
 
   useEffect(() => {
-    callbacks.current.onQuery?.({ dayType, hour: activeHour });
-  }, [callbacks, dayType, activeHour]);
+    callbacks.current.onQuery?.({ dayType, basis });
+  }, [callbacks, dayType, basis]);
 
   // Tell the map what to draw.
   useEffect(() => {
@@ -101,7 +102,7 @@ export default function RouteAnalysisPanel({
 
   const loadRoute = (name, keepStop) =>
     run(async () => {
-      const data = await fetchRouteStops({ route: name, dayType, hour: activeHour, messages: messagesFor(name) });
+      const data = await fetchRouteStops({ route: name, dayType, basis, messages: messagesFor(name) });
       setRouteData(data);
       setSegment(null);
       const seqs = data.stops.map((s) => s.seq);
@@ -114,7 +115,7 @@ export default function RouteAnalysisPanel({
     });
 
   // What the effects below need at the moment they run, without rerunning them.
-  const current = useLatest({ run, loadRoute, messagesFor, routeData, dayType, activeHour });
+  const current = useLatest({ run, loadRoute, messagesFor, routeData, dayType, basis });
 
   const onSubmit = (event) => {
     event.preventDefault();
@@ -126,7 +127,7 @@ export default function RouteAnalysisPanel({
     loadRoute(name, false);
   };
 
-  // Day type or hour changed: reload the route already on screen.
+  // Day type, months or hours changed: reload the route already on screen.
   const firstRun = useRef(true);
   useEffect(() => {
     if (firstRun.current) {
@@ -135,7 +136,7 @@ export default function RouteAnalysisPanel({
     }
     const { routeData: shown, loadRoute: reload } = current.current;
     if (shown) reload(shown.노선명, true);
-  }, [current, dayType, activeHour]);
+  }, [current, dayType, basisId]);
 
   // Stop detail follows the chosen stop, the time of day and the threshold,
   // with a short delay while the threshold is being typed.
@@ -148,7 +149,7 @@ export default function RouteAnalysisPanel({
           await fetchRouteStop({
             route: routeData.노선명,
             dayType: now.dayType,
-            hour: now.activeHour,
+            basis: now.basis,
             seq: stopSeq,
             reach: [reachValue],
             messages: now.messagesFor(routeData.노선명)
@@ -165,7 +166,7 @@ export default function RouteAnalysisPanel({
         await fetchRouteSegment({
           route: routeData.노선명,
           dayType,
-          hour: activeHour,
+          basis,
           from: Number(fromSeq),
           to: Number(toSeq),
           messages: messagesFor(routeData.노선명)
@@ -224,54 +225,34 @@ export default function RouteAnalysisPanel({
         ))}
       </div>
 
-      <div className="hour-picker">
-        <div className="hour-picker__head">
-          <span className="label-strong">{t("route.hour.label")}</span>
-          <span className="num">
-            {activeHour === null ? t("route.hour.allDay") : t("route.hour.range", { from: pad2(activeHour), to: pad2(activeHour + 1) })}
-          </span>
-        </div>
-        <div className="hour-picker__row">
-          <button
-            type="button"
-            className="chip"
-            aria-pressed={activeHour === null}
-            onClick={() => setHour(null)}
-          >
-            {t("route.hour.allDay")}
-          </button>
-          <div role="group" aria-label={t("route.hour.pick")} className="hour-grid">
-            {HOURS.map((h) => (
-              <button
-                key={h}
-                type="button"
-                disabled={!hourOk}
-                aria-pressed={activeHour === h}
-                onClick={() => setHour(activeHour === h ? null : h)}
-                className="hour-cell num"
-              >
-                {pad2(h)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <p className="note">{hourOk ? t("route.hour.meaning") : t("route.hour.weekdayOnly")}</p>
-      </div>
+      <BasisControls basis={basis} onChange={setBasis} dayType={dayType} showFixed />
 
-      {error && <div className="error-box" role="alert">{error}</div>}
+      {error &&
+        (isPeriodUnavailable(error) && !isPlain(basis) ? (
+          <PeriodUnavailable message={error} basis={basis} onTypical={() => setBasis({ ...TYPICAL, fixed: basis.fixed })} />
+        ) : (
+          <div className="error-box" role="alert">{error}</div>
+        ))}
 
       {!routeData && !error && <p className="note">{t("route.empty")}</p>}
 
       {routeData && (
         <>
           <p className="route-summary num">
-            {activeHour === null
-              ? t("route.summary", { total: fmt(routeData.totalPassengers), stops: routeData.stops.length, days: routeData.nDays ?? "-" })
-              : t("route.summaryHour", {
+            {hours
+              ? t("route.summaryHour", {
                   total: fmt(routeData.totalPassengers),
                   stops: routeData.stops.length,
-                  hour: t("route.hour.range", { from: pad2(activeHour), to: pad2(activeHour + 1) })
-                })}
+                  hour: t("route.hour.range", { from: pad2(hours.from), to: pad2(hours.to + 1) })
+                })
+              : basis.period
+                ? t("route.summaryPeriod", {
+                    total: fmt(routeData.totalPassengers),
+                    stops: routeData.stops.length,
+                    period: periodParam(basis.period).replace("..", "–"),
+                    days: routeData.nDays ?? "-"
+                  })
+                : t("route.summary", { total: fmt(routeData.totalPassengers), stops: routeData.stops.length, days: routeData.nDays ?? "-" })}
             {routeData.unorderedPassengers > 0 && (
               <span className="note"> · {t("route.unordered", { value: fmt(routeData.unorderedPassengers) })}</span>
             )}
@@ -395,7 +376,7 @@ export default function RouteAnalysisPanel({
             <CsvButton
               result={routeData}
               toCsv={routeStopsCsv}
-              fileName={csvFileName("route", routeData.노선명, "stops", routeData.기준일자)}
+              fileName={csvFileName("route", routeData.노선명, "stops", routeData.기준일자, basisFileTag(basis))}
             />
             <div className="table-wrap">
               <table className="data-table">

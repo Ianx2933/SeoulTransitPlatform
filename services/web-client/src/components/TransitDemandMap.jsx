@@ -911,6 +911,7 @@ export default function TransitDemandMap({
         state={road.exploreLoad.state}
         error={road.exploreLoad.error}
         result={road.exploreLoad.result}
+        hours={road.explore?.basis?.hours || null}
         onClose={road.closeExplore}
       />
       {showAdminBoundary && lastDistrict && (

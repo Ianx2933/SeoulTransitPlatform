@@ -3,9 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { areaCode, fetchDongOd, fetchDongReach, fetchDongRouteLoad, fetchDongRoutes } from "../api/dongOdApi.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
+import { basisFileTag, basisKey, fixedScaleMax, hoursRange, isPeriodUnavailable, isPlain, TYPICAL } from "../utils/basis.js";
 import { csvFileName } from "../utils/roadCsv.js";
 import { busiestRoutes, DEFAULT_MIN_LOAD, styleSegments } from "../utils/routeLoad.js";
 import { guName } from "../utils/seoulGu.js";
+import BasisControls, { PeriodUnavailable } from "./BasisControls.jsx";
 import RoadLoadControls from "./RoadLoadControls.jsx";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
@@ -34,6 +36,9 @@ const LOAD_DIRECTION_NAMES = { od: "Boarding here", do: "Alighting here", both: 
  * ride: onRouteLoad hands { result, minLoad, routes } to the map (null clears
  * it). Ticked routes narrow the lines to those routes; none ticked shows all.
  *
+ * Months (BigQuery) apply to every tab; boarding hours only to the bus routes
+ * and road tabs, the others being whole days (BasisControls says so).
+ *
  * Each result is kept with the request it answers, so switching tabs never
  * draws one tab's data with another tab's layout (the routes tab used to
  * crash on flow data).
@@ -59,6 +64,7 @@ export default function DongOdPanel({
   const [reachDirection, setReachDirection] = useState("from");
   const [minLoad, setMinLoad] = useStoredNumber("roadMinLoad", DEFAULT_MIN_LOAD);
   const [pickedRoutes, setPickedRoutes] = useState([]);
+  const [basis, setBasis] = useState(TYPICAL);
   const [answer, setAnswer] = useState(null);
   const [state, setState] = useState("idle");
   const [error, setError] = useState("");
@@ -80,6 +86,7 @@ export default function DongOdPanel({
   const routesAllowed = level !== "city";
   const activeView = (view === "routes" || view === "road") && !routesAllowed ? "from" : view;
   const area = areaCode(code, level, groupCodes);
+  const hoursView = activeView === "routes" || activeView === "road";
   const inArea = (unitCode) => (level === "group" ? groupCodes.includes(unitCode) : unitCode === area);
   const requestKey = [
     activeView,
@@ -87,12 +94,13 @@ export default function DongOdPanel({
     dest,
     area,
     dayType,
-    activeView === "road" ? loadDirection : activeView === "reach" ? reachDirection : ""
+    activeView === "road" ? loadDirection : activeView === "reach" ? reachDirection : "",
+    basisKey(basis, { withHours: hoursView })
   ].join("|");
 
   // The request runs when its key changes; its parameters are read from a ref.
   const paramsRef = useRef(null);
-  paramsRef.current = { activeView, area, level, dest, dayType, loadDirection, reachDirection };
+  paramsRef.current = { activeView, area, level, dest, dayType, loadDirection, reachDirection, basis };
 
   useEffect(() => {
     const p = paramsRef.current;
@@ -103,12 +111,26 @@ export default function DongOdPanel({
     setError("");
     const request =
       p.activeView === "routes"
-        ? fetchDongRoutes({ code: p.area, level: p.level, dayType: p.dayType })
+        ? fetchDongRoutes({ code: p.area, level: p.level, dayType: p.dayType, basis: p.basis })
         : p.activeView === "reach"
-          ? fetchDongReach({ code: p.area, level: p.level, dayType: p.dayType, direction: p.reachDirection })
+          ? fetchDongReach({ code: p.area, level: p.level, dayType: p.dayType, direction: p.reachDirection, basis: p.basis })
         : p.activeView === "road"
-          ? fetchDongRouteLoad({ code: p.area, level: p.level, dayType: p.dayType, direction: p.loadDirection })
-          : fetchDongOd({ code: p.area, level: p.level, dest: p.dest, dayType: p.dayType, direction: p.activeView, limit: 15 });
+          ? fetchDongRouteLoad({
+              code: p.area,
+              level: p.level,
+              dayType: p.dayType,
+              direction: p.loadDirection,
+              basis: p.basis
+            })
+          : fetchDongOd({
+              code: p.area,
+              level: p.level,
+              dest: p.dest,
+              dayType: p.dayType,
+              direction: p.activeView,
+              limit: 15,
+              basis: p.basis
+            });
     request
       .then((result) => {
         if (ignore) return;
@@ -134,15 +156,16 @@ export default function DongOdPanel({
     () => pickedRoutes.filter((r) => roadRoutes.some((x) => x.route === r)),
     [pickedRoutes, roadRoutes]
   );
+  const fixedMax = roadResult ? fixedScaleMax(roadResult, basis) : null;
   const styled = useMemo(
-    () => (roadResult ? styleSegments(roadResult.segments, { minLoad, routes: activeRoutes }) : null),
-    [roadResult, minLoad, activeRoutes]
+    () => (roadResult ? styleSegments(roadResult.segments, { minLoad, routes: activeRoutes, fixedMax }) : null),
+    [roadResult, minLoad, activeRoutes, fixedMax]
   );
 
   // The map draws the road layer only while this view shows its result.
   useEffect(() => {
-    onRouteLoad?.(roadResult ? { result: roadResult, minLoad, routes: activeRoutes } : null);
-  }, [roadResult, minLoad, activeRoutes, onRouteLoad]);
+    onRouteLoad?.(roadResult ? { result: roadResult, minLoad, routes: activeRoutes, basis, fixedMax } : null);
+  }, [roadResult, minLoad, activeRoutes, basis, fixedMax, onRouteLoad]);
   useEffect(() => () => onRouteLoad?.(null), [onRouteLoad]);
 
   const areaTitle =
@@ -165,7 +188,7 @@ export default function DongOdPanel({
   return (
     <section className="side-card" aria-labelledby="dong-od-title">
       <h2 id="dong-od-title" className="section-title">{tx("District OD: {name}", { name: areaTitle })}</h2>
-      <p className="note">{tx("Rail and bus, typical day, from TOPIS district OD.")}</p>
+      <p className="note">{tx("Rail and bus from TOPIS district OD; bus routes and the road from route stop OD.")}</p>
 
       <div role="group" aria-label={tx("Area")} className="segmented segmented--fill">
         {levels.map((l) => (
@@ -199,6 +222,14 @@ export default function DongOdPanel({
           {tx("How far")}
         </button>
       </div>
+      <BasisControls
+        basis={basis}
+        onChange={setBasis}
+        dayType={dayType}
+        withHours={hoursView}
+        showFixed={activeView === "road"}
+        dayOnlyNote={tx("Whole days in this tab; boarding hours work in Bus routes and On the road.")}
+      />
       {activeView === "reach" && (
         <div role="group" aria-label={tx("Riders")} className="segmented segmented--fill">
           <button type="button" aria-pressed={reachDirection === "from"} onClick={() => setReachDirection("from")}>
@@ -226,7 +257,10 @@ export default function DongOdPanel({
       )}
 
       {state === "loading" && <p className="note">{tx("Loading…")}</p>}
-      {state === "error" && (
+      {state === "error" && isPeriodUnavailable(error) && !isPlain(basis) && (
+        <PeriodUnavailable message={error} basis={basis} onTypical={() => setBasis({ ...TYPICAL, fixed: basis.fixed })} />
+      )}
+      {state === "error" && !(isPeriodUnavailable(error) && !isPlain(basis)) && (
         <p className="field-error">
           {activeView === "road" && level === "gu"
             ? tx("A whole gu took too long or failed. Pick “This district” to see one district at a time.")
@@ -280,10 +314,16 @@ export default function DongOdPanel({
       {current && current.view === "routes" && (
         <>
           <p className="note num">
-            {tx("{count} routes, {riders} riders boarding here a day", {
-              count: current.result.routes.length,
-              riders: fmt(current.result.boardings)
-            })}
+            {basis.hours
+              ? tx("{count} routes, {riders} riders boarding here {hours}", {
+                  count: current.result.routes.length,
+                  riders: fmt(current.result.boardings),
+                  hours: hoursRange(basis.hours)
+                })
+              : tx("{count} routes, {riders} riders boarding here a day", {
+                  count: current.result.routes.length,
+                  riders: fmt(current.result.boardings)
+                })}
           </p>
           {current.result.routes.length === 0 ? (
             <p className="note">{tx("No bus riders board here.")}</p>
@@ -319,7 +359,8 @@ export default function DongOdPanel({
             routes={roadRoutes}
             picked={activeRoutes}
             onPicked={setPickedRoutes}
-            csvName={csvFileName("road", areaTitle, roadResult.direction, roadResult.dayType)}
+            csvName={csvFileName("road", areaTitle, roadResult.direction, roadResult.dayType, basisFileTag(basis))}
+            hours={basis.hours}
             extra={
               <label className="check">
                 <input type="checkbox" checked={boundariesOn} onChange={(e) => onBoundariesChange?.(e.target.checked)} />
