@@ -12,6 +12,19 @@ missing route IDs, stop codes that disagree between tables, and incomplete
 origin–destination records. The platform rebuilds OD flows from them, checks the
 result, and serves spatial demand queries from it.
 
+What a user can do on the site:
+
+- **Route analysis**: riders on board along a bus route, where a stop's riders
+  go, and the demand inside and across a chosen segment.
+- **Riders on the road**: every route's riders placed on the road they ride,
+  added up where routes share it, for a district, chosen routes, one stop or one
+  segment (select link).
+- **District OD**: where a 행정동's riders go and come from by rail and bus,
+  which bus routes they board, and how far they travel.
+- **Choose the days**: the representative day of the last twelve months
+  (default), or any run of up to twelve months, and the boarding hours, on any
+  day type. The page names the sample days behind every period figure.
+
 **Findings so far:** a congested segment that supports a short-turn bus service,
 a route segment whose demand would justify splitting it into a local service,
 three routes that carry over half their demand on one core segment, and, once
@@ -37,7 +50,8 @@ client on Firebase Hosting, calling the deployed API. It is in a closed beta wit
 external users.
 
 The backend scales to zero, so the first request after a quiet period waits for
-a cold start (2–4 s).
+a cold start: usually a few seconds, up to 28 s measured on 2026-11-20 for the
+heaviest district view. Later requests are in the ranges below.
 
 ## Highlights
 
@@ -45,14 +59,16 @@ a cold start (2–4 s).
 |---|---|
 | **Data validation** | Reconciliation checks found a loader overwrite understating monthly boarding by 3.6% and holiday-table errors in six months; fixed, rebuilt on 32 months, and now asserted by tests that surfaced two further holiday omissions ([details](#data-quality-and-validation)) |
 | **Data correction** | Four-stage OD identifier recovery plus a separate three-stage coordinate matcher with per-row method/confidence provenance. The Java OD correction was ported to pandas and matched row for row against its own SQL on three real days (1.48M rows); the port then fixes a merge defect that added 675–1,550 passengers a day and cleared 15,000–20,000 stop codes ([details](#inflated-od-days-and-the-java-correction)) |
-| **Representative OD** | Twelve months of corrected days averaged per day type in BigQuery and scored by leaving each day out: on weekdays the error is 5.6% by stop, 3.3% by route and 25.6% by OD pair. The weekday result is loaded into Cloud SQL, serves the congestion and curated OD endpoints, and is the input of the hourly allocation ([details](#representative-od)) |
-| **Bus riders on the road** | Each OD leg is placed on the stop-to-stop segments of its route's stored path (Seoul bus route API), and routes sharing a road are added up: a district's riders by road, chosen routes together, one stop, or everyone who passes one segment (select link). Checked automatically against the route chart on 8 routes; the check found three defects, now fixed, and every route agrees to within 4.4 riders a segment ([details](#bus-riders-on-the-road)) |
+| **Representative OD** | Twelve months of corrected days averaged per day type in BigQuery and scored by leaving each day out: on weekdays the error is 5.6% by stop, 3.3% by route and 25.6% by OD pair. Loaded into Cloud SQL, it serves every OD view by default ([details](#representative-od)) |
+| **Months and hours** | Any run of up to twelve months is averaged on request in BigQuery by the same rule as the representative day, and any boarding hours on any day type are split from it at request time. A period equal to the representative window gives the same figures (0.00% difference), and 0–23 h gives the day back ([details](#choosing-months-and-hours)) |
+| **Hourly split, checked** | Hourly OD assumes a stop's riders share one time profile whatever their destination. Rebuilding hourly alightings from it and comparing with counted ones gives 7.6% WAPE by route and hour against 6.9% for boardings checked the same way ([details](#what-the-hourly-od-is)) |
+| **Bus riders on the road** | Each OD leg is placed on the stop-to-stop segments of its route's stored path (Seoul bus route API), and routes sharing a road are added up: a district's riders by road, chosen routes together, one stop, or everyone who passes one segment (select link). Checked automatically against the route chart on 8 routes; the check found three defects, now fixed, and every route agrees to within 4.4 riders a segment. A district's view went from a 5.2 s median to about 0.4 s, mainly from two missing indexes ([details](#bus-riders-on-the-road)) |
 | **OD collection** | A Cloud Run Job copies TOPIS's monthly OD archives to Cloud Storage unchanged, with a SHA-256 manifest written last as the completion marker; 34 months stored. A second Job corrects every stored day (102) and the warehouse loads them into BigQuery, checked against each day's report |
 | **Spatial stack** | PostGIS with GIST, composite, and expression indexes over 1,208 administrative boundaries |
 | **Query performance** | District-demand endpoint reduced from ~9.5–12.9 s to sub-second cold calls (best observed 192 ms) with spatial, composite, and expression indexes ([details](#performance-district-demand)) |
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | 34 months of hourly boarding read from the warehouse as a labelled 3-D array (34 × 24 × 12,850) and grouped by terrain band, reconciled to the passenger against the source copy |
-| **Analytical warehouse** | BigQuery star schema built with dbt from a 1:1 staging copy: 34 months (31.7M rows), 8 models, 25 tests including per-month reconciliation to the source; serving stays in PostGIS ([details](#analytical-warehouse-bigquery-and-dbt)) |
+| **Analytical warehouse** | BigQuery models built with dbt from a 1:1 staging copy: 34 months of hourly boarding (31.7M rows), 102 corrected OD days, district OD for every day; 28 models and over 50 tests, including per-month reconciliation to the source. Serving stays in PostGIS; only the months-and-hours views read BigQuery ([details](#analytical-warehouse-bigquery-and-dbt)) |
 | **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert ([details](#weekly-cloud-pipeline)) |
 | **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass ([details](#orchestration)) |
 | **Backups** | Weekly Cloud SQL export to Cloud Storage, outside the instance, with 60-day retention. The first export was restored end to end in 22 minutes and matched the warehouse copy row for row ([details](#backups)) |
@@ -271,18 +287,35 @@ hourly rows. `analysis_table_final`, with the inflated days, was renamed
 
 ### What the hourly OD is
 
-The hourly OD tables are computed by allocation. Two separate sources meet in
-them: the OD records give origin, destination and passengers for a whole
-day with no time of travel (the representative weekday), and the hourly
-boarding counts give, for each
-stop and hour, how many people boarded over 34 months, but not where they went.
-Each daily OD pair is spread over 24 hours in proportion to the day-type hourly
-boarding profile of its route at its boarding stop. That assumes every pair
-leaving a stop shares the stop's profile; in practice a stop's morning riders and
-evening riders head to different places, and the allocation cannot show that.
-The checks above prove the allocation is complete and conserves every passenger,
-not that its hours match real trips, which would need OD records with boarding
-times. More months make the profiles steadier; they do not add OD days.
+Hourly OD is computed by allocation. Two separate sources meet in it: the OD
+records give origin, destination and passengers for a whole day with no time of
+travel, and the hourly boarding counts give, for each stop and hour, how many
+people boarded over 34 months, but not where they went. Each daily OD pair is
+spread over 24 hours in proportion to the day-type hourly boarding profile of its
+route at its boarding stop. That assumes every pair leaving a stop shares the
+stop's profile; in practice a stop's morning riders and evening riders head to
+different places. The checks above prove the allocation is complete and conserves
+every passenger. Since November 2026 the split is made at request time for any day
+type and any months ([Choosing months and hours](#choosing-months-and-hours)),
+with the rules of the batch allocation.
+
+**Alighting reproduction.** Boardings by hour match by construction, so the test is
+the other end. Every allocated rider is moved forward by the ride (stops ridden ×
+1.5 minutes) and the resulting hourly alightings are compared with the counted ones,
+over the twelve months of the representative window, 658 routes, each route (or
+route and stop) scaled to its counted total first:
+
+| WAPE | route × hour | stop × hour |
+|---|---|---|
+| Boardings (control) | 6.9% | 17.3% |
+| Alightings | 7.6% | 21.7% |
+
+The boarding control is not zero because the profiles are solved over 34 months
+and per day type while the counts mix all days of one year. Over that floor the
+destination-independent split adds about 0.7 points by route and 4.4 by stop. The
+routes with the largest errors are off by as much on the boarding control, so their
+profiles, not the split, are what to fix first. Method, ride-time variants and
+reading: [`docs/analysis/alight_reproduction.md`](docs/analysis/alight_reproduction.md).
 
 ## Bus riders on the road
 
@@ -296,13 +329,17 @@ routes and keep each route's share.
 
 | View | Endpoint | Median response |
 |---|---|---|
-| A district's riders (boarding, alighting or both, a trip inside counted once) | `GET /api/dong-od/{code}/route-load` | 5.19 s |
+| A district's riders (boarding, alighting or both, a trip inside counted once) | `GET /api/dong-od/{code}/route-load` | 0.39 s (5.19 s before 2026-11-19) |
 | Chosen routes added up (up to 20) | `GET /api/road-load/routes` | 1.00 s |
 | One stop's riders on every route | `GET /api/road-load/stop` | 0.51 s |
 | Everyone who passes one segment, with where they come from and go to (select link) | `GET /api/road-load/segment` | 0.92 s |
 
-Medians of three calls to the deployed service on 2026-11-18; a first call after
-a quiet period can take 2–4 s more for the Cloud Run cold start.
+Medians of three calls to the deployed service on 2026-11-18; the district row
+after the 2026-11-19 fix is the median of three calls on 2026-11-20 (API run
+locally against the production database). The district query was slow on the legs
+of its stops: `od_typical_route_stop` had no index on the boarding or alighting
+stop; two (`기준일자` with each) were the main fix. A first call after a quiet period
+waits for the Cloud Run cold start.
 
 **Checked against the route chart.** For one route the road view and the route
 chart count the same riders, so they must agree segment by segment.
@@ -334,6 +371,39 @@ stop tables with its position on the stored paths; 101 ARS on the paths were in
 neither table, and 12 stops with the same name more than 1 km apart are listed
 for a manual decision (Known gap 12).
 
+## Choosing months and hours
+
+By default every OD view reads the representative day from Cloud SQL. A user can
+instead pick a run of whole months (up to twelve) and boarding hours (one hour or a
+range, stepped with ◀ ▶). Those views read BigQuery:
+
+| | Months | Hours |
+|---|---|---|
+| Route OD | `fct_od_stop`: the days of the period and day type, sum per stop pair ÷ days, a pair absent on a day counted as zero (the rule of `fct_od_typical`) | Legs × the boarding stop's profile (`hourly_profile`, same rules as the batch allocation), any day type |
+| District OD | `fct_od_dong_month` ÷ `od_dong_period_days` | Whole days only; the page says so |
+| Sample | Route OD has about one day of each type a month, so the page lists the days ("3 sample days: 07-15 · 08-12 · 09-09") | — |
+
+The API takes `period=2026-03..2026-05` and `hours=7-9` on the existing endpoints.
+With hours, the road view also returns `legendMax`, the busiest segment of the
+busiest single hour of the day, so the map can keep one colour scale while the
+hours move.
+
+**Checks** (`ops/checks/quality_checks.py`, 2026-11-20):
+
+| Check | Result |
+|---|---|
+| Period = the representative window (2025-10..2026-09), 3 routes and one district's OD | identical, 0.00% |
+| 0–23 h = the whole day, Saturday, 3 routes | 0.00%, except route 143 at −1.10%, most likely riders from the virtual depot (ARS `00000`), which the split leaves out as the batch allocation does |
+| One hour, route chart against road view | identical |
+| Response, 12-month period | route 1.1 s, district OD 0.6 s, district road view 2.4 s |
+
+**Cost.** BigQuery checks the bytes-billed cap against its upper estimate, which
+ignores clustering, and on these tables bills that estimate too: 0.9–1.2 GB for a
+route over twelve months, 1.8 GB each way for a district's road view. The cap is
+3 GB a query, the API's service account has a daily quota of 0.2 TiB, and each
+answer is cached. If BigQuery fails, the views answer 503 and the page offers the
+representative day, which does not use it.
+
 ## Key capabilities
 
 - Node-centered demand lookup around a coordinate radius.
@@ -342,6 +412,8 @@ for a manual decision (Known gap 12).
   snapshots.
 - Bus and subway mode filtering.
 - Weekday/day-type and hour filtering.
+- Any run of up to twelve months and any boarding hours for the OD views, with the
+  sample days shown.
 - Route, node, and district-level demand summaries.
 - Route analysis on the representative OD: load along the route, where a stop's
   riders go, demand inside and across a chosen segment.
@@ -357,6 +429,7 @@ Everything runs in `asia-northeast3` (Seoul).
 ```text
 Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
   static Vite build                     │
+                                        ├──months and hours (read only)──> BigQuery: transit_marts
                                         ├──unix socket──> Cloud SQL: PostgreSQL 18 + PostGIS
                                         │                   ▲
                                         │                   │ unix socket
@@ -573,8 +646,8 @@ is the single best call, not a median or p95.
 Because the database path alone became sub-second, the deployed service does
 not need a shared cache: it runs Caffeine instead of Redis (see *No
 Memorystore*). Response times of the deployed service for the OD and road views
-are in [Bus riders on the road](#bus-riders-on-the-road); the slowest, a
-district's riders on the road, takes about 5 s.
+are in [Bus riders on the road](#bus-riders-on-the-road) and
+[Choosing months and hours](#choosing-months-and-hours).
 
 A precomputed node-to-district mapping table was considered and not built.
 Indexing was enough, and the table would have needed rebuilding whenever stop
@@ -596,10 +669,13 @@ The serving API reads from PostgreSQL. Analysis runs on a separate BigQuery ware
 from the same data. The warehouse code is in [transit-bigquery](https://github.com/Ianx2933/transit-bigquery);
 this section summarizes it.
 
-- **Load:** a Python script copies 13 PostgreSQL tables 1:1 into a staging dataset. It writes
+- **Load:** a Python script copies 14 PostgreSQL tables 1:1 into a staging dataset. It writes
   checksums and per-month row and passenger totals at export, then recomputes the monthly
   totals in BigQuery after loading and stops if any month differs.
-- **Transform:** dbt builds the dimensional model from staging. 8 models, 25 tests.
+- **Transform:** dbt builds the models from staging: the boarding star schema
+  below, the corrected OD days, the representative OD and its accuracy, district
+  OD, and the period and hourly-profile models the months-and-hours views read.
+  28 models, over 50 tests.
 - **Data:** 34 months (2024-01 to 2026-10), 31.7M rows of hourly boarding by route and stop,
   exported from Cloud SQL by the [weekly cloud pipeline](#weekly-cloud-pipeline).
 
@@ -711,7 +787,7 @@ PostgreSQL database to the dbt models:
 | Task | What it does | On failure |
 |---|---|---|
 | `preflight` | Connects to PostgreSQL and BigQuery and reports the months found | Stops in seconds instead of partway into an export |
-| `export` | Read-only snapshot of 13 tables with checksums and per-month totals | Retried once; the retry deletes its own partial folder |
+| `export` | Read-only snapshot of 14 tables with checksums and per-month totals | Retried once; the retry deletes its own partial folder |
 | `load` | Replaces the staging tables, then reconciles per month | Retried twice; tables already loaded are skipped, and a load job that reached BigQuery is not submitted again |
 | `dbt_build` | `dbt build --target prod` | Not retried; a failing test leaves `transit_marts` as it was |
 | `cleanup` | Deletes the export folder | Runs only after dbt succeeds, so a failed run's files stay for inspection |
@@ -830,10 +906,11 @@ and `06_fix_terrain_guard.sql`.
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; checked by the weekly workflow, which corrects and loads a new month |
 | OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; runs as a cloud job, 102 days corrected with passengers conserved; loaded into BigQuery (`fct_od_stop`) |
-| Day-type representative OD | Weekday, Saturday and Sunday/holiday built in BigQuery from 12 months, scored by leaving each day out and loaded into Cloud SQL; only the weekday is allocated to hours |
+| Day-type representative OD | Weekday, Saturday and Sunday/holiday built in BigQuery from 12 months, scored by leaving each day out and loaded into Cloud SQL; every day type can be split into hours on request |
+| Months and hours | API and page done and checked on 2026-11-20; deployed 2026-11-24 |
 | District OD by mode | TOPIS district OD averaged per day type in BigQuery, exported and loaded by the weekly workflow (`transit-od-dong-load`); served for a 행정동, 구, Seoul or a chosen group |
 | Bus route paths and riders on the road | 672 stored paths for 666 TOPIS routes, refreshed weekly; road view checked against the route chart on 8 routes |
-| Route analysis view | Live in the map client |
+| Route analysis view | Live in the map client; months and hours from 2026-11-24 |
 | Policy insights | Recomputed on the representative weekday (`pipelines/analysis/policy_insights_typical.py`); route 143 needs a peak-hour check |
 | Weekly database backup | Cloud SQL export every Sunday from 2026-11-15; the first export was restored and matched on 2026-11-10 |
 | Airflow orchestration | Local development only; the warehouse DAG is triggered by hand (the correction DAG called the removed Java endpoints and went with them) |
@@ -994,10 +1071,12 @@ Problems that are known and not fixed yet.
     position-based join as the sixth defect in Data quality and cannot be
     checked. Four ARS numbers outside Seoul map to two nodes and were also left
     as they were.
-9. Hourly OD is an allocation of the representative weekday OD by stop boarding
-    profiles (see [What the hourly OD is](#what-the-hourly-od-is)); Saturday and
-    Sunday/holiday are loaded but not allocated to hours, because their hourly
-    tables would not fit the database disk limit.
+9. Hourly OD is an allocation by stop boarding profiles (see
+    [What the hourly OD is](#what-the-hourly-od-is)). The alighting check puts its
+    added error at about 0.7 points by route and 4.4 by stop; fitting both ends
+    (per route, adjusting until boarding-stop and alighting-stop hourly totals both
+    match) is not done. The batch table `estimated_hourly_od` (weekday) is still
+    rebuilt weekly but no longer read by the API.
 10. `analysis_table_final_legacy` keeps the three inflated OD days in both
     databases for reference. Only the switched-off prediction features still
     point at it.
@@ -1007,15 +1086,24 @@ Problems that are known and not fixed yet.
     evidential basis; the prediction endpoint is switched off, and the model is
     to be rebuilt from the TOPIS daily district OD series and judged against the
     representative OD scaled to each day's total.
-12. 12 stops have the same name in the stop table and on the stored route path
-    but positions more than 1 km apart (`ops/stop_coords/stop_location_review_20261118.csv`).
-    Which one is right was not decided, so neither was changed.
+12. 12 stops had the same name in the stop table and on the stored route path but
+    positions more than 1 km apart (`ops/stop_coords/stop_location_review_20261118.csv`).
+    Decided on 2026-11-20 from the gu in the ARS number and the stop name: 3 take
+    the path's position (`stop_location_fix`, reason `manual`), 7 keep the stop
+    table's, and 2 (35278 고촌역, 21539 삼성산주공정문) are still open.
 13. District OD has no breakdown outside Seoul: TOPIS gives one code for
-    everywhere outside the city. Only the bus routes tab, built from stop OD,
-    names the district outside Seoul where riders alight.
+    everywhere outside the city. For Seoul city buses the stop OD fills part of it
+    (cities and counties, distance bands); Gyeonggi and Incheon buses are not in
+    that data, and rail has none.
 14. Distance in the district "how far" view is the straight line between two
     districts' points (`ST_PointOnSurface`), not the length of the trip; a ride
     inside one district counts as 0 km.
+15. The months-and-hours views cost their BigQuery upper estimate per new query
+    (up to 1.8 GB), because clustering does not cut what is billed on these
+    tables. A smaller table pre-summed by route and month would cut it; until then
+    the daily quota bounds it. Hours apply to the route and road views and the bus
+    routes tab, not yet to the district map colours or the outside-Seoul bus
+    figures.
 
 ## Next work
 
@@ -1028,9 +1116,10 @@ Problems that are known and not fixed yet.
    the number-based `route_type` rules against it.
 4. Check the stops in Known gap 8 against an archived stop master from the
    year of each OD date.
-5. Look for OD records that carry boarding times to test the hourly allocation
-   against, and let users pick the period the representative OD is averaged over.
+5. Fit the hourly split at both ends (Known gap 9), starting with the routes whose
+   profiles miss their own boardings, and look for OD records with boarding times
+   to test it against.
 6. Rebuild the prediction model (Known gap 11).
-7. Decide the 12 stops in Known gap 12.
+7. Decide the last 2 stops in Known gap 12.
 
 See the [Roadmap](docs/career/en/ROADMAP.md) for priorities toward a wider public beta.
