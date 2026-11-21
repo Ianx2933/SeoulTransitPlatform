@@ -2,19 +2,32 @@ package com.ian.transit.dongod.infrastructure;
 
 import com.ian.transit.dongod.application.DongArea;
 import com.ian.transit.dongod.application.RouteLoadCalculator;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Reads what the area route load needs: the route OD legs touching an area,
  * the stored stations of those routes, and their segment geometry
  * (bus_route_path_*, filled by pipelines/bus_route_path).
+ *
+ * Stations and segments are kept in memory per route for 12 hours: they
+ * change once a week (Tuesday), every district or route view reads dozens
+ * of routes, and reading their geometry on each request was most of the disk
+ * reads that capped the load test of 2026-11-20 at under one request a
+ * second.
  */
 @Repository
 @RequiredArgsConstructor
@@ -24,29 +37,16 @@ public class RouteLoadQueryRepository {
     private static final double SIMPLIFY_TOLERANCE = 0.00005;
 
     /**
-     * Stops inside the area, placed like the district demand query, as ARS
-     * keys with and without leading zeros. %s is the area filter on adm_cd.
-     * stop_location_fix (database/schema/09) replaces both tables for its ARS.
-     * Shared with DongOdQueryRepository (bus routes tab, bus reach outside Seoul).
+     * Stops inside the area as ARS keys with and without leading zeros, from
+     * stop_area_any (database/schema/10_stop_area_lookup.sql: every stop point
+     * of bus_stop_location and integrated_bus_stop_location, stop_location_fix
+     * replacing both for its ARS, placed in its 행정동 once instead of per
+     * request). %s is the area filter on adm_cd. Shared with
+     * DongOdQueryRepository (bus routes tab, bus reach outside Seoul).
      */
     static final String AREA_STOPS = """
-            WITH dong AS (
-                SELECT ST_Union(geom) AS g FROM public.admin_dong_boundary WHERE %s
-            ),
-            stops AS MATERIALIZED (
-                SELECT LPAD("정류장번호"::text, 5, '0') AS ars
-                FROM bus_stop_location b, dong
-                WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b."경도", b."위도"), 4326)))
-                  AND LPAD("정류장번호"::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
-                UNION
-                SELECT LPAD(b.ars_id::text, 5, '0')
-                FROM integrated_bus_stop_location b, dong
-                WHERE ST_Covers(dong.g, COALESCE(b.geom, ST_SetSRID(ST_MakePoint(b.lng, b.lat), 4326)))
-                  AND LPAD(b.ars_id::text, 5, '0') NOT IN (SELECT ars FROM stop_location_fix)
-                UNION
-                SELECT f.ars
-                FROM stop_location_fix f, dong
-                WHERE ST_Covers(dong.g, ST_SetSRID(ST_MakePoint(f.lng, f.lat), 4326))
+            WITH stops AS MATERIALIZED (
+                SELECT DISTINCT ars FROM stop_area_any WHERE %s
             ),
             stop_keys AS MATERIALIZED (
                 SELECT ars FROM stops WHERE ars <> '00000'
@@ -97,6 +97,15 @@ public class RouteLoadQueryRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
 
+    private final Cache<String, List<RouteLoadCalculator.Station>> stationCache = Caffeine.newBuilder()
+            .maximumSize(3_000).expireAfterWrite(Duration.ofHours(12)).build();
+    /** Weighed by map points kept (about 1.5 million points, some 70 MB of heap at most). */
+    private final Cache<String, List<SegmentRow>> segmentCache = Caffeine.newBuilder()
+            .maximumWeight(1_500_000)
+            .weigher((String variant, List<SegmentRow> rows) ->
+                    1 + rows.stream().mapToInt(r -> r.path().size()).sum())
+            .expireAfterWrite(Duration.ofHours(12)).build();
+
     public record SegmentRow(String variant, int seq, String fromArs, String toArs, List<double[]> path,
                              String fromName, String toName) {
 
@@ -135,25 +144,48 @@ public class RouteLoadQueryRepository {
         return jdbc.queryForList(sql, new MapSqlParameterSource().addValues(level.params(code)), String.class);
     }
 
+    /** Stored stations of the OD routes (all their variants), cached per OD route. */
     public List<RouteLoadCalculator.Station> stations(Collection<String> routes) {
         if (routes.isEmpty()) {
             return List.of();
         }
-        return jdbc.query(STATIONS_SQL, new MapSqlParameterSource("routes", List.copyOf(routes)),
-                (rs, i) -> new RouteLoadCalculator.Station(rs.getString("od_route_nm"), rs.getString("route_nm"),
-                        rs.getInt("seq"), rs.getString("ars")));
+        return stationCache.getAll(new LinkedHashSet<>(routes), this::loadStations).values().stream()
+                .flatMap(List::stream).toList();
     }
 
+    private Map<String, List<RouteLoadCalculator.Station>> loadStations(Set<? extends String> routes) {
+        Map<String, List<RouteLoadCalculator.Station>> out = new HashMap<>();
+        routes.forEach(r -> out.put(r, new ArrayList<>()));
+        jdbc.query(STATIONS_SQL, new MapSqlParameterSource("routes", List.copyOf(routes)), rs -> {
+            var s = new RouteLoadCalculator.Station(rs.getString("od_route_nm"), rs.getString("route_nm"),
+                    rs.getInt("seq"), rs.getString("ars"));
+            out.computeIfAbsent(s.odRoute(), k -> new ArrayList<>()).add(s);
+        });
+        return out;
+    }
+
+    /** Segments of the stored variants with simplified geometry, cached per variant. */
     public List<SegmentRow> segments(Collection<String> variants) {
         if (variants.isEmpty()) {
             return List.of();
         }
+        return segmentCache.getAll(new LinkedHashSet<>(variants), this::loadSegments).values().stream()
+                .flatMap(List::stream).toList();
+    }
+
+    private Map<String, List<SegmentRow>> loadSegments(Set<? extends String> variants) {
+        Map<String, List<SegmentRow>> out = new HashMap<>();
+        variants.forEach(v -> out.put(v, new ArrayList<>()));
         MapSqlParameterSource p = new MapSqlParameterSource()
                 .addValue("variants", List.copyOf(variants))
                 .addValue("tolerance", SIMPLIFY_TOLERANCE);
-        return jdbc.query(SEGMENTS_SQL, p, (rs, i) -> new SegmentRow(rs.getString("route_nm"), rs.getInt("seq"),
-                rs.getString("from_ars"), rs.getString("to_ars"), parseLineString(rs.getString("wkt")),
-                rs.getString("from_name"), rs.getString("to_name")));
+        jdbc.query(SEGMENTS_SQL, p, rs -> {
+            var row = new SegmentRow(rs.getString("route_nm"), rs.getInt("seq"),
+                    rs.getString("from_ars"), rs.getString("to_ars"), parseLineString(rs.getString("wkt")),
+                    rs.getString("from_name"), rs.getString("to_name"));
+            out.computeIfAbsent(row.variant(), k -> new ArrayList<>()).add(row);
+        });
+        return out;
     }
 
     /** [lat, lng] pairs of a WKT LINESTRING, rounded to 6 decimals; empty for anything else. */

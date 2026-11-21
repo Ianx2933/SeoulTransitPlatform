@@ -134,6 +134,17 @@ class RoadLoadPostgisIntegrationTest {
         saturday("01002", "23999", 1);
         saturday("31001", "01002", 8);
         saturday("01001", "01003", 4);
+
+        // Stop and district lookups, built from the rows above as production builds them.
+        Path lookups = Path.of("..", "..", "database", "schema", "10_stop_area_lookup.sql").toAbsolutePath().normalize();
+        jdbc.execute(Files.readString(lookups, StandardCharsets.UTF_8));
+    }
+
+    /** What an operator runs after changing a stop table or stop_location_fix (10_stop_area_lookup.sql). */
+    private void refreshLookups() {
+        jdbc.execute("REFRESH MATERIALIZED VIEW stop_area_any");
+        jdbc.execute("REFRESH MATERIALIZED VIEW stop_area_primary");
+        jdbc.execute("REFRESH MATERIALIZED VIEW dong_point");
     }
 
     private void saturday(String board, String alight, double riders) {
@@ -257,6 +268,7 @@ class RoadLoadPostgisIntegrationTest {
     void stopLocationFixWinsOverTheStopTables() {
         // 01004 is in B per integrated_bus_stop_location; a fix row puts it in A
         jdbc.update("INSERT INTO stop_location_fix (ars, stop_name, lat, lng, reason) VALUES ('01004', 'east', 37.005, 127.005, 'manual')");
+        refreshLookups();
         try {
             List<DongRouteFlows.Row> rows = dongRepo.routeRows("typical_weekday", DongArea.DONG, A);
             double toA = rows.stream().filter(row -> A.equals(row.destCode())).mapToDouble(DongRouteFlows.Row::passengers).sum();
@@ -265,6 +277,7 @@ class RoadLoadPostgisIntegrationTest {
             assertThat(new DongRouteLoadService(routeRepo, null).load("weekday", "dong", A, "do").passengers()).isEqualTo(14.0);
         } finally {
             jdbc.update("DELETE FROM stop_location_fix");
+            refreshLookups();
         }
     }
 
