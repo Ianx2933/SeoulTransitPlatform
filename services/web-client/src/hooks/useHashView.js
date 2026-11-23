@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export const VIEWS = ["map", "route", "method"];
+export const VIEWS = ["map", "route", "method", "download", "about", "privacy"];
 const DEFAULT_VIEW = "map";
 
 /** The view named in a location hash such as "#/route", or the default. */

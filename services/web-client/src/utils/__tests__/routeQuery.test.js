@@ -20,6 +20,9 @@ describe("viewFromHash", () => {
   test("reads the view and falls back to the map", () => {
     expect(viewFromHash("#/route")).toBe("route");
     expect(viewFromHash("#/method?x=1")).toBe("method");
+    expect(viewFromHash("#/download")).toBe("download");
+    expect(viewFromHash("#/about")).toBe("about");
+    expect(viewFromHash("#/privacy")).toBe("privacy");
     expect(viewFromHash("")).toBe("map");
     expect(viewFromHash("#/nope")).toBe("map");
   });

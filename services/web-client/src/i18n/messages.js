@@ -5,11 +5,13 @@
  * are in both languages. Korean uses 정류소 (the term on Seoul's stop signs),
  * not 정류장.
  */
+import { aboutMessages } from "./messagesAbout.js";
 import { mapMessages } from "./messagesMap.js";
 
 export const messages = {
   ko: {
     ...mapMessages.ko,
+    ...aboutMessages.ko,
     app: {
       name: "서울 대중교통 수요",
       skip: "본문으로 건너뛰기",
@@ -23,6 +25,9 @@ export const messages = {
       route: "노선 분석",
       method: "방법론",
       download: "데이터 내려받기",
+      about: "안내",
+      privacy: "개인정보처리방침",
+      report: "오류 신고",
       soon: "준비 중"
     },
     busType: {
@@ -157,6 +162,21 @@ export const messages = {
       source:
         "서울시 TOPIS 승하차 OD를 보정해 계산했습니다. TOPIS는 달마다 사흘치 OD를 공개합니다. 최근 12개월에 공개된 날 가운데 같은 요일 유형의 날을 평균했고(평일은 보통 10일), 특수일은 뺐습니다."
     },
+    download: {
+      title: "데이터 내려받기",
+      intro: "이 사이트가 쓰는 대표일 OD와 정류소 자료를 CSV(gzip)로 내려받을 수 있습니다. 매주 화요일 갱신을 거쳐 대표일 OD가 바뀌면 새 판이 올라옵니다.",
+      loading: "파일 목록을 불러오는 중…",
+      error: "파일 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      release: "기간 {start} ~ {end} · 생성 {generated}",
+      rows: "{rows}행",
+      columns: "열 {n}개",
+      howTitle: "쓰는 법",
+      howCsv: "파일은 UTF-8, 쉼표 구분, 첫 줄이 열 이름인 CSV를 gzip으로 압축한 것입니다. 엑셀에서는 압축을 푼 뒤 [데이터 > 텍스트/CSV]로 UTF-8을 골라 여세요. Python은 pandas.read_csv가 .csv.gz를 바로 읽습니다.",
+      howBigQuery: "같은 표를 BigQuery {dataset} 데이터 세트에서도 조회할 수 있습니다. 쿼리 비용은 조회하는 계정에 청구됩니다.",
+      howWeekly: "링크는 판(기간 마지막 날)마다 고정되어 있어 인용이나 재현에 그대로 쓸 수 있습니다.",
+      licenseTitle: "출처와 이용 조건",
+      licenseNote: "원천 자료는 공공누리 제1유형(출처표시)입니다. 출처를 밝히면 상업적 이용과 변경이 가능합니다. 추정값이 들어 있으니 방법론 페이지의 정확도를 함께 확인해 주세요."
+    },
     method: {
       title: "방법론",
       items: [
@@ -172,6 +192,7 @@ export const messages = {
   },
   en: {
     ...mapMessages.en,
+    ...aboutMessages.en,
     app: {
       name: "Seoul Transit Demand",
       skip: "Skip to content",
@@ -185,6 +206,9 @@ export const messages = {
       route: "Route analysis",
       method: "Methodology",
       download: "Download data",
+      about: "About",
+      privacy: "Privacy",
+      report: "Report a problem",
       soon: "Coming soon"
     },
     busType: {
@@ -318,6 +342,21 @@ export const messages = {
       },
       source:
         "Calculated from corrected Seoul TOPIS boarding and alighting OD. TOPIS publishes three days of OD a month; each value is the mean over the published days of this type in the last twelve months (usually 10 for weekdays), special days left out."
+    },
+    download: {
+      title: "Download data",
+      intro: "The representative-day OD and stop tables this site uses, as gzip CSV. A new release appears when the Tuesday refresh changes the representative-day OD.",
+      loading: "Loading the file list…",
+      error: "Could not load the file list. Please try again later.",
+      release: "Window {start} to {end} · generated {generated}",
+      rows: "{rows} rows",
+      columns: "{n} columns",
+      howTitle: "How to use",
+      howCsv: "Files are UTF-8, comma-separated CSV with a header row, gzip-compressed. pandas.read_csv reads .csv.gz directly; in Excel, unzip first and open with Data > From Text/CSV, choosing UTF-8.",
+      howBigQuery: "The same tables can be queried in BigQuery as the {dataset} dataset; query costs are billed to the querying account.",
+      howWeekly: "Links are fixed per release (the window's last day), so they can be cited and reproduced.",
+      licenseTitle: "Source and terms",
+      licenseNote: "Source data are KOGL Type 1 (attribution): commercial use and changes are allowed with attribution. The tables include estimates; see the accuracy notes on the Methodology page."
     },
     method: {
       title: "Methodology",

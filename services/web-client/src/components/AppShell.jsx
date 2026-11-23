@@ -2,8 +2,9 @@ import { useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { LANGUAGES } from "../i18n/translate.js";
+import { ISSUES_URL } from "../site.js";
 
-const NAV = ["map", "route", "method"];
+const NAV = ["map", "route", "download", "method", "about"];
 const LANGUAGE_NAMES = { ko: "한국어", en: "English" };
 
 /**
@@ -66,13 +67,17 @@ export default function AppShell({ view, onNavigate, children }) {
               </a>
             </li>
           ))}
-          <li>
-            <span className="nav-item nav-item--disabled">
-              {t("nav.download")}
-              <small>{t("nav.soon")}</small>
-            </span>
-          </li>
         </ul>
+
+        <p className="sidebar-links">
+          <a href="#/privacy" aria-current={view === "privacy" ? "page" : undefined} onClick={(e) => { e.preventDefault(); go("privacy"); }}>
+            {t("nav.privacy")}
+          </a>
+          {" · "}
+          <a href={ISSUES_URL} target="_blank" rel="noopener noreferrer">
+            {t("nav.report")}
+          </a>
+        </p>
 
         <div className="lang-switch">
           <span id="lang-label">{t("app.language")}</span>

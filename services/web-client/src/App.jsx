@@ -3,6 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import AppShell from "./components/AppShell.jsx";
 import DataCoverageNotice from "./components/DataCoverageNotice.jsx";
 import DemandControlPanel from "./components/DemandControlPanel.jsx";
+import AboutView from "./components/AboutView.jsx";
+import DownloadView from "./components/DownloadView.jsx";
+import PrivacyView from "./components/PrivacyView.jsx";
 import MethodologyPanel from "./components/MethodologyPanel.jsx";
 import RouteAnalysisView from "./components/RouteAnalysisView.jsx";
 import TransitDemandMap from "./components/TransitDemandMap.jsx";
@@ -238,6 +241,9 @@ export default function App() {
         </div>
       )}
       {view === "route" && <RouteAnalysisView busLines={busLines} />}
+      {view === "download" && <DownloadView />}
+      {view === "about" && <AboutView />}
+      {view === "privacy" && <PrivacyView />}
       {view === "method" && (
         <div className="page">
           <MethodologyPanel asPage />
