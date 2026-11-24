@@ -28,6 +28,24 @@ class PeriodTest {
     }
 
     @Test
+    void readsOneTopisDay() {
+        Period d = Period.parse("2026-09-15");
+        assertThat(d.oneDay()).isTrue();
+        assertThat(d.from()).isEqualTo(YearMonth.of(2026, 9));
+        assertThat(d.to()).isEqualTo(YearMonth.of(2026, 9));
+        assertThat(d.monthCount()).isEqualTo(1);
+        assertThat(d.firstMonthDay()).isEqualTo(LocalDate.of(2026, 9, 1));
+        assertThat(d.firstDay()).isEqualTo(LocalDate.of(2026, 9, 15));
+        assertThat(d.lastDay()).isEqualTo(LocalDate.of(2026, 9, 15));
+        assertThat(d).hasToString("2026-09-15");
+        assertThat(Period.parse("2026-09").oneDay()).isFalse();
+        assertThat(Period.parse("2026-09").firstDay()).isEqualTo(LocalDate.of(2026, 9, 1));
+        assertThatThrownBy(() -> Period.parse("2026-02-30")).hasMessageContaining("YYYY-MM-DD");
+        assertThatThrownBy(() -> new Period(YearMonth.of(2026, 8), YearMonth.of(2026, 9), LocalDate.of(2026, 9, 1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void blankMeansTheTypicalDay() {
         assertThat(Period.parse(null)).isNull();
         assertThat(Period.parse("  ")).isNull();

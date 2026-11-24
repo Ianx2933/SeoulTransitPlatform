@@ -69,3 +69,31 @@ describe("findTurnaround", () => {
     expect(findTurnaround(route)).toBeNull();
   });
 });
+
+describe("buildBarChart on the weekday scale", () => {
+  const stops = [
+    { seq: 1, onBoardAfter: 50 },
+    { seq: 2, onBoardAfter: 25 }
+  ];
+  const size = { width: 352, height: 168, padLeft: 40, padRight: 12, padTop: 28, padBottom: 40 };
+
+  test("a weekday peak above the day's own peak sets the top", () => {
+    const chart = buildBarChart(stops, { ...size, scaleMax: 100 });
+    expect(chart.maxLoad).toBe(100);
+    expect(chart.ownMax).toBe(50);
+    expect(chart.bars[0].h).toBe(50);
+    expect(chart.scaleY).toBe(28);
+  });
+
+  test("a day busier than the weekday still fits", () => {
+    const chart = buildBarChart(stops, { ...size, scaleMax: 40 });
+    expect(chart.maxLoad).toBe(50);
+    expect(chart.scaleY).toBe(Math.round((128 - (40 / 50) * 100) * 10) / 10);
+  });
+
+  test("without a scale the route's own peak is the top", () => {
+    const chart = buildBarChart(stops, size);
+    expect(chart.maxLoad).toBe(50);
+    expect(chart.scaleY).toBeNull();
+  });
+});

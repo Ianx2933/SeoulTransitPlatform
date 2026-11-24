@@ -67,20 +67,76 @@ public class PeriodOdRepository {
         p.put("day_type", QueryParameterValue.string(dayType));
         p.put("first_month", QueryParameterValue.date(period.firstMonthDay().toString()));
         p.put("last_month", QueryParameterValue.date(period.lastMonthDay().toString()));
+        p.put("first_day", QueryParameterValue.date(period.firstDay().toString()));
         p.put("last_day", QueryParameterValue.date(period.lastDay().toString()));
         return p;
     }
 
+    /**
+     * The days a period averages over, per mode, as a query: od_period_days for
+     * months (special days left out), and for one chosen day that day itself as
+     * TOPIS published it, a special day (a strike, Seollal) included.
+     */
+    static String daysSql(BigQueryProperties props, boolean oneDay) {
+        return oneDay
+                ? """
+                  SELECT DISTINCT service_date, mode
+                  FROM %s
+                  WHERE service_date = @first_day AND day_type = @day_type
+                  """.formatted(props.table("fct_od_stop"))
+                : """
+                  SELECT service_date, mode
+                  FROM %s
+                  WHERE day_type = @day_type AND month BETWEEN @first_month AND @last_month
+                    AND service_date BETWEEN @first_day AND @last_day
+                  """.formatted(props.table("od_period_days"));
+    }
+
     /** The days a period averages over, per mode (bus, ferry). */
     public List<PeriodDay> days(Period period, String dayType) {
-        String sql = """
-                SELECT service_date, mode
-                FROM %s
-                WHERE day_type = @day_type AND month BETWEEN @first_month AND @last_month
-                ORDER BY service_date, mode
-                """.formatted(props().table("od_period_days"));
+        String sql = "SELECT * FROM (" + daysSql(props(), period.oneDay()) + ") ORDER BY service_date, mode";
         return runner.query("period_days", sql, periodParams(period, dayType),
                 r -> new PeriodDay(LocalDate.parse(r.get("service_date").getStringValue()), r.get("mode").getStringValue()));
+    }
+
+    /** A TOPIS bus day of the period left out of its mean; reason major_holiday, special or other. */
+    public record ExcludedDay(LocalDate date, String reason, String name) {
+    }
+
+    /**
+     * The period's TOPIS bus days of this day type that od_period_days leaves
+     * out (Seollal and Chuseok, strikes and other special days), with why, so
+     * the page can say why a period has fewer days or none. Reads the date
+     * columns of the period's fct_od_stop partitions only.
+     */
+    public List<ExcludedDay> excludedDays(Period period, String dayType) {
+        String sql = """
+                WITH d AS (
+                  SELECT DISTINCT service_date
+                  FROM %1$s
+                  WHERE service_date BETWEEN @first_day AND @last_day
+                    AND day_type = @day_type AND mode = 'bus'
+                ),
+                p AS (
+                  SELECT service_date
+                  FROM %2$s
+                  WHERE mode = 'bus' AND month BETWEEN @first_month AND @last_month
+                )
+                SELECT d.service_date, c.is_major_holiday, c.excludes_bus, c.holiday_name
+                FROM d
+                LEFT JOIN p USING (service_date)
+                LEFT JOIN %3$s c ON c.calendar_date = d.service_date
+                WHERE p.service_date IS NULL
+                ORDER BY d.service_date
+                """.formatted(props().table("fct_od_stop"), props().table("od_period_days"),
+                props().table("dim_calendar"));
+        return runner.query("period_excluded_days", sql, periodParams(period, dayType), r -> {
+            boolean major = !r.get("is_major_holiday").isNull() && r.get("is_major_holiday").getBooleanValue();
+            boolean special = !r.get("excludes_bus").isNull() && r.get("excludes_bus").getBooleanValue();
+            String name = r.get("holiday_name").isNull() ? null : r.get("holiday_name").getStringValue();
+            return new ExcludedDay(LocalDate.parse(r.get("service_date").getStringValue()),
+                    major ? "major_holiday" : special ? "special" : "other", name);
+        });
     }
 
     /** First and last month that have route OD, e.g. [2023-10-01, 2026-09-01]. */
@@ -104,11 +160,13 @@ public class PeriodOdRepository {
     }
 
     static String legsSql(BigQueryProperties props, String filter) {
+        return legsSql(props, filter, false);
+    }
+
+    static String legsSql(BigQueryProperties props, String filter, boolean oneDay) {
         return """
                 WITH days AS (
-                  SELECT service_date, mode
-                  FROM %1$s
-                  WHERE day_type = @day_type AND month BETWEEN @first_month AND @last_month
+                  %1$s
                 ),
                 n AS (SELECT mode, COUNT(*) AS n_days FROM days GROUP BY mode),
                 od_rows AS (
@@ -119,7 +177,7 @@ public class PeriodOdRepository {
                          f.service_date, f.passengers
                   FROM %2$s f
                   JOIN days d USING (service_date, mode)
-                  WHERE f.service_date BETWEEN @first_month AND @last_day
+                  WHERE f.service_date BETWEEN @first_day AND @last_day
                     AND f.route_name IS NOT NULL
                     AND COALESCE(f.board_stop_key, f.board_name) IS NOT NULL
                     AND COALESCE(f.alight_stop_key, f.alight_name) IS NOT NULL
@@ -134,7 +192,7 @@ public class PeriodOdRepository {
                 FROM od_rows r
                 JOIN n USING (mode)
                 GROUP BY 1, 2, 3
-                """.formatted(props.table("od_period_days"), props.table("fct_od_stop"), filter);
+                """.formatted(daysSql(props, oneDay), props.table("fct_od_stop"), filter);
     }
 
     private List<PeriodLeg> legs(String what, Filter filter, Period period, String dayType, Collection<String> keys) {
@@ -143,7 +201,7 @@ public class PeriodOdRepository {
         }
         Map<String, QueryParameterValue> p = periodParams(period, dayType);
         p.put("keys", BigQueryRunner.strings(keys));
-        return runner.query(what, legsSql(props(), filter.sql), p, PeriodOdRepository::leg);
+        return runner.query(what, legsSql(props(), filter.sql, period.oneDay()), p, PeriodOdRepository::leg);
     }
 
     private static PeriodLeg leg(FieldValueList r) {

@@ -105,7 +105,12 @@ export const messages = {
         none: "이 노선의 정류소 위치를 찾지 못했습니다.",
         placed: "정류소 {all}곳 중 {placed}곳을 지도에 그렸습니다. 지도에서 정류소를 누르면 자세히 봅니다.",
         road: "노선은 서울시 버스 노선 정보의 실제 경로로 그렸습니다.",
-        straight: "실제 경로를 받지 못해 정류소를 직선으로 이었습니다."
+        straight: "실제 경로를 받지 못해 정류소를 직선으로 이었습니다.",
+        past: "이 기간의 정류소가 지금 노선과 {value}%만 겹칩니다. 노선이 바뀐 것으로 보고 이 기간 정류소 순서로 노선을 다시 그렸습니다. 색은 구간별 재차인원이고, 회색 점선은 지금 노선입니다.",
+        pastStraight: "저장된 도로 경로가 없는 구간은 정류소를 점선 직선으로 이었습니다.",
+        pastRoad: "도로 구간 보기는 지금 노선 경로에 놓으므로, 지금 노선에 없는 정류소의 승객은 빠집니다.",
+        pastSegment: "이 구간 재차 {value}명",
+        currentPath: "지금 노선 경로"
       },
       hour: {
         label: "시간대",
@@ -124,7 +129,10 @@ export const messages = {
         turnaround: "{seq}번에서 돌아옴(추정)",
         turnaroundBis: "{seq}번에서 돌아옴",
         bar: "{seq} {name}: 떠날 때 {onBoard}명, 승차 {on}명, 하차 {off}명",
-        max: "가장 많을 때 {value}명"
+        max: "가장 많을 때 {value}명",
+        weekdayScale: "평일 기준 눈금 (평일 최대 {value}명 = 100%)",
+        weekdayShare: "이 요일 최대는 평일 최대의 {value}%",
+        weekdayLine: "평일 최대"
       },
       stop: {
         heading: "{seq}번 정류소",
@@ -158,6 +166,14 @@ export const messages = {
         share: "노선 전체의 {value}",
         leavingTo: "구간에서 나간 사람이 내린 곳",
         enteringFrom: "구간으로 들어온 사람이 탄 곳"
+      },
+      flow: {
+        sortLabel: "정렬",
+        riders: "많은 순",
+        seq: "순번 순",
+        name: "이름 순",
+        showAll: "모두 보기 ({count}곳)",
+        showTop: "많은 {count}곳만"
       },
       table: {
         summary: "정류소 표 ({count}곳)",
@@ -295,7 +311,12 @@ export const messages = {
         none: "No stop locations found for this route.",
         placed: "{placed} of {all} stops drawn. Click a stop on the map to look at it.",
         road: "The route follows its road path from Seoul's bus route data.",
-        straight: "No road path was available, so stops are joined by straight lines."
+        straight: "No road path was available, so stops are joined by straight lines.",
+        past: "Only {value}% of this period's stops are on today's route, so the route is taken to have changed and is redrawn from this period's stop order. Colours show riders on board; the grey dotted line is today's route.",
+        pastStraight: "Sections with no stored road path are joined by dotted straight lines.",
+        pastRoad: "The road view places riders on today's route path, so riders at stops it no longer serves are left out.",
+        pastSegment: "{value} on board here",
+        currentPath: "Today's route path"
       },
       hour: {
         label: "Time of day",
@@ -314,7 +335,10 @@ export const messages = {
         turnaround: "Turns at stop {seq} (estimated)",
         turnaroundBis: "Turns at stop {seq}",
         bar: "{seq} {name}: {onBoard} on board leaving, {on} on, {off} off",
-        max: "Peak {value}"
+        max: "Peak {value}",
+        weekdayScale: "Weekday scale (weekday peak {value} = 100%)",
+        weekdayShare: "this day type's peak is {value}% of the weekday's",
+        weekdayLine: "Weekday peak"
       },
       stop: {
         heading: "Stop {seq}",
@@ -348,6 +372,14 @@ export const messages = {
         share: "{value} of the route",
         leavingTo: "Riders leaving the section got off at",
         enteringFrom: "Riders entering the section got on at"
+      },
+      flow: {
+        sortLabel: "Sort",
+        riders: "Most riders",
+        seq: "Stop order",
+        name: "Name",
+        showAll: "Show all ({count} stops)",
+        showTop: "Top {count} only"
       },
       table: {
         summary: "Stop table ({count} stops)",

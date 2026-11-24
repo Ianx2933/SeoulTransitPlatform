@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { fetchBusMonths } from "../api/mapDemandApi.js";
 
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle } from "../utils/busRouteType.js";
@@ -50,6 +52,8 @@ export default function DemandControlPanel({
   setSelectedBusLines,
   metric,
   setMetric,
+  month = "",
+  setMonth = () => {},
   subwayLines = [],
   busLines = [],
   subwayLineLoading,
@@ -64,6 +68,18 @@ export default function DemandControlPanel({
   onSelectSearchNode
 }) {
   const { t } = useI18n();
+  const [busMonths, setBusMonths] = useState([]);
+  useEffect(() => {
+    let ignore = false;
+    fetchBusMonths()
+      .then((months) => {
+        if (!ignore && Array.isArray(months)) setBusMonths([...months].reverse());
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, []);
   const [subwayLineSearch, setSubwayLineSearch] = useState("");
   const [busLineSearch, setBusLineSearch] = useState("");
 
@@ -121,6 +137,16 @@ export default function DemandControlPanel({
           <select value={dayAggregation} onChange={(e) => setDayAggregation(e.target.value)}>
             {DAY_AGGREGATIONS.map((v) => (
               <option key={v} value={v}>{t(`map.aggregation.${v}`)}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>{t("map.month.label")}</span>
+          <select value={month} onChange={(e) => setMonth(e.target.value)} disabled={busMonths.length === 0}>
+            <option value="">{t("map.month.typical")}</option>
+            {busMonths.map((m) => (
+              <option key={m} value={m}>{t("map.month.option", { month: m })}</option>
             ))}
           </select>
         </label>
@@ -196,6 +222,13 @@ export default function DemandControlPanel({
         setSelected={setSelectedBusLines}
         styleFor={(name) => busRouteStyle(name)}
       />
+
+      {month && (
+        <p className="note" role="note">
+          {t("map.month.note", { month })}
+          {selectedSubwayLines.length > 0 && ` ${t("map.month.noSubway")}`}
+        </p>
+      )}
 
       <div className="load-row">
         <button type="button" className="button button--primary" onClick={onLoadDemand} disabled={!canLoad}>

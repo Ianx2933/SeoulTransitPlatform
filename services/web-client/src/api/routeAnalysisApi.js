@@ -74,3 +74,10 @@ export function fetchRoutePath({ route }) {
     notFoundMessage: "No road path for this route."
   });
 }
+
+/** A line through the given stops in order ("01001,01002,..."), for a route as it ran in a past period. */
+export function fetchStopPath({ stops }) {
+  return fetchJson(`/api/curated-od/stop-path?stops=${encodeURIComponent(stops)}`, {
+    defaultMessage: "Failed to fetch the period's route line"
+  });
+}

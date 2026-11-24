@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 
-import { fetchOdRouteNames, fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints } from "../api/routeAnalysisApi.js";
+import { fetchOdRouteNames, fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints, fetchStopPath } from "../api/routeAnalysisApi.js";
+import { isPastRoute, pastPoints, pastSegments, stopMatch, stopPathQuery } from "../utils/pastRoute.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
@@ -50,7 +51,8 @@ const COLORS = {
  * in the panel.
  */
 export default function RouteAnalysisView({ busLines }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const fmtRiders = (v) => Number(v || 0).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 0 });
   const translate = useLatest(t);
   const [routeData, setRouteData] = useState(null);
   const [turnaround, setTurnaround] = useState(null);
@@ -175,6 +177,32 @@ export default function RouteAnalysisView({ busLines }) {
     return seqOfArs(routeData.stops, roadPath.turnaroundArs, findTurnaround(routeData.stops));
   }, [roadPath, routeData]);
   const hasRoad = Array.isArray(roadPath?.path) && roadPath.path.length > 1;
+
+  // A route that ran differently in this period: redraw it from the period's stop order.
+  const match = useMemo(() => (routeData && roadPath ? stopMatch(routeData.stops, roadPath) : null), [routeData, roadPath]);
+  const past = isPastRoute(match);
+  const pastQuery = past ? stopPathQuery(routeData.stops) : null;
+  const [pastPath, setPastPath] = useState(null);
+  useEffect(() => {
+    setPastPath(null);
+    if (!pastQuery) return undefined;
+    let ignore = false;
+    fetchStopPath({ stops: pastQuery })
+      .then((data) => {
+        if (!ignore) setPastPath(data);
+      })
+      .catch(() => {
+        if (!ignore) setPastPath(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [pastQuery]);
+  const pastLines = useMemo(
+    () => (pastPath && routeData ? pastSegments(routeData.stops, pastPath) : []),
+    [pastPath, routeData]
+  );
+  const showPast = past && pastLines.length > 0;
   const roadColor = routeName ? busRouteStyle(routeName).bg : COLORS.up;
 
   // District OD, loaded only while the district view is on.
@@ -229,8 +257,8 @@ export default function RouteAnalysisView({ busLines }) {
   const variantPaths = (roadPath?.variants || []).filter((v) => Array.isArray(v.path) && v.path.length > 1);
   // Demand-layer positions first; the stored route path fills the rest (piers, new stops).
   const placed = useMemo(
-    () => placeStops(routeData?.stops || [], [...points, ...pathStopPoints(roadPath)]),
-    [routeData, points, roadPath]
+    () => placeStops(routeData?.stops || [], [...points, ...pastPoints(pastPath), ...pathStopPoints(roadPath)]),
+    [routeData, points, roadPath, pastPath]
   );
   const effectiveTurnaround = turnaroundFromBis ?? turnaround;
   const lines = useMemo(() => splitAtTurnaround(placed, effectiveTurnaround), [placed, effectiveTurnaround]);
@@ -240,9 +268,10 @@ export default function RouteAnalysisView({ busLines }) {
     [placed, segment]
   );
   const bounds = useMemo(() => {
+    if (showPast) return boundsOf(pastLines.flatMap((s) => s.path.map(([lat, lng]) => ({ lat, lng }))));
     if (hasRoad) return boundsOf(roadPath.path.map(([lat, lng]) => ({ lat, lng })));
     return boundsOf(placed);
-  }, [placed, hasRoad, roadPath]);
+  }, [placed, hasRoad, roadPath, showPast, pastLines]);
   const selected = placed.find((p) => p.seq === stopSeq) || null;
 
   let note = t("route.map.empty");
@@ -253,7 +282,11 @@ export default function RouteAnalysisView({ busLines }) {
       placed.length === 0
         ? t("route.map.none")
         : t("route.map.placed", { placed: placed.length, all: routeData.stops.length });
-    if (roadPath) note += " " + (hasRoad ? t("route.map.road") : t("route.map.straight"));
+    if (showPast) {
+      note += " " + t("route.map.past", { value: Math.round(match.ratio * 100) });
+      if (pastLines.some((s) => s.straight)) note += " " + t("route.map.pastStraight");
+      if (roadOn) note += " " + t("route.map.pastRoad");
+    } else if (roadPath) note += " " + (hasRoad ? t("route.map.road") : t("route.map.straight"));
   }
 
   return (
@@ -310,20 +343,38 @@ export default function RouteAnalysisView({ busLines }) {
           {segmentPath.length > 1 && (
             <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
-          {!roadOn && hasRoad && variantPaths.length === 0 && (
+          {/* The period's route, redrawn from its stops; the current path faint underneath. */}
+          {!roadOn && showPast && hasRoad && (
+            <Polyline positions={roadPath.path} pathOptions={{ color: "#8a929c", weight: 3, opacity: 0.55, dashArray: "2 8" }}>
+              <Tooltip sticky>{t("route.map.currentPath")}</Tooltip>
+            </Polyline>
+          )}
+          {!roadOn &&
+            showPast &&
+            pastLines.map((s) => (
+              <Polyline
+                key={s.key}
+                positions={s.path}
+                pathOptions={{ color: s.color, weight: Math.max(ROUTE_WEIGHT - 2, s.weight), opacity: 0.95, dashArray: s.straight ? "8 8" : null }}
+              >
+                <Tooltip sticky>{t("route.map.pastSegment", { value: fmtRiders(s.load) })}</Tooltip>
+              </Polyline>
+            ))}
+          {!roadOn && !showPast && hasRoad && variantPaths.length === 0 && (
             <Polyline positions={roadPath.path} pathOptions={{ color: roadColor, weight: ROUTE_WEIGHT, opacity: 0.9 }} />
           )}
           {/* A route stored as several runs (한강버스01, 8762 출근/퇴근): draw each. */}
           {!roadOn &&
+            !showPast &&
             variantPaths.map((v) => (
               <Polyline key={v.name} positions={v.path} pathOptions={{ color: roadColor, weight: ROUTE_WEIGHT, opacity: 0.9 }}>
                 <Tooltip sticky>{v.name}</Tooltip>
               </Polyline>
             ))}
-          {!roadOn && !hasRoad && lines.up.length > 1 && (
+          {!roadOn && !showPast && !hasRoad && lines.up.length > 1 && (
             <Polyline positions={lines.up} pathOptions={{ color: COLORS.up, weight: ROUTE_WEIGHT, opacity: 0.9 }} />
           )}
-          {!roadOn && !hasRoad && lines.down.length > 1 && (
+          {!roadOn && !showPast && !hasRoad && lines.down.length > 1 && (
             <Polyline positions={lines.down} pathOptions={{ color: COLORS.down, weight: ROUTE_WEIGHT, opacity: 0.95 }} />
           )}
           {roadOn && roadStyled && (

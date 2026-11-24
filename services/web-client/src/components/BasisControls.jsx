@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fetchPeriodDays, fetchPeriodRange } from "../api/periodApi.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
@@ -12,6 +12,7 @@ import {
   monthsList,
   setHoursEnd,
   shiftHours,
+  shiftPeriod,
   TYPICAL
 } from "../utils/basis.js";
 
@@ -54,22 +55,62 @@ export default function BasisControls({ basis, onChange, dayType, withHours = tr
   const { range, error: rangeError } = usePeriodRange();
   const available = Boolean(range);
   const months = available ? monthsList(range.first, range.last) : [];
-  const [draft, setDraft] = useState(basis.period || null);
-  useEffect(() => setDraft(basis.period || null), [basis.period]);
+  // typical | months | day. Months are applied with a button (each new period is
+  // a BigQuery query); a day is applied when it is picked from that month's
+  // TOPIS days of this day type.
+  const [mode, setMode] = useState(basis.period?.day ? "day" : basis.period ? "months" : "typical");
+  const [draft, setDraft] = useState(basis.period && !basis.period.day ? basis.period : null);
+  const [dayMonth, setDayMonth] = useState(basis.period?.day ? basis.period.from : null);
+  useEffect(() => {
+    if (basis.period?.day) {
+      setMode("day");
+      setDayMonth(basis.period.from);
+    } else if (basis.period) {
+      setMode("months");
+      setDraft(basis.period);
+    }
+  }, [basis.period]);
 
   // Without BigQuery, fall back to the plain typical day.
   useEffect(() => {
     if (rangeError && !isPlain(basis)) onChange({ ...TYPICAL, fixed: basis.fixed });
   }, [rangeError, basis, onChange]);
 
-  const periodMode = Boolean(draft);
-  const choosePeriod = () => setDraft(basis.period || defaultPeriod(range));
+  // A day belongs to one day type: a new day type drops the day and keeps the month open.
+  const lastDayType = useRef(dayType);
+  useEffect(() => {
+    if (lastDayType.current !== dayType) {
+      lastDayType.current = dayType;
+      if (basis.period?.day) onChange({ ...basis, period: null });
+    }
+  }, [dayType, basis, onChange]);
+
+  const periodMode = mode === "months" && Boolean(draft);
+  const choosePeriod = () => {
+    setMode("months");
+    const next = basis.period && !basis.period.day ? basis.period : defaultPeriod(range);
+    setDraft(next);
+    if (basis.period?.day) onChange({ ...basis, period: null });
+  };
+  const chooseDay = () => {
+    setMode("day");
+    setDayMonth(basis.period?.from || range?.last || null);
+    if (basis.period && !basis.period.day) onChange({ ...basis, period: null });
+  };
   const chooseTypical = () => {
+    setMode("typical");
     setDraft(null);
     if (basis.period) onChange({ ...basis, period: null });
   };
   const setDraftEnd = (end, value) => setDraft(clampPeriod({ ...draft, [end]: value }, range, end));
   const draftChanged = periodMode && (!basis.period || draft.from !== basis.period.from || draft.to !== basis.period.to);
+  const applied = basis.period && !basis.period.day ? basis.period : null;
+  const prevPeriod = shiftPeriod(applied, -1, range);
+  const nextPeriod = shiftPeriod(applied, 1, range);
+  const applyPeriod = (p) => {
+    setDraft(p);
+    onChange({ ...basis, period: p });
+  };
 
   const hours = basis.hours;
   const setHours = (next) => onChange({ ...basis, hours: next });
@@ -79,11 +120,14 @@ export default function BasisControls({ basis, onChange, dayType, withHours = tr
   return (
     <div className="basis-controls">
       <div role="group" aria-label={tx("Days averaged")} className="segmented segmented--fill">
-        <button type="button" aria-pressed={!periodMode} onClick={chooseTypical}>
+        <button type="button" aria-pressed={mode === "typical"} onClick={chooseTypical}>
           {tx("Typical day (last 12 months)")}
         </button>
-        <button type="button" aria-pressed={periodMode} disabled={!available} onClick={choosePeriod}>
+        <button type="button" aria-pressed={mode === "months"} disabled={!available} onClick={choosePeriod}>
           {tx("Choose months")}
+        </button>
+        <button type="button" aria-pressed={mode === "day"} disabled={!available} onClick={chooseDay}>
+          {tx("One day")}
         </button>
       </div>
 
@@ -112,8 +156,37 @@ export default function BasisControls({ basis, onChange, dayType, withHours = tr
             </select>
           </label>
           <button type="submit" className="chip" disabled={!draftChanged}>{tx("Apply")}</button>
+          <button
+            type="button"
+            className="chip"
+            disabled={draft.from === draft.to && applied?.from === draft.to && applied?.to === draft.to}
+            onClick={() => applyPeriod({ from: draft.to, to: draft.to })}
+          >
+            {tx("This month only")}
+          </button>
+          {applied && (
+            <span className="chip-row" role="group" aria-label={tx("Move the months")}>
+              <button type="button" className="chip" disabled={!prevPeriod} onClick={() => applyPeriod(prevPeriod)} aria-label={tx("Earlier months")}>
+                ◀
+              </button>
+              <button type="button" className="chip" disabled={!nextPeriod} onClick={() => applyPeriod(nextPeriod)} aria-label={tx("Later months")}>
+                ▶
+              </button>
+            </span>
+          )}
           <span className="note">{tx("Whole months, up to {max}.", { max: MAX_MONTHS })}</span>
         </form>
+      )}
+
+      {mode === "day" && available && dayMonth && (
+        <DayPicker
+          months={months}
+          month={dayMonth}
+          onMonth={setDayMonth}
+          dayType={dayType}
+          selected={basis.period?.day || null}
+          onPick={(day) => onChange({ ...basis, period: { from: dayMonth, to: dayMonth, day } })}
+        />
       )}
 
       {withHours ? (
@@ -175,6 +248,67 @@ export default function BasisControls({ basis, onChange, dayType, withHours = tr
 }
 
 /**
+ * One TOPIS day: a month, then one of the days TOPIS published in it for this
+ * day type (about one a month for each type). Special days left out of every
+ * mean (a strike, Seollal) can be chosen too, marked as such: one day's own
+ * figures are worth seeing.
+ */
+function DayPicker({ months, month, onMonth, dayType, selected, onPick }) {
+  const { tx } = useI18n();
+  const [days, setDays] = useState(null);
+  useEffect(() => {
+    setDays(null);
+    let ignore = false;
+    fetchPeriodDays({ period: { from: month, to: month }, dayType })
+      .then((d) => {
+        if (ignore) return;
+        const normal = (d.days || []).map((day) => ({ day: String(day), special: false }));
+        const special = (d.excluded || []).map((e) => ({ day: String(e.date), special: true }));
+        setDays([...normal, ...special].sort((a, b) => a.day.localeCompare(b.day)));
+      })
+      .catch(() => {
+        if (!ignore) setDays([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [month, dayType]);
+  return (
+    <div className="road-controls">
+      <label className="field-inline">
+        {tx("Month")}
+        <select value={month} onChange={(e) => onMonth(e.target.value)}>
+          {months.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </label>
+      {days === null ? (
+        <span className="note">{tx("Loading days…")}</span>
+      ) : days.length === 0 ? (
+        <span className="note">{tx("No TOPIS day of this type in {month}.", { month })}</span>
+      ) : (
+        <span className="chip-row" role="group" aria-label={tx("TOPIS days")}>
+          {days.map(({ day, special }) => (
+            <button
+              key={day}
+              type="button"
+              className="chip"
+              aria-pressed={selected === day}
+              onClick={() => onPick(day)}
+              title={special ? tx("Left out of every mean; shown as that day") : undefined}
+            >
+              {day.slice(5)}
+              {special && ` ${tx("(special day)")}`}
+            </button>
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
  * One sentence on what the numbers are: the typical day, or a period with
  * its sample days ("3 days: 03-11 · 04-15 · 05-13"), and the boarding hours.
  * Route OD has about one day of each day type a month, so a short period
@@ -184,8 +318,9 @@ export function BasisNote({ basis, dayType, withHours = true }) {
   const { tx } = useI18n();
   const [days, setDays] = useState(null);
   const period = basis?.period || null;
-  const from = period?.from;
-  const to = period?.to;
+  const oneDay = period?.day || null;
+  const from = oneDay ? null : period?.from;
+  const to = oneDay ? null : period?.to;
 
   useEffect(() => {
     setDays(null);
@@ -205,17 +340,27 @@ export function BasisNote({ basis, dayType, withHours = true }) {
 
   const label = from === to ? from : `${from}–${to}`;
   let text;
-  if (!period) {
+  if (oneDay) {
+    text = tx("{day}: that one day as TOPIS published it, not a mean.", { day: oneDay });
+  } else if (!period) {
     text = tx("Typical day: the mean of the days of this type in the last twelve months.");
   } else if (!days) {
     text = tx("Mean of {period}.", { period: label });
   } else {
     const list = (days.days || []).map((d) => String(d).slice(5));
     const shown = list.length > 12 ? `${list.slice(0, 12).join(" · ")} …` : list.join(" · ");
+    // TOPIS days of this type that the mean leaves out (Seollal, Chuseok, strikes), and why.
+    const reasonText = { major_holiday: tx("Seollal or Chuseok break"), special: tx("special day such as a strike") };
+    const left = (days.excluded || [])
+      .map((e) => `${String(e.date).slice(5)} ${reasonText[e.reason] || tx("special day")}`)
+      .join(" · ");
     text =
       days.nDays === 0
-        ? tx("No days of this type in {period}.", { period: label })
-        : tx("Mean of {period}, {n} sample days: {days}", { period: label, n: days.nDays ?? "-", days: shown });
+        ? left
+          ? tx("No days of this type in {period}: the published ones are left out ({days}).", { period: label, days: left })
+          : tx("No days of this type in {period}.", { period: label })
+        : tx("Mean of {period}, {n} sample days: {days}", { period: label, n: days.nDays ?? "-", days: shown }) +
+          (left ? ` ${tx("Left out: {days}.", { days: left })}` : "");
   }
   const hours = withHours && basis?.hours ? basis.hours : null;
   return (

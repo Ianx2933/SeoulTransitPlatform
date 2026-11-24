@@ -36,15 +36,21 @@ export function buildLoadChart(stops, { width, height, padding = 24 }) {
  * labelEvery: label every n-th stop so labels do not overlap (the first, the
  * last and the turnaround are labelled regardless, by the caller).
  */
-export function buildBarChart(stops, { width, height, padLeft = 40, padRight = 12, padTop = 28, padBottom = 40, minLabelGap = 22 }) {
+/**
+ * scaleMax, when given, is the top of the scale instead of the route's own
+ * peak (the weekday peak, so a Saturday chart reads against the weekday); a
+ * peak above it still fits.
+ */
+export function buildBarChart(stops, { width, height, padLeft = 40, padRight = 12, padTop = 28, padBottom = 40, minLabelGap = 22, scaleMax = null }) {
   const count = Array.isArray(stops) ? stops.length : 0;
   const innerWidth = Math.max(width - padLeft - padRight, 1);
   const innerHeight = Math.max(height - padTop - padBottom, 1);
   const baseY = padTop + innerHeight;
   if (count === 0) {
-    return { bars: [], maxLoad: 0, baseY, labelEvery: 1, slot: 0 };
+    return { bars: [], maxLoad: 0, ownMax: 0, baseY, labelEvery: 1, slot: 0, scaleY: null };
   }
-  const maxLoad = Math.max(...stops.map((s) => s.onBoardAfter || 0), 1);
+  const ownMax = Math.max(...stops.map((s) => s.onBoardAfter || 0), 1);
+  const maxLoad = scaleMax > 0 ? Math.max(scaleMax, ownMax) : ownMax;
   const slot = innerWidth / count;
   const barWidth = Math.max(slot * 0.75, 1);
   const bars = stops.map((stop, index) => {
@@ -60,7 +66,8 @@ export function buildBarChart(stops, { width, height, padLeft = 40, padRight = 1
     };
   });
   const labelEvery = Math.max(1, Math.ceil(minLabelGap / slot));
-  return { bars, maxLoad, baseY: round(baseY), labelEvery, slot };
+  const scaleY = scaleMax > 0 ? round(baseY - (scaleMax / maxLoad) * innerHeight) : null;
+  return { bars, maxLoad, ownMax, baseY: round(baseY), labelEvery, slot, scaleY };
 }
 
 /**

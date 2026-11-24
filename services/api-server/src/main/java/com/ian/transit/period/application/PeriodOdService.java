@@ -43,6 +43,8 @@ public class PeriodOdService {
             .maximumSize(300).expireAfterWrite(Duration.ofHours(1)).build();
     private final Cache<String, Map<String, double[]>> profiles = Caffeine.newBuilder()
             .maximumSize(3000).expireAfterWrite(Duration.ofDays(1)).build();
+    private final Cache<String, List<PeriodOdRepository.ExcludedDay>> excluded = Caffeine.newBuilder()
+            .maximumSize(300).expireAfterWrite(Duration.ofHours(1)).build();
     private final Cache<String, Object> single = Caffeine.newBuilder()
             .maximumSize(10).expireAfterWrite(Duration.ofDays(1)).build();
 
@@ -71,6 +73,12 @@ public class PeriodOdService {
     public List<PeriodDay> days(Period period, String dayType) {
         requireInRange(period);
         return days.get(period + "|" + dayType, k -> repository.days(period, dayType));
+    }
+
+    /** TOPIS bus days of the period and day type left out of its mean, with the reason. */
+    public List<PeriodOdRepository.ExcludedDay> excludedBusDays(Period period, String dayType) {
+        requireInRange(period);
+        return excluded.get(period + "|" + dayType, k -> repository.excludedDays(period, dayType));
     }
 
     /** Bus days of the period (the ferry runs on a subset), for "weekday sample: 3 days". */

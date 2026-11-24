@@ -28,7 +28,7 @@ public class DongOdQueryRepository {
     /**
      * Riders boarding at bus stops inside the district, by route and the
      * district of the alighting stop. Both ends come from the stop lookups of
-     * database/schema/10_stop_area_lookup.sql: area stops from stop_area_any,
+     * database/schema/11_stop_area_lookup.sql: area stops from stop_area_any,
      * the alighting stop's district from stop_area_primary (stop_location_fix,
      * then bus_stop_location, then integrated_bus_stop_location, so stops only
      * the integrated table knows have a district too: 452, 2026-11-17). ARS

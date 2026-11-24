@@ -123,3 +123,20 @@ describe("fixed scale", () => {
     expect(isPeriodUnavailable("")).toBe(false);
   });
 });
+
+describe("one TOPIS day and moving months", () => {
+  test("a day goes to the API as YYYY-MM-DD", async () => {
+    const { periodParam, basisKey } = await import("../basis.js");
+    const day = { from: "2026-09", to: "2026-09", day: "2026-09-15" };
+    expect(periodParam(day)).toBe("2026-09-15");
+    expect(basisKey({ period: day, hours: null })).toBe("p2026-09-15");
+  });
+
+  test("months move by their own length inside the data", async () => {
+    const { shiftPeriod } = await import("../basis.js");
+    const range = { first: "2024-01", last: "2026-09" };
+    expect(shiftPeriod({ from: "2026-03", to: "2026-05" }, -1, range)).toEqual({ from: "2025-12", to: "2026-02" });
+    expect(shiftPeriod({ from: "2026-09", to: "2026-09" }, 1, range)).toBeNull();
+    expect(shiftPeriod({ from: "2026-09", to: "2026-09", day: "2026-09-15" }, -1, range)).toBeNull();
+  });
+});

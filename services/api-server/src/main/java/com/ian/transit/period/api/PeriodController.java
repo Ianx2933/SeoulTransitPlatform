@@ -3,6 +3,7 @@ package com.ian.transit.period.api;
 import com.ian.transit.period.OdBasis;
 import com.ian.transit.period.Period;
 import com.ian.transit.period.application.PeriodOdService;
+import com.ian.transit.period.infrastructure.PeriodOdRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,7 +30,9 @@ public class PeriodController {
     public record RangeResponse(YearMonth first, YearMonth last, int maxMonths) {
     }
 
-    public record DaysResponse(String dayType, String period, int nDays, List<LocalDate> days) {
+    /** excluded: the period's TOPIS days of this type left out of the mean (Seollal, Chuseok, strikes). */
+    public record DaysResponse(String dayType, String period, int nDays, List<LocalDate> days,
+                               List<PeriodOdRepository.ExcludedDay> excluded) {
     }
 
     private final PeriodOdService service;
@@ -52,6 +55,7 @@ public class PeriodController {
     ) {
         OdBasis basis = OdBasis.of(date, period, null, null);
         List<LocalDate> days = service.busDays(basis.period(), basis.dayType());
-        return ResponseEntity.ok(new DaysResponse(basis.dayType(), basis.period().toString(), days.size(), days));
+        return ResponseEntity.ok(new DaysResponse(basis.dayType(), basis.period().toString(), days.size(), days,
+                service.excludedBusDays(basis.period(), basis.dayType())));
     }
 }

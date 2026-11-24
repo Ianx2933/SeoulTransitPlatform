@@ -61,7 +61,19 @@ public class PeriodDongRepository {
 
     public List<Pair> pairs(Period period, String dayType, DongArea level, String code, End end) {
         BigQueryProperties props = runner.props();
-        String sql = """
+        // One TOPIS day: that day's district OD as published (fct_od_dong_daily,
+        // one partition), not the special-day rules of a period mean.
+        String daySql = """
+                SELECT m.origin_cd, ANY_VALUE(m.origin_name) AS origin_name,
+                       m.dest_cd, ANY_VALUE(m.dest_name) AS dest_name,
+                       SUM(m.subway_rides) AS subway,
+                       SUM(m.bus_rides) AS bus
+                FROM %1$s m
+                WHERE m.service_date = @day
+                  AND %2$s
+                GROUP BY m.origin_cd, m.dest_cd
+                """.formatted(props.table("fct_od_dong_daily"), where(level, end));
+        String sql = period.oneDay() ? daySql : """
                 WITH n AS (
                   SELECT COUNTIF(mode = 'subway') AS ns, COUNTIF(mode = 'bus') AS nb
                   FROM %1$s
@@ -82,6 +94,10 @@ public class PeriodDongRepository {
         p.put("day_type", QueryParameterValue.string(dayType));
         p.put("first_month", QueryParameterValue.date(period.firstMonthDay().toString()));
         p.put("last_month", QueryParameterValue.date(period.lastMonthDay().toString()));
+        if (period.oneDay()) {
+            p.clear();
+            p.put("day", QueryParameterValue.date(period.day().toString()));
+        }
         if (end != End.ANY) {
             if (level == DongArea.GROUP) {
                 p.put("codes", BigQueryRunner.strings(DongArea.groupCodes(code)));

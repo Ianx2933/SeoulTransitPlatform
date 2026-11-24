@@ -411,7 +411,8 @@ export default function TransitDemandMap({
           selectedBusLines: filters.selectedBusLines,
           dayTypes: filters.dayTypes,
           dayAggregation: filters.dayAggregation,
-          hours: filters.hours
+          hours: filters.hours,
+          month: filters.month || null
         });
         // Selected districts are intentionally preserved across Load demand:
         // the district-demand effect below refetches with the new filter keys,

@@ -18,6 +18,13 @@ so a run stops at --max-calls and the next run continues: routes that were
 never fetched go first, then the oldest. A quota answer from the gateway ends
 the run cleanly as well. Run it daily until every route is fresh.
 
+A route whose station order changed since the last fetch, or a stored route
+the API no longer has, is not simply replaced: the old rows are copied to the
+bus_route_path_version tables first, so a past period can still be drawn on
+the road it ran then. A fetch that fails (API error) leaves the stored path
+as it was instead of replacing it with an error row (a route never stored
+still gets its error row).
+
     python -m pipelines.bus_route_path.load_bus_route_path --max-calls 900
     python -m pipelines.bus_route_path.load_bus_route_path --only-route 302 --dry-run
 
@@ -250,6 +257,15 @@ class RouteResult:
     def turnaround_seq(self) -> int | None:
         return next((s.seq for s in self.stations if s.trans_yn), None)
 
+    @property
+    def path_sig(self) -> str | None:
+        return station_sig([(s.ars, s.station_id) for s in self.stations]) if self.stations else None
+
+
+def station_sig(stations: list[tuple[str | None, str | None]]) -> str:
+    """Station order as text, ARS or "id:<station id>" joined by ">" (same as STORED_SQL)."""
+    return ">".join(ars if ars else f"id:{sid or ''}" for ars, sid in stations)
+
 
 def _float(value: str | None) -> float | None:
     try:
@@ -372,21 +388,93 @@ def plan_routes(engine, stale_days: int) -> list[str]:
         return [row[0] for row in conn.execute(text(PLAN_SQL), {"stale_days": stale_days})]
 
 
-def save_routes(engine, od_route_nm: str, results: list[RouteResult], attempts: int = 3) -> None:
+# Stored ok rows of one TOPIS route with their station order, computed from the
+# stations (path_sig is empty for rows stored before it existed).
+STORED_SQL = """
+    SELECT r.route_nm, r.path_since,
+           (SELECT string_agg(COALESCE(s.ars, 'id:' || COALESCE(s.station_id, '')), '>' ORDER BY s.seq)
+              FROM bus_route_path_station s WHERE s.route_nm = r.route_nm) AS sig
+    FROM bus_route_path_route r
+    WHERE (r.od_route_nm = :n OR r.route_nm = :n) AND r.status = 'ok'
+"""
+
+ARCHIVE_SQL = """
+    WITH v AS (
+        INSERT INTO bus_route_path_version (route_nm, od_route_nm, route_id, start_name, end_name,
+            n_stations, turnaround_seq, path_sig, valid_from, valid_to, reason)
+        SELECT route_nm, od_route_nm, route_id, start_name, end_name, n_stations, turnaround_seq,
+               :sig, COALESCE(path_since, fetched_at), now(), :reason
+        FROM bus_route_path_route WHERE route_nm = :route_nm
+        RETURNING version_id
+    ), st AS (
+        INSERT INTO bus_route_path_version_station (version_id, seq, ars, station_id, station_nm, lng, lat, trans_yn)
+        SELECT v.version_id, s.seq, s.ars, s.station_id, s.station_nm, s.lng, s.lat, s.trans_yn
+        FROM v, bus_route_path_station s WHERE s.route_nm = :route_nm
+    )
+    INSERT INTO bus_route_path_version_segment (version_id, seq, from_ars, to_ars, length_m, geom)
+    SELECT v.version_id, g.seq, g.from_ars, g.to_ars, g.length_m, g.geom
+    FROM v, bus_route_path_segment g WHERE g.route_nm = :route_nm
+"""
+
+
+@dataclass
+class SavePlan:
+    keep_stored: bool                       # every fetch failed: leave the stored rows alone
+    archive: list[tuple[str, str]]          # (stored route_nm, reason changed | gone)
+    since: dict[str, object]                # new route_nm -> path_since to carry over
+
+
+def plan_save(stored: dict[str, tuple[str | None, object]], results: list[RouteResult]) -> SavePlan:
     """
-    Replace every stored row of one TOPIS route in one transaction. A dropped
-    connection (proxy or server closing it during a long run) rolls the
-    transaction back, so it is simply tried again on a fresh connection.
+    What to do with the stored ok rows of one TOPIS route (pure).
+    stored: route_nm -> (station order, path_since).
+    A route kept with the same station order carries its path_since over; one
+    whose order changed, or that the fetch no longer returns, is archived. A
+    not_found answer archives everything (the route is gone); a fetch with any
+    error changes nothing, and the oldest-first plan tries the route again.
+    """
+    if stored and any(r.status == "error" for r in results):
+        return SavePlan(True, [], {})
+    new = {r.route_nm: r for r in results if r.status == "ok"}
+    archive: list[tuple[str, str]] = []
+    since: dict[str, object] = {}
+    for name, (sig, path_since) in stored.items():
+        r = new.get(name)
+        if r is None:
+            archive.append((name, "gone"))
+        elif sig and r.path_sig != sig:
+            archive.append((name, "changed"))
+        else:
+            since[name] = path_since
+    return SavePlan(False, archive, since)
+
+
+def save_routes(engine, od_route_nm: str, results: list[RouteResult], attempts: int = 3, log=print) -> None:
+    """
+    Replace every stored row of one TOPIS route in one transaction, archiving
+    rows whose station order changed first (plan_save). A dropped connection
+    (proxy or server closing it during a long run) rolls the transaction back,
+    so it is simply tried again on a fresh connection.
     """
     from sqlalchemy import text
     from sqlalchemy.exc import OperationalError
     for attempt in range(1, attempts + 1):
         try:
             with engine.begin() as conn:
+                stored = {row.route_nm: (row.sig, row.path_since)
+                          for row in conn.execute(text(STORED_SQL), {"n": od_route_nm})}
+                plan = plan_save(stored, results)
+                if plan.keep_stored:
+                    log(f"  {od_route_nm}: fetch failed, stored path kept")
+                    return
+                for name, reason in plan.archive:
+                    conn.execute(text(ARCHIVE_SQL), {"route_nm": name, "reason": reason,
+                                                     "sig": stored[name][0]})
+                    log(f"  {name}: earlier path archived ({reason})")
                 conn.execute(text("DELETE FROM bus_route_path_route WHERE od_route_nm = :n OR route_nm = :n"),
                              {"n": od_route_nm})
                 for r in results:
-                    _insert_route(conn, r)
+                    _insert_route(conn, r, plan.since.get(r.route_nm))
             return
         except OperationalError:
             if attempt == attempts:
@@ -395,18 +483,21 @@ def save_routes(engine, od_route_nm: str, results: list[RouteResult], attempts: 
             time.sleep(5 * attempt)
 
 
-def _insert_route(conn, r: RouteResult) -> None:
+def _insert_route(conn, r: RouteResult, path_since=None) -> None:
     from sqlalchemy import text
     conn.execute(text("""
         INSERT INTO bus_route_path_route (route_nm, od_route_nm, route_id, route_type, start_name,
-            end_name, n_stations, n_points, turnaround_seq, status, message, fetched_at)
+            end_name, n_stations, n_points, turnaround_seq, status, message, fetched_at,
+            path_since, path_sig)
         VALUES (:route_nm, :od_route_nm, :route_id, :route_type, :start_name,
-            :end_name, :n_stations, :n_points, :turnaround_seq, :status, :message, now())
+            :end_name, :n_stations, :n_points, :turnaround_seq, :status, :message, now(),
+            CASE WHEN :status = 'ok' THEN COALESCE(CAST(:path_since AS timestamptz), now()) END, :path_sig)
     """), {"route_nm": r.route_nm, "od_route_nm": r.od_route_nm, "route_id": r.route_id,
            "route_type": r.route_type,
            "start_name": r.start_name, "end_name": r.end_name, "n_stations": len(r.stations),
            "n_points": r.n_points, "turnaround_seq": r.turnaround_seq,
-           "status": r.status, "message": r.message})
+           "status": r.status, "message": r.message,
+           "path_since": path_since, "path_sig": r.path_sig})
     if r.stations:
         conn.execute(text("""
             INSERT INTO bus_route_path_station (route_nm, seq, ars, station_id, station_nm,

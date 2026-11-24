@@ -22,16 +22,48 @@ export async function fetchMapDemand({
   });
 }
 
+/** Months the demand map can show for buses ("2026-03"), from BigQuery. */
+let busMonthsPromise = null;
+export function fetchBusMonths() {
+  if (!busMonthsPromise) {
+    busMonthsPromise = fetchJson("/api/map/bus-months", { defaultMessage: "Bus months unavailable" }).catch((e) => {
+      busMonthsPromise = null;
+      throw e;
+    });
+  }
+  return busMonthsPromise;
+}
+
+/** Query string of one month's bus demand (BusMonthDemandController). Pure, for tests. */
+export function busMonthQuery({ month, lines, dayTypes, dayAggregation, hours }) {
+  return new URLSearchParams({
+    month,
+    dayTypes: (dayTypes || []).join(","),
+    dayAggregation: dayAggregation || "average",
+    hours: (hours || []).join(","),
+    lines: (lines || []).join(",")
+  }).toString();
+}
+
 /**
- * Calls map demand for subway and bus, then merges results.
+ * Calls map demand for subway and bus, then merges results. With a month,
+ * only buses are asked (the subway has no monthly hourly data).
  */
 export async function fetchMultiModeMapDemand({
   selectedSubwayLines,
   selectedBusLines,
   dayTypes,
   dayAggregation,
-  hours
+  hours,
+  month = null
 }) {
+  if (month) {
+    if (!Array.isArray(selectedBusLines) || selectedBusLines.length === 0) return [];
+    return fetchJson(
+      `/api/map/demand-month?${busMonthQuery({ month, lines: selectedBusLines, dayTypes, dayAggregation, hours })}`,
+      { defaultMessage: "Failed to fetch bus demand for the month" }
+    );
+  }
   const requests = [];
   if (Array.isArray(selectedSubwayLines) && selectedSubwayLines.length > 0) {
     requests.push(

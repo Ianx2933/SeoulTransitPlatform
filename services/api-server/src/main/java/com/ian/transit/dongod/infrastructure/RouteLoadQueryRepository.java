@@ -38,7 +38,7 @@ public class RouteLoadQueryRepository {
 
     /**
      * Stops inside the area as ARS keys with and without leading zeros, from
-     * stop_area_any (database/schema/10_stop_area_lookup.sql: every stop point
+     * stop_area_any (database/schema/11_stop_area_lookup.sql: every stop point
      * of bus_stop_location and integrated_bus_stop_location, stop_location_fix
      * replacing both for its ARS, placed in its 행정동 once instead of per
      * request). %s is the area filter on adm_cd. Shared with

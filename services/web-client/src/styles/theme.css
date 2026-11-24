@@ -109,6 +109,7 @@
   display: flex; flex-direction: column; gap: 16px; padding: 22px 24px; overflow-y: auto;
   background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel);
 }
+.route-panel > * { min-width: 0; }
 .route-panel__head { display: flex; align-items: center; gap: 12px; }
 .route-panel__titles { display: flex; flex-direction: column; }
 .route-panel__title { margin: 0; font-size: 20px; font-weight: 700; }
@@ -405,9 +406,19 @@
 
 /* route analysis: cards stacked on the left of the map */
 .route-cards {
-  position: absolute; left: 56px; top: 12px; z-index: 600; width: 300px; max-height: calc(100% - 96px);
-  overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+  position: absolute; left: 56px; top: 12px; z-index: 600; width: clamp(300px, 24vw, 360px); max-height: calc(100% - 96px);
+  overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px;
 }
+/* The cards are narrower than the map page's side column: let every row
+   shrink to the card instead of pushing it wider (a sideways scrollbar that
+   cut off the left edge on PC, 2026-11-24). */
+.route-cards > *, .route-cards .dong-card > * { min-width: 0; }
+.route-cards .load-legend__steps { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+.route-cards .load-legend__steps li span { white-space: nowrap; }
+.route-cards .route-picks__list { grid-template-columns: minmax(0, 1fr); }
+.route-cards .road-controls { gap: 8px 12px; }
+.route-cards .field-inline { flex-wrap: wrap; max-width: 100%; }
+.route-cards .field-inline__wide { width: 120px !important; }
 
 /* Folding the side panels: a small button on each panel, a tab at the edge
    while folded. Folded panels stay mounted (display: none) so their state is
@@ -435,6 +446,13 @@
 .road-explore__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .field-inline__wide { width: 130px !important; text-align: left !important; }
 .road-stop { display: grid; gap: 4px; }
+/* Laptops (Windows at 125–150 %: about 1000–1280 px wide): both panels
+   narrower so they do not cover each other and the map in between. */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .route-panel { width: 360px; padding: 18px 18px; }
+  .side-fold--right { right: 384px; }
+  .route-cards { width: 290px; }
+}
 @media (max-width: 900px) {
   .route-cards { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
   .side-fold, .side-tab { display: none; }

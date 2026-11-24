@@ -13,6 +13,7 @@ import { basisFileTag, basisKey, isPeriodUnavailable, isPlain, periodParam, TYPI
 import BasisControls, { PeriodUnavailable } from "./BasisControls.jsx";
 import CsvButton from "./CsvButton.jsx";
 import useLatest from "../hooks/useLatest.js";
+import { sortFlows } from "../utils/flowSort.js";
 
 const DAY_TYPES = ["weekday", "saturday", "sunday_holiday"];
 const CHART = { width: 440, height: 200 };
@@ -83,7 +84,33 @@ export default function RouteAnalysisPanel({
     };
   };
 
-  const chart = useMemo(() => buildBarChart(routeData?.stops || [], CHART), [routeData]);
+  // Saturday and Sunday read against the weekday: the chart's scale is the
+  // route's weekday peak (same months or typical day, same hours; a single day
+  // is compared with the typical weekday).
+  const [weekdayMax, setWeekdayMax] = useState(null);
+  const [weekdayScale, setWeekdayScale] = useState(true);
+  const routeName = routeData?.노선명 || null;
+  useEffect(() => {
+    setWeekdayMax(null);
+    if (!routeName || dayType === "weekday") return undefined;
+    let ignore = false;
+    const reference = basis.period?.day ? { ...basis, period: null } : basis;
+    fetchRouteStops({ route: routeName, dayType: "weekday", basis: reference, messages: { defaultMessage: "weekday" } })
+      .then((d) => {
+        if (!ignore) setWeekdayMax(Math.max(0, ...(d.stops || []).map((s) => s.onBoardAfter || 0)) || null);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+    // basisId stands for basis.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeName, dayType, basisId]);
+  const scaleMax = weekdayScale && dayType !== "weekday" ? weekdayMax : null;
+  const chart = useMemo(
+    () => buildBarChart(routeData?.stops || [], { ...CHART, scaleMax }),
+    [routeData, scaleMax]
+  );
   const estimatedTurnaround = useMemo(() => findTurnaround(routeData?.stops), [routeData]);
   // The city's stop list marks the turnaround (transYn); the estimate is the fallback.
   const turnaround = turnaroundFromBis ?? estimatedTurnaround;
@@ -116,7 +143,16 @@ export default function RouteAnalysisPanel({
 
   const loadRoute = (name, keepStop) =>
     run(async () => {
-      const data = await fetchRouteStops({ route: name, dayType, basis, messages: messagesFor(name) });
+      let data;
+      try {
+        data = await fetchRouteStops({ route: name, dayType, basis, messages: messagesFor(name) });
+      } catch (e) {
+        // Figures of another day type or period must not stay under the error.
+        setRouteData(null);
+        setSegment(null);
+        setStopDetail(null);
+        throw e;
+      }
       setRouteData(data);
       setSegment(null);
       const seqs = data.stops.map((s) => s.seq);
@@ -277,8 +313,18 @@ export default function RouteAnalysisPanel({
             <div className="legend">
               <span><i className="swatch swatch--up" />{t("route.chart.up")}</span>
               {turnaround != null && <span><i className="swatch swatch--down" />{t("route.chart.down")}</span>}
-              <span className="note num">{t("route.chart.max", { value: fmt(chart.maxLoad) })}</span>
+              <span className="note num">{t("route.chart.max", { value: fmt(chart.ownMax) })}</span>
             </div>
+            {dayType !== "weekday" && weekdayMax > 0 && (
+              <label className="check">
+                <input type="checkbox" checked={weekdayScale} onChange={(e) => setWeekdayScale(e.target.checked)} />
+                {t("route.chart.weekdayScale", { value: fmt(weekdayMax) })}
+                <span className="note num">
+                  {" · "}
+                  {t("route.chart.weekdayShare", { value: Math.round(((chart.ownMax || 0) / weekdayMax) * 100) })}
+                </span>
+              </label>
+            )}
             <svg
               viewBox={`0 0 ${CHART.width} ${CHART.height}`}
               className="load-chart"
@@ -296,6 +342,14 @@ export default function RouteAnalysisPanel({
                 </linearGradient>
               </defs>
               <line x1={40} x2={CHART.width - 12} y1={chart.baseY} y2={chart.baseY} stroke="var(--rule)" />
+              {chart.scaleY != null && (
+                <g>
+                  <line x1={40} x2={CHART.width - 12} y1={chart.scaleY} y2={chart.scaleY} stroke="var(--muted)" strokeDasharray="2 3" />
+                  <text x={CHART.width - 12} y={chart.scaleY - 3} fontSize="10" textAnchor="end" className="axis-label">
+                    {t("route.chart.weekdayLine")}
+                  </text>
+                </g>
+              )}
               {bandBars.length > 0 && (
                 <rect
                   x={bandBars[0].x}
@@ -549,22 +603,53 @@ function SegmentView({ segment, fmt }) {
   );
 }
 
+const FLOW_TOP = 10;
+const FLOW_SORTS = ["riders", "seq", "name"];
+
+/**
+ * Where riders go or come from. The response carries every stop: the list
+ * shows the busiest ten first, and can be sorted by stop number or name and
+ * shown in full.
+ */
 function FlowList({ title, flows, fmt }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const [by, setBy] = useState("riders");
+  const [all, setAll] = useState(false);
+  const sorted = useMemo(() => sortFlows(flows, by, lang), [flows, by, lang]);
+  // The top ten by riders, then shown in the chosen order.
+  const top = useMemo(() => {
+    if (all || sorted.length <= FLOW_TOP) return sorted;
+    const keep = new Set(sortFlows(flows, "riders").slice(0, FLOW_TOP).map((f) => f.seq));
+    return sorted.filter((f) => keep.has(f.seq));
+  }, [all, sorted, flows]);
   return (
     <div>
       <h4 className="flow-title">{title}</h4>
       {flows.length === 0 ? (
         <p className="note">{t("route.stop.none")}</p>
       ) : (
-        <ol className="flow-list">
-          {flows.map((f) => (
-            <li key={f.seq}>
-              <span>{f.seq} {f.name}</span>
-              <span className="num">{fmt(f.passengers)}</span>
-            </li>
-          ))}
-        </ol>
+        <>
+          <span className="chip-row flow-sort" role="group" aria-label={t("route.flow.sortLabel")}>
+            {FLOW_SORTS.map((key) => (
+              <button key={key} type="button" className="chip" aria-pressed={by === key} onClick={() => setBy(key)}>
+                {t(`route.flow.${key}`)}
+              </button>
+            ))}
+          </span>
+          <ol className="flow-list">
+            {top.map((f) => (
+              <li key={f.seq}>
+                <span>{f.seq} {f.name}</span>
+                <span className="num">{fmt(f.passengers)}</span>
+              </li>
+            ))}
+          </ol>
+          {flows.length > FLOW_TOP && (
+            <button type="button" className="chip" onClick={() => setAll(!all)}>
+              {all ? t("route.flow.showTop", { count: FLOW_TOP }) : t("route.flow.showAll", { count: flows.length })}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

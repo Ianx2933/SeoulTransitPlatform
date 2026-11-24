@@ -3,11 +3,13 @@
  * twelve months or a period of whole months (BigQuery), and the whole day or
  * boarding hours. Pure, for tests.
  *
- *   basis = { period: null | { from: "YYYY-MM", to: "YYYY-MM" },
+ *   basis = { period: null | { from: "YYYY-MM", to: "YYYY-MM", day?: "YYYY-MM-DD" },
  *             hours:  null | { from: 0-23, to: 0-23 },   // inclusive
  *             fixed:  true | false }                      // fixed road colours while hours change
  *
- * The API takes period=YYYY-MM[..YYYY-MM] and hours=H or H-H (Period, Hours).
+ * A period with a day is one TOPIS day (from = to = its month): the day's
+ * own figures, not a mean. The API takes period=YYYY-MM[..YYYY-MM] or
+ * period=YYYY-MM-DD, and hours=H or H-H (Period, Hours).
  */
 export const TYPICAL = Object.freeze({ period: null, hours: null, fixed: true });
 
@@ -20,7 +22,18 @@ export function isPlain(basis) {
 
 export function periodParam(period) {
   if (!period) return null;
+  if (period.day) return period.day;
   return period.from === period.to ? period.from : `${period.from}..${period.to}`;
+}
+
+/** The same number of months moved by delta inside the data, or null past either end. */
+export function shiftPeriod(period, delta, range) {
+  if (!period || period.day) return null;
+  const n = monthCount(period.from, period.to);
+  const from = addMonths(period.from, delta * n);
+  const to = addMonths(period.to, delta * n);
+  if ((range?.first && from < range.first) || (range?.last && to > range.last)) return null;
+  return { from, to };
 }
 
 export function hoursParam(hours) {

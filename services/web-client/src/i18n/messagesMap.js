@@ -38,6 +38,13 @@ export const mapMessages = {
         start: "시작 {hour}:00",
         end: "끝 {hour}:00"
       },
+      month: {
+        label: "달",
+        typical: "대표값 (전체 기간, 요일별)",
+        option: "{month} (버스)",
+        note: "{month} 버스: 그 달 합계를 정류소별 요일 비율로 나눈 하루입니다. 정류소 상세·반경·행정동 분석은 대표값을 씁니다.",
+        noSubway: "지하철은 달별 시간대 자료가 없어 지도에서 빠집니다."
+      },
       metric: {
         label: "지표",
         total: "승하차 합계",
@@ -150,6 +157,13 @@ export const mapMessages = {
       hours: {
         start: "From {hour}:00",
         end: "To {hour}:00"
+      },
+      month: {
+        label: "Month",
+        typical: "Typical (all months, by day type)",
+        option: "{month} (bus)",
+        note: "{month}, buses: the month's total split into days by each stop's day-type shape. Stop detail, radius and district analysis use the typical figures.",
+        noSubway: "The subway has no monthly hourly data and is left off the map."
       },
       metric: {
         label: "Metric",

@@ -61,6 +61,6 @@ SET client_encoding = 'UTF8';
 \ir 12_performance_indexes.sql
 
 \echo '=== schema creation complete ==='
-\echo 'Expect 24 tables (23 project tables + PostGIS spatial_ref_sys) and 3 materialized views.'
+\echo 'Expect 27 tables (26 project tables + PostGIS spatial_ref_sys) and 3 materialized views.'
 \echo 'The materialized views are empty until data is loaded: after loading stops,'
 \echo 'boundaries and stop_location_fix, run the REFRESH lines in 11_stop_area_lookup.sql.'

@@ -86,7 +86,7 @@ class RoadLoadPostgisIntegrationTest {
         // The stored-path tables exactly as production creates them (Surefire runs from services/api-server).
         Path schema = Path.of("..", "..", "database", "schema", "08_bus_route_path.sql").toAbsolutePath().normalize();
         jdbc.execute(Files.readString(schema, StandardCharsets.UTF_8));
-        Path fix = Path.of("..", "..", "database", "schema", "09_stop_location_fix.sql").toAbsolutePath().normalize();
+        Path fix = Path.of("..", "..", "database", "schema", "10_stop_location_fix.sql").toAbsolutePath().normalize();
         jdbc.execute(Files.readString(fix, StandardCharsets.UTF_8));
 
         jdbc.execute("CREATE TABLE admin_dong_boundary (adm_cd VARCHAR, adm_nm VARCHAR, geom geometry(MultiPolygon, 4326))");
@@ -136,11 +136,11 @@ class RoadLoadPostgisIntegrationTest {
         saturday("01001", "01003", 4);
 
         // Stop and district lookups, built from the rows above as production builds them.
-        Path lookups = Path.of("..", "..", "database", "schema", "10_stop_area_lookup.sql").toAbsolutePath().normalize();
+        Path lookups = Path.of("..", "..", "database", "schema", "11_stop_area_lookup.sql").toAbsolutePath().normalize();
         jdbc.execute(Files.readString(lookups, StandardCharsets.UTF_8));
     }
 
-    /** What an operator runs after changing a stop table or stop_location_fix (10_stop_area_lookup.sql). */
+    /** What an operator runs after changing a stop table or stop_location_fix (11_stop_area_lookup.sql). */
     private void refreshLookups() {
         jdbc.execute("REFRESH MATERIALIZED VIEW stop_area_any");
         jdbc.execute("REFRESH MATERIALIZED VIEW stop_area_primary");

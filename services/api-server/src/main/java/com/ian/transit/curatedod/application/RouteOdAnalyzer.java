@@ -37,6 +37,7 @@ public final class RouteOdAnalyzer {
     private record Stop(int seq, String ars, String name) {
     }
 
+    /** Rows the page lists before "show all"; the response carries every stop. */
     public static final int TOP = 10;
     public static final List<Double> REACH_LEVELS = List.of(25.0, 50.0, 100.0, 200.0);
     /** At most this many reach levels in one request. */
@@ -251,7 +252,6 @@ public final class RouteOdAnalyzer {
         return bySeq.entrySet().stream()
                 .sorted(Map.Entry.<Integer, Double>comparingByValue(Comparator.reverseOrder())
                         .thenComparing(Map.Entry.comparingByKey()))
-                .limit(TOP)
                 .map(e -> {
                     Stop s = stops.get(e.getKey());
                     return new StopFlow(s.seq(), s.ars(), s.name(), e.getValue());

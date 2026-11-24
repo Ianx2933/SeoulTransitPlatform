@@ -34,6 +34,8 @@ export default function App() {
   const [startHour, setStartHour] = useState(8);
   const [endHour, setEndHour] = useState(8);
   const [metric, setMetric] = useState("total");
+  // "" = the typical figures (all months, by day type); "2026-03" = one month, buses only.
+  const [month, setMonth] = useState("");
 
   const [subwayLines, setSubwayLines] = useState([]);
   const [busLines, setBusLines] = useState([]);
@@ -125,6 +127,7 @@ export default function App() {
       dayAggregation,
       hours: buildSelectedHours(),
       metric,
+      month: month || null,
       autoApplied: false
     });
   };
@@ -152,6 +155,7 @@ export default function App() {
         dayAggregation,
         hours: buildSelectedHours(),
         metric,
+        month: month || null,
         autoApplied: true
       });
     }
@@ -212,6 +216,8 @@ export default function App() {
             setSelectedBusLines={setSelectedBusLines}
             metric={metric}
             setMetric={setMetric}
+            month={month}
+            setMonth={setMonth}
             subwayLines={subwayLines}
             busLines={busLines}
             subwayLineLoading={subwayLineLoading}
