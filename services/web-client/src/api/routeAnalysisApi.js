@@ -25,6 +25,15 @@ export function routeQuery({ dayType, basis = null, reach = null, from = null, t
   return params.toString();
 }
 
+/**
+ * Every route name the route analysis can serve, as the representative OD names
+ * it (5522A난곡, 8773출근, 한강버스01). The map's route list uses the boarding
+ * data's names (5522A), which the server also accepts.
+ */
+export function fetchOdRouteNames() {
+  return fetchJson("/api/curated-od/routes", { defaultMessage: "Failed to fetch route names" });
+}
+
 export function fetchRouteStops({ route, dayType, basis, messages }) {
   return fetchJson(`${base(route)}/stops?${routeQuery({ dayType, basis })}`, messages);
 }

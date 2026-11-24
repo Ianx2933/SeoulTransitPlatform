@@ -64,10 +64,24 @@ export default function RouteAnalysisPanel({
   const reachValue = Number(reachText);
   const reachValid = reachText.trim() !== "" && Number.isFinite(reachValue) && reachValue >= 1;
 
-  const messagesFor = (name) => ({
-    defaultMessage: t("route.failed"),
-    notFoundMessage: isPlain(basis) ? t("route.notFound", { route: name }) : t("route.notFoundBasis", { route: name })
-  });
+  // A route the OD splits in two (서대문02 → 서대문02대, 서대문02소; 8773 →
+  // 8773출근, 8773퇴근) is not guessed by the server: name the choices instead.
+  const splitInto = (name) => {
+    const n = String(name || "").trim();
+    return n ? busLines.filter((line) => line !== n && line.startsWith(n) && /^[가-힣]/.test(line.slice(n.length))) : [];
+  };
+  const messagesFor = (name) => {
+    const choices = splitInto(name);
+    return {
+      defaultMessage: t("route.failed"),
+      notFoundMessage:
+        choices.length > 1
+          ? t("route.notFoundSplit", { route: name, list: choices.join(", ") })
+          : isPlain(basis)
+            ? t("route.notFound", { route: name })
+            : t("route.notFoundBasis", { route: name })
+    };
+  };
 
   const chart = useMemo(() => buildBarChart(routeData?.stops || [], CHART), [routeData]);
   const estimatedTurnaround = useMemo(() => findTurnaround(routeData?.stops), [routeData]);

@@ -23,6 +23,10 @@ public interface CuratedOdQueryRepository extends JpaRepository<TypicalOdRecord,
 
     List<TypicalOdRecord> findBy기준일자And노선명(String 기준일자, String 노선명, Pageable pageable);
 
+    /** Every route name in the representative OD, for the route list (cached by RouteNameResolver). */
+    @Query("SELECT DISTINCT b.노선명 FROM TypicalOdRecord b ORDER BY b.노선명")
+    List<String> findDistinct노선명();
+
     /** Every OD pair of one route on one typical day, for the route analysis endpoints. */
     List<TypicalOdRecord> findAllBy기준일자And노선명(String 기준일자, String 노선명);
 

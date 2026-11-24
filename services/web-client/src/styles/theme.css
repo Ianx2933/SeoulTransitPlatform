@@ -105,7 +105,7 @@
   font-size: 12px; color: var(--muted);
 }
 .route-panel {
-  position: absolute; top: 16px; right: 16px; bottom: 16px; width: 480px; z-index: 600;
+  position: absolute; top: 16px; right: 16px; bottom: 16px; width: 420px; z-index: 600;
   display: flex; flex-direction: column; gap: 16px; padding: 22px 24px; overflow-y: auto;
   background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel);
 }
@@ -405,9 +405,31 @@
 
 /* route analysis: cards stacked on the left of the map */
 .route-cards {
-  position: absolute; left: 16px; top: 16px; z-index: 600; width: 320px; max-height: calc(100% - 96px);
+  position: absolute; left: 56px; top: 12px; z-index: 600; width: 300px; max-height: calc(100% - 96px);
   overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
 }
+
+/* Folding the side panels: a small button on each panel, a tab at the edge
+   while folded. Folded panels stay mounted (display: none) so their state is
+   kept. On narrow screens the panels stack under the map and do not fold. */
+.side-fold {
+  align-self: flex-end; padding: 4px 10px; font-size: 12px; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-control); cursor: pointer;
+}
+.side-fold:hover, .side-tab:hover { color: var(--ink, #1f2328); border-color: var(--muted); }
+.side-fold--right {
+  position: absolute; top: 16px; right: 444px; z-index: 610; width: 28px; height: 40px; padding: 0;
+  font-size: 18px; border-radius: var(--radius-control) 0 0 var(--radius-control); border-right: 0;
+}
+.side-tab {
+  position: absolute; top: 12px; z-index: 610; padding: 8px 12px; font-size: 13px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-control);
+  box-shadow: 0 1px 4px rgba(31, 35, 40, 0.12); cursor: pointer;
+}
+.side-tab--left { left: 56px; }
+.side-tab--right { right: 16px; }
+.route-view--left-closed .route-cards { display: none; }
+.route-view--right-closed .route-panel { display: none; }
 .route-cards .dong-card { position: static; width: auto; max-height: none; overflow: visible; }
 .route-cards .road-explore { margin: 0; }
 .road-explore__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -415,6 +437,9 @@
 .road-stop { display: grid; gap: 4px; }
 @media (max-width: 900px) {
   .route-cards { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
+  .side-fold, .side-tab { display: none; }
+  .route-view--left-closed .route-cards { display: flex; }
+  .route-view--right-closed .route-panel { display: flex; }
 }
 
 /* District OD "How far": one row per distance band with a bar. */

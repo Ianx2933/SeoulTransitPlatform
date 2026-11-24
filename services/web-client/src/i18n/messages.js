@@ -65,7 +65,16 @@ export const messages = {
       failed: "불러오지 못했습니다",
       enterRoute: "버스 노선 번호를 입력하세요. 예: 302, 452",
       showBoundaries: "행정동 경계 보이기",
+      panels: {
+        hide: "접기",
+        hideLeft: "왼쪽 창 접기",
+        showLeft: "도로·행정동 창",
+        hideRight: "노선 분석 창 접기",
+        showRight: "노선 분석",
+        showRightRoute: "{route} 노선 분석"
+      },
       notFound: "{route}번 노선의 이 요일 OD가 없습니다.",
+      notFoundSplit: "{route} 노선은 대표일 OD에서 {list}(으)로 나뉩니다. 이 중 하나를 고르세요.",
       notFoundHour: "{route}번 노선의 이 시간대 OD가 없습니다.",
       notFoundBasis: "{route}번 노선의 이 기간·시간대 OD가 없습니다.",
       summary: "하루 {total}명 · 정류소 {stops}곳 · 대표일 {days}일 평균",
@@ -246,7 +255,16 @@ export const messages = {
       failed: "Could not load",
       enterRoute: "Enter a bus route number, for example 302 or 452.",
       showBoundaries: "Show district boundaries",
+      panels: {
+        hide: "Hide",
+        hideLeft: "Hide the left panel",
+        showLeft: "Road and district panel",
+        hideRight: "Hide the route analysis panel",
+        showRight: "Route analysis",
+        showRightRoute: "Route {route} analysis"
+      },
       notFound: "No OD for route {route} on this day type.",
+      notFoundSplit: "The representative OD splits route {route} into {list}. Please choose one.",
       notFoundHour: "No OD for route {route} in this hour.",
       notFoundBasis: "No OD for route {route} in these months or hours.",
       summary: "{total} riders a day · {stops} stops · mean of {days} sample days",

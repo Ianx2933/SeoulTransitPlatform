@@ -48,7 +48,7 @@ export const aboutMessages = {
         },
         storage: {
           title: "3. 브라우저 저장소",
-          body: "언어 선택과 일부 화면 설정(도로 부하 최소값)을 브라우저의 localStorage에 저장합니다. 이 값은 이용자의 브라우저에만 있고 운영자에게 보내지지 않으며, 브라우저 설정에서 지울 수 있습니다."
+          body: "언어 선택과 일부 화면 설정(도로 부하 최소값, 노선 분석 창을 접었는지)을 브라우저의 localStorage에 저장합니다. 이 값은 이용자의 브라우저에만 있고 운영자에게 보내지지 않으며, 브라우저 설정에서 지울 수 있습니다."
         },
         thirdParty: {
           title: "4. 제3자 제공과 외부 서비스",
@@ -112,7 +112,7 @@ export const aboutMessages = {
         },
         storage: {
           title: "3. Browser storage",
-          body: "The language choice and a few display settings (the minimum road load) are kept in the browser's localStorage. They stay in your browser, are not sent to the operator, and can be cleared in the browser's settings."
+          body: "The language choice and a few display settings (the minimum road load, whether the route analysis panels are folded) are kept in the browser's localStorage. They stay in your browser, are not sent to the operator, and can be cleared in the browser's settings."
         },
         thirdParty: {
           title: "4. Third parties and outside services",

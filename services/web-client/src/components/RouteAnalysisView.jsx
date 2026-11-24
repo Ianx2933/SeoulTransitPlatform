@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 
-import { fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints } from "../api/routeAnalysisApi.js";
+import { fetchOdRouteNames, fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints } from "../api/routeAnalysisApi.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
@@ -73,6 +73,25 @@ export default function RouteAnalysisView({ busLines }) {
   const [dongDirection, setDongDirection] = useState("from");
 
   const routeName = routeData?.노선명 ?? null;
+
+  // Route search offers the representative OD's own names; the map's list
+  // (boarding data names) is the fallback if they cannot be loaded.
+  const [odRouteNames, setOdRouteNames] = useState(null);
+  useEffect(() => {
+    let ignore = false;
+    fetchOdRouteNames()
+      .then((names) => {
+        if (!ignore && Array.isArray(names) && names.length > 0) setOdRouteNames(names);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // Side panels fold away to give the map the screen; remembered per browser.
+  const [leftOpen, setLeftOpen] = useStoredNumber("routeLeftPanelOpen", 1);
+  const [rightOpen, setRightOpen] = useStoredNumber("routeRightPanelOpen", 1);
 
   // Demand colours: the route (plus added routes) by riders on board.
   const [roadOn, setRoadOn] = useState(false);
@@ -238,14 +257,20 @@ export default function RouteAnalysisView({ busLines }) {
   }
 
   return (
-    <div className="route-view">
+    <div
+      className={[
+        "route-view",
+        leftOpen ? "" : "route-view--left-closed",
+        rightOpen ? "" : "route-view--right-closed"
+      ].join(" ")}
+    >
       <div className="route-view__map">
         <MapContainer center={SEOUL_CENTER} zoom={12} className="route-view__leaflet" scrollWheelZoom>
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
-          <FitRoute bounds={bounds} routeName={routeName} />
+          <FitRoute bounds={bounds} routeName={routeName} rightOpen={Boolean(rightOpen)} />
 
           {boundaryOn && boundaries && (
             <Pane name="district-outlines" style={{ zIndex: 340, pointerEvents: "none" }}>
@@ -343,8 +368,22 @@ export default function RouteAnalysisView({ busLines }) {
           )}
         </MapContainer>
         <p className="map-note" role="status">{note}</p>
+        {routeName && !leftOpen && (
+          <button type="button" className="side-tab side-tab--left" onClick={() => setLeftOpen(1)}>
+            {t("route.panels.showLeft")} ›
+          </button>
+        )}
         {routeName && (
           <div className="route-cards">
+          <button
+            type="button"
+            className="side-fold side-fold--left"
+            onClick={() => setLeftOpen(0)}
+            aria-label={t("route.panels.hideLeft")}
+            title={t("route.panels.hideLeft")}
+          >
+            ‹ {t("route.panels.hide")}
+          </button>
           <RouteRoadCard
             key={routeName}
             routeName={routeName}
@@ -400,8 +439,23 @@ export default function RouteAnalysisView({ busLines }) {
           </div>
         )}
       </div>
+      {rightOpen ? (
+        <button
+          type="button"
+          className="side-fold side-fold--right"
+          onClick={() => setRightOpen(0)}
+          aria-label={t("route.panels.hideRight")}
+          title={t("route.panels.hideRight")}
+        >
+          ›
+        </button>
+      ) : (
+        <button type="button" className="side-tab side-tab--right" onClick={() => setRightOpen(1)}>
+          ‹ {routeName ? t("route.panels.showRightRoute", { route: routeName }) : t("route.panels.showRight")}
+        </button>
+      )}
       <RouteAnalysisPanel
-        busLines={busLines}
+        busLines={odRouteNames || busLines}
         stopSeq={stopSeq}
         onStopSeqChange={setStopSeq}
         onRouteData={setRouteData}
@@ -487,12 +541,13 @@ function DongCard({ on, setOn, state, data, selected, setSelected, direction, se
 }
 
 /**
- * Frames the route once per route. The right-hand panel covers part of the
- * map on wide screens, so the fit leaves room for it.
+ * Frames the route once per route. The right-hand panel, when open, covers
+ * part of the map on wide screens, so the fit leaves room for it.
  */
-function FitRoute({ bounds, routeName }) {
+function FitRoute({ bounds, routeName, rightOpen }) {
   const map = useMap();
   const latestBounds = useLatest(bounds);
+  const latestRightOpen = useLatest(rightOpen);
   const hasBounds = bounds !== null;
   useEffect(() => {
     const target = latestBounds.current;
@@ -500,10 +555,11 @@ function FitRoute({ bounds, routeName }) {
     const wide = map.getContainer().clientWidth > 900;
     map.fitBounds(target, {
       paddingTopLeft: [40, 40],
-      paddingBottomRight: [wide ? 520 : 40, 40],
+      paddingBottomRight: [wide && latestRightOpen.current ? 460 : 40, 40],
       maxZoom: 15
     });
-    // Fit when the route changes, not on every re-render of its stops.
-  }, [map, latestBounds, routeName, hasBounds]);
+    // Fit when the route changes, not on every re-render of its stops or a
+    // panel being folded (folding only uncovers more map).
+  }, [map, latestBounds, latestRightOpen, routeName, hasBounds]);
   return null;
 }
