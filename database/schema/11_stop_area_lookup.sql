@@ -1,3 +1,6 @@
+-- 11_stop_area_lookup.sql
+-- Materialized views placing stops in districts; needs 02, 04, 05 and 10.
+--
 -- Stop and district lookups for the district views (2026-11-20).
 --
 -- The district views used to place every bus stop in its 행정동 on each

@@ -1,10 +1,12 @@
--- 01_curated_od.sql
--- Curated OD table and holiday reference.
+-- 01_legacy_od_holiday.sql
+-- Legacy dated OD table (no longer served), its quarantine table, and the
+-- holiday reference.
 --
 -- IMPORTANT:
 -- analysis_table_final_legacy (named analysis_table_final until 2026-11, see
--- 10_rename_analysis_table_final.sql) is mapped by a JPA @Entity, as is
--- od_typical_route_stop (09_...), which the API now serves
+-- database/migrations/01_rename_analysis_table_final.sql) is mapped by a JPA
+-- @Entity, as is od_typical_route_stop (09_od_typical_route_stop.sql), which
+-- the API now serves
 -- (com.ian.transit.curatedod.infrastructure.CuratedOdRecord).
 -- Because application.yaml uses `ddl-auto: validate`, the API server will
 -- FAIL TO START if this table or any of its columns is missing.

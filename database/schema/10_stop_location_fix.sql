@@ -1,3 +1,6 @@
+-- 10_stop_location_fix.sql
+-- Manual bus stop positions; 11_stop_area_lookup.sql reads them.
+--
 -- Bus stop positions that override bus_stop_location and
 -- integrated_bus_stop_location for the district queries (bus routes tab, road
 -- load of an area). One row per ARS.

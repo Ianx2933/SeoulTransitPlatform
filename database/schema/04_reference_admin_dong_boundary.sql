@@ -24,13 +24,15 @@ CREATE TABLE IF NOT EXISTS public.admin_dong_boundary (
     geom       geometry(MultiPolygon, 4326)
 );
 
--- adm_cd carries no unique constraint, matching the live database. In the
--- current dataset the values happen to be unique (1,208 rows, 1,208 distinct
--- codes), but nothing enforces that. If a future boundary import introduces a
--- duplicate code, district-demand would count the same node once per matching
--- polygon. Worth re-checking after any boundary reload:
+-- adm_cd carries no unique constraint, matching the live database, and one
+-- code can have more than one row (a district in several polygons, or more
+-- than one boundary release loaded). Queries that need one row per district
+-- group by adm_cd: dong_point in 11_stop_area_lookup.sql unions a district's
+-- rows. A query that joins rows directly counts a stop once per matching row,
+-- so check after any boundary reload:
 --
---   SELECT COUNT(*), COUNT(DISTINCT adm_cd) FROM public.admin_dong_boundary;
+--   SELECT COUNT(*), COUNT(DISTINCT adm_cd), COUNT(DISTINCT base_date)
+--   FROM public.admin_dong_boundary;
 
 CREATE INDEX IF NOT EXISTS idx_admin_dong_boundary_adm_cd
 ON public.admin_dong_boundary (adm_cd);

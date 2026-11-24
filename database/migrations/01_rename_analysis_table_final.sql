@@ -1,3 +1,6 @@
+-- migrations/01_rename_analysis_table_final.sql
+-- analysis_table_final -> analysis_table_final_legacy on an existing database.
+--
 -- Retire the dated OD table (2026-11).
 --
 -- analysis_table_final held the OD days the API served, three of them inflated

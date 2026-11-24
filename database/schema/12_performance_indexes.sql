@@ -1,4 +1,4 @@
--- 07_performance_indexes.sql
+-- 12_performance_indexes.sql
 -- Phase 6.9-2 district demand performance indexes.
 --
 -- Run LAST. The index file also runs ANALYZE, and ANALYZE is only meaningful

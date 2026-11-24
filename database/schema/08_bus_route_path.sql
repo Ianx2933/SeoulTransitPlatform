@@ -1,3 +1,6 @@
+-- 08_bus_route_path.sql
+-- Stored bus route paths (transit-bus-route-path Job).
+--
 -- Seoul bus route geometry from the Seoul bus route API (ws.bus.go.kr
 -- busRouteInfo), cut into stop-to-stop segments so that per-segment loads can
 -- be summed across routes and drawn along the road.
