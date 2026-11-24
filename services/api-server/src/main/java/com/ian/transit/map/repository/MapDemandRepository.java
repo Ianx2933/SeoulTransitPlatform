@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -63,6 +64,7 @@ public class MapDemandRepository {
     /**
      * Returns available lines by mode.
      */
+    @Cacheable(cacheNames = "mapLines", key = "#mode")
     public List<String> findLinesByMode(String mode) {
         String sql = """
                 SELECT DISTINCT service_id

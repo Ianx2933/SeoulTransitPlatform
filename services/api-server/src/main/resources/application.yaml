@@ -75,7 +75,7 @@ spring:
     # Deployment sets CACHE_TYPE=caffeine: Memorystore costs more per month than
     # the Cloud SQL instance, and per-instance caches are acceptable at demo scale.
     type: ${CACHE_TYPE:redis}
-    cache-names: congestion, congestionStops, arsStandardCode, terrainDongSummary
+    cache-names: congestion, congestionStops, arsStandardCode, terrainDongSummary, mapLines
     redis:
       time-to-live: ${CACHE_TTL:10m}
       cache-null-values: false
