@@ -9,7 +9,7 @@ export const aboutMessages = {
     about: {
       title: "안내",
       intro:
-        "Seoul Transit Platform은 서울 버스·지하철 이용 자료로 정류소·노선·행정동 단위의 수요를 보여 주는 사이트입니다. 시민, 시민단체, 연구자가 자유롭게 쓸 수 있도록 만들었습니다. 서울특별시 공식 서비스가 아니며, 화면의 값에는 추정이 들어 있습니다.",
+        "CityRiderMap은 서울 버스·지하철 이용 자료로 정류소·노선·행정동 단위의 수요를 보여 주는 사이트입니다. 시민, 시민단체, 연구자가 자유롭게 쓸 수 있도록 만들었습니다. 서울특별시 공식 서비스가 아니며, 화면의 값에는 추정이 들어 있습니다.",
       operator: "운영 {name}",
       useTitle: "쓰는 법",
       useItems: [
@@ -25,7 +25,7 @@ export const aboutMessages = {
       ],
       reuseTitle: "이 사이트의 자료를 쓸 때",
       reuseText:
-        "출처를 \"Seoul Transit Platform (원천: 서울특별시, 공공누리 제1유형)\"처럼 밝혀 주세요. 출처를 밝히면 상업적 이용과 변경도 됩니다. 서울특별시나 이 사이트가 결과를 보증하는 것처럼 쓰지는 말아 주세요.",
+        "출처를 \"CityRiderMap (원천: 서울특별시, 공공누리 제1유형)\"처럼 밝혀 주세요. 출처를 밝히면 상업적 이용과 변경도 됩니다. 서울특별시나 이 사이트가 결과를 보증하는 것처럼 쓰지는 말아 주세요.",
       reportTitle: "오류 신고·문의",
       reportText:
         "값이 이상하거나 화면이 동작하지 않으면 알려 주세요. 노선 번호, 요일 유형, 기간·시간대와 화면 주소를 함께 적어 주시면 빨리 확인할 수 있습니다.",
@@ -36,7 +36,7 @@ export const aboutMessages = {
     privacy: {
       title: "개인정보처리방침",
       effective: "시행일 {date}",
-      intro: "Seoul Transit Platform(운영 {name})이 이용자 정보를 어떻게 다루는지 적은 문서입니다.",
+      intro: "CityRiderMap(운영 {name})이 이용자 정보를 어떻게 다루는지 적은 문서입니다.",
       sections: {
         collect: {
           title: "1. 받는 개인정보",
@@ -73,7 +73,7 @@ export const aboutMessages = {
     about: {
       title: "About",
       intro:
-        "Seoul Transit Platform shows bus and subway demand in Seoul by stop, route and district (행정동), built from public ridership data for citizens, civic groups and researchers to use freely. It is not an official Seoul Metropolitan Government service, and the figures include estimates.",
+        "CityRiderMap shows bus and subway demand in Seoul by stop, route and district (행정동), built from public ridership data for citizens, civic groups and researchers to use freely. It is not an official Seoul Metropolitan Government service, and the figures include estimates.",
       operator: "Run by {name}",
       useTitle: "How to use",
       useItems: [
@@ -89,7 +89,7 @@ export const aboutMessages = {
       ],
       reuseTitle: "Using data from this site",
       reuseText:
-        "Please credit it, for example \"Seoul Transit Platform (source: Seoul Metropolitan Government, KOGL Type 1)\". With attribution, commercial use and changes are allowed. Please do not present results as endorsed by Seoul Metropolitan Government or by this site.",
+        "Please credit it, for example \"CityRiderMap (source: Seoul Metropolitan Government, KOGL Type 1)\". With attribution, commercial use and changes are allowed. Please do not present results as endorsed by Seoul Metropolitan Government or by this site.",
       reportTitle: "Report a problem",
       reportText:
         "If a figure looks wrong or the page does not work, please tell us. The route number, day type, months and hours, and the page address help us check quickly.",
@@ -100,7 +100,7 @@ export const aboutMessages = {
     privacy: {
       title: "Privacy policy",
       effective: "Effective {date}",
-      intro: "How Seoul Transit Platform (run by {name}) handles information about visitors.",
+      intro: "How CityRiderMap (run by {name}) handles information about visitors.",
       sections: {
         collect: {
           title: "1. Personal information collected",

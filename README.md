@@ -4,6 +4,8 @@
 
 SeoulTransitPlatform analyses public transit demand in the Seoul metropolitan
 area at stop, station and district level, using the city's smart-card records.
+It is the code behind **[CityRiderMap](https://cityridermap.com)**, which is not an
+official Seoul Metropolitan Government service.
 Each figure can be traced back to the source table and the method that produced
 it.
 
@@ -45,13 +47,16 @@ riders travel. The terrain finding does not use OD.
 
 ## Live demo
 
-**[seoul-transit-prod.web.app](https://seoul-transit-prod.web.app)**: the map
-client on Firebase Hosting, calling the deployed API. It is in a closed beta with
-external users.
+**[cityridermap.com](https://cityridermap.com)** (also
+[seoul-transit-prod.web.app](https://seoul-transit-prod.web.app)): the map client on
+Firebase Hosting, calling the deployed API. It is in a closed beta with external
+users; the public launch is planned for 2026-12-01.
 
-The backend scales to zero, so the first request after a quiet period waits for
-a cold start: usually a few seconds, up to 28 s measured on 2026-11-20 for the
-heaviest district view. Later requests are in the ranges below.
+One API instance is kept running, so there is no cold start. The database is a
+`db-f1-micro` with 0.6 GB of memory, so the first request after a quiet period can
+still wait while it reads from disk (the heaviest district view took 28 s on
+2026-11-20); later requests are in the ranges below. See
+[Serving under load](#serving-under-load).
 
 ## Highlights
 
@@ -69,6 +74,8 @@ heaviest district view. Later requests are in the ranges below.
 | **Raster integration** | Terrain attributes from a Copernicus GLO-30 DEM published as immutable versioned snapshots, served per stop and per dong |
 | **Demand profiling** | 34 months of hourly boarding read from the warehouse as a labelled 3-D array (34 × 24 × 12,850) and grouped by terrain band, reconciled to the passenger against the source copy |
 | **Analytical warehouse** | BigQuery models built with dbt from a 1:1 staging copy: 34 months of hourly boarding (31.7M rows), 102 corrected OD days, district OD for every day; 28 models and over 50 tests, including per-month reconciliation to the source. Serving stays in PostGIS; only the months-and-hours views read BigQuery ([details](#analytical-warehouse-bigquery-and-dbt)) |
+| **Open data** | The tables behind the site, published weekly as gzip CSV in a public bucket and as a BigQuery dataset, with a manifest of rows, columns and attribution written last; a release is rewritten only when its rows change ([details](#open-data)) |
+| **Serving on a small database** | A load test found the limit in database memory, not in the API: raising the connection pool or the instance count did not help, a larger tier did. The service stays on `db-f1-micro` with precomputed lookups, in-memory caches and a CDN-cached route list ([details](#serving-under-load)) |
 | **Cloud pipeline** | Weekly Cloud Scheduler → Workflows → 10 Cloud Run Jobs: loads any newly published month, rebuilds the hourly models into shadow tables, validates them, swaps them in in one transaction and publishes to BigQuery. A full rebuild went from 9 h 30 min to 1 h 31 min with an identical output hash; failed runs send an alert ([details](#weekly-cloud-pipeline)) |
 | **Orchestration** | Airflow DAG runs a preflight check, export, load and `dbt build` in order; each step is safe to retry, and the export is deleted only after the tests pass ([details](#orchestration)) |
 | **Backups** | Weekly Cloud SQL export to Cloud Storage, outside the instance, with 60-day retention. The first export was restored end to end in 22 minutes and matched the warehouse copy row for row ([details](#backups)) |
@@ -404,6 +411,33 @@ route over twelve months, 1.8 GB each way for a district's road view. The cap is
 answer is cached. If BigQuery fails, the views answer 503 and the page offers the
 representative day, which does not use it.
 
+## Open data
+
+The download page (`#/download`) offers five tables as gzip CSV, UTF-8 with a header
+row, from the public bucket `gs://seoul-transit-open-data`. The same tables are in the
+BigQuery dataset `transit_open`.
+
+| File | Contents | Rows (release 20260920) |
+|---|---|---|
+| `route_stop_od_typical` | Representative-day route stop OD, three day types | 2,171,908 |
+| `district_od_typical` | Representative-day 행정동 OD by rail and bus | 244,382 |
+| `stop_hourly_profile` | Share of a day's boardings in each hour, by route, stop and day type | 2,933,496 |
+| `stops` | Stop key, name and WGS84 position | 12,850 |
+| `typical_accuracy` | Leave-one-day-out WAPE of the representative day | 256 |
+
+`od/open_data_export.py` in transit-bigquery runs at the end of the weekly warehouse
+step. It writes each table to `transit_open`, extracts it and joins the shards behind a
+gzip header into one file per table under `releases/<window end>/`, writes
+`manifest.json` last and copies the release to `latest/`. Links on the page point at
+the release folder, so a cited link keeps naming the same file. When the rows are the
+same it leaves the files alone, and when only the text changed (attribution,
+descriptions) it rewrites the manifest alone. A failure there is reported without
+failing the weekly run, so the public files never hold up the serving loads.
+
+The bucket is readable by anyone and writable only by the warehouse job's service
+account; CORS lets the site read the manifest. Source data are KOGL Type 1
+(공공누리 제1유형, attribution); the manifest and the page carry the attribution.
+
 ## Key capabilities
 
 - Node-centered demand lookup around a coordinate radius.
@@ -440,7 +474,7 @@ Firebase Hosting ──rewrite /api/**──> Cloud Run: transit-api (public)
                                         │                            ├─> od-correct (new OD month) ──> Cloud Storage
                                         │                            ├─> bus-route-path ──> Seoul bus route API
                                         │                            ├─> 8 rebuild, validate, publish Jobs (new month only)
-                                        │                            ├─> Cloud Run Job: warehouse ──> BigQuery + dbt
+                                        │                            ├─> Cloud Run Job: warehouse ──> BigQuery + dbt ──> open data (public bucket)
                                         │                            └─> od-typical-load, od-dong-load <── Cloud Storage <── BigQuery
                                         │   Cloud Scheduler ──> Workflows: transit-db-export ──> Cloud SQL export ──> Cloud Storage
                                         │     weekly
@@ -462,9 +496,10 @@ environment variable away from changing.
 token whose audience is the service URL. Every inference call costs money, so
 knowing the URL should not be enough to make one.
 
-**No CORS configuration.** Firebase Hosting rewrites `/api/**` to the Cloud Run
-service, so the browser only ever sees one origin. The frontend calls relative
-paths and needs no build-time API URL.
+**No CORS configuration on the API.** Firebase Hosting rewrites `/api/**` to the Cloud
+Run service, so the browser only ever sees one origin. The frontend calls relative
+paths and needs no build-time API URL. The only CORS rule is on the public open data
+bucket, which the download page reads directly (`ops/open_data/cors.json`).
 
 **Cloud SQL is the source of record, and is sized for serving.** The hourly
 table (34 months, 31.7M rows), the OD tables and every model built from them
@@ -663,6 +698,44 @@ boundary release means publishing a new snapshot anyway.
 Index SQL: `database/performance/district_demand_indexes.sql`
 Analysis: [`docs/performance/district_demand_optimization.md`](docs/performance/district_demand_optimization.md)
 
+## Serving under load
+
+Before the public launch, `ops/checks/load_test.py` sent the site's heaviest requests
+with 1, 5, 10 and 20 simultaneous users, six requests each, against the deployed
+service. Response times grew with users while the API and the database both had CPU
+to spare: Cloud SQL peaked at 36.5% and Cloud Run at 10%. What spiked was disk reads.
+`db-f1-micro` has 0.6 GB of memory, so most index and table pages are not cached and
+each one missed costs a disk read of about 20 ms.
+
+Raising the connection pool or the Cloud Run instance count only sent more queries to
+the same disk. A larger tier did help, which confirmed the cause. Time for the
+20-user stage:
+
+| Tier | Memory | 20-user stage |
+|---|---|---|
+| `db-f1-micro` | 0.6 GB | 136.9 s |
+| `db-g1-small` | 1.7 GB | 79.8 s (48.1 s on a second, warm run) |
+| `db-custom-1-3840` | 3.75 GB | 41.2 s |
+
+Expected traffic is small, so the instance stays on `db-f1-micro`. If traffic grows,
+`db-g1-small` comes first, then `db-custom-1-3840`; the weekly workflow's final
+scale-down tier changes with it. What was done to make the small tier enough:
+
+- **Precomputed lookups.** Which stops lie in which 행정동, and each 행정동's point,
+  were spatial joins on every request. They are now three materialized views
+  (`stop_area_any`, `stop_area_primary`, `dong_point`) with indexes, refreshed after
+  stop or boundary changes (`database/schema/10_stop_area_lookup.sql`); a check
+  compared them with the old queries and found no difference.
+- **Caches in the API.** Stop positions and road segment paths are kept in Caffeine
+  for 12 hours and filled in bulk; the data changes once a week.
+- **Route list on the CDN.** `/api/map/lines` ran a `DISTINCT` over the hourly demand
+  table on every call, 6–8 s for a 6 KB answer. It is now cached in the API and sent
+  with `Cache-Control: public, s-maxage=21600`, so Firebase Hosting serves it from
+  its CDN (1 ms on a hit).
+- **Settings.** One instance is kept running (`min-instances 1`), at most three, a
+  pool of three connections each, and a 25 s statement timeout so a slow query fails
+  instead of holding a connection.
+
 ## Analytical warehouse (BigQuery and dbt)
 
 The serving API reads from PostgreSQL. Analysis runs on a separate BigQuery warehouse built
@@ -818,7 +891,7 @@ mode and the missing-password case.
 | rebuild | Month-day counts, day-type hourly ratios (route and stop level), OD allocation to hours, stop demand, bus + subway integration, each written to an empty `<table>__next` |
 | validate | `validate_rebuild.py` on the `__next` copies; a failed check stops the run with the API and BigQuery unchanged |
 | publish | Swaps all five copies in, in one transaction, and gives their indexes back the original names |
-| warehouse | Exports from Cloud SQL, replaces the BigQuery staging tables, runs `dbt build --target prod` |
+| warehouse | Exports from Cloud SQL, replaces the BigQuery staging tables, runs `dbt build --target prod`, then writes the [open data](#open-data) files |
 | scale down | Back to `db-f1-micro`, also when any step fails |
 
 A run that ends without success, and a trigger that fails to start one, each send an email
@@ -901,13 +974,15 @@ and `06_fix_terrain_guard.sql`.
 | District-demand indexing and statistics refresh | Done |
 | Terrain snapshots and stop/dong screening API | Done |
 | Hourly pipeline rebuild, 2024-01 to 2026-10 | Done, validated; rebuilt in Cloud SQL |
-| GCP deployment: serving path | Live, closed beta |
+| GCP deployment: serving path | Live at cityridermap.com, closed beta; public launch planned for 2026-12-01 |
+| Load test and database sizing | Done 2026-11-22; stays on `db-f1-micro` ([Serving under load](#serving-under-load)) |
+| Open data downloads | Live from 2026-11-23; first release 20260920 |
 | Weekly cloud pipeline (collect, rebuild, validate, publish) | Running weekly since 2026-11-10; forced full runs passed on 2026-11-07 and 2026-11-08 (1 h 31 min); failure alerts tested |
 | BigQuery warehouse | 34 months loaded and modelled in dbt; refreshed by the weekly pipeline |
 | TOPIS OD archives | 2024-01 to 2026-09 and 2023-10 stored with manifests; checked by the weekly workflow, which corrects and loads a new month |
 | OD correction port | Matches the Java SQL row for row on 2026-09-15, -19 and -20; runs as a cloud job, 102 days corrected with passengers conserved; loaded into BigQuery (`fct_od_stop`) |
 | Day-type representative OD | Weekday, Saturday and Sunday/holiday built in BigQuery from 12 months, scored by leaving each day out and loaded into Cloud SQL; every day type can be split into hours on request |
-| Months and hours | API and page done and checked on 2026-11-20; deployed 2026-11-24 |
+| Months and hours | Checked on 2026-11-20; API deployed 2026-11-21, page 2026-11-24 |
 | District OD by mode | TOPIS district OD averaged per day type in BigQuery, exported and loaded by the weekly workflow (`transit-od-dong-load`); served for a 행정동, 구, Seoul or a chosen group |
 | Bus route paths and riders on the road | 672 stored paths for 666 TOPIS routes, refreshed weekly; road view checked against the route chart on 8 routes |
 | Route analysis view | Live in the map client; months and hours from 2026-11-24 |
@@ -989,6 +1064,7 @@ database/performance/   Performance index scripts
 database/terrain/       Terrain snapshot schema, diagnostics, activation
 docs/                   Documentation (see table above)
 ops/                    Export restore script, retired local backup script, bucket lifecycle rule
+ops/open_data/          Public open data bucket: CORS rule and file list
 ops/workflows/          Weekly cloud pipeline and weekly database export (Workflows), deploy script
 ops/monitoring/         Alert policies for failed pipeline runs and triggers
 pipelines/              Python data pipelines by phase
@@ -1015,6 +1091,11 @@ firebase.json           Hosting config and the /api/** rewrite to Cloud Run
   Space GmbH 2014–2018, under COPERNICUS by the European Union and ESA.
 - Administrative boundaries: `admin_dong_boundary`, base date 20250630.
 - Basemap: © OpenStreetMap contributors.
+
+Seoul's transit data are published under KOGL Type 1 (공공누리 제1유형): reuse,
+including commercial use and changes, with attribution. The site and the open data
+files credit the source and state that CityRiderMap is not an official Seoul
+Metropolitan Government service.
 
 Secrets are never committed; `.env.example` holds placeholders only. In the
 deployed environment the database credentials and the collector's Seoul Open API key come

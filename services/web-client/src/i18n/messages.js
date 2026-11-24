@@ -13,7 +13,7 @@ export const messages = {
     ...mapMessages.ko,
     ...aboutMessages.ko,
     app: {
-      name: "서울 대중교통 수요",
+      name: "CityRiderMap · 서울",
       skip: "본문으로 건너뛰기",
       menuOpen: "메뉴 열기",
       menuClose: "메뉴 닫기",
@@ -194,7 +194,7 @@ export const messages = {
     ...mapMessages.en,
     ...aboutMessages.en,
     app: {
-      name: "Seoul Transit Demand",
+      name: "CityRiderMap · Seoul",
       skip: "Skip to content",
       menuOpen: "Open menu",
       menuClose: "Close menu",
