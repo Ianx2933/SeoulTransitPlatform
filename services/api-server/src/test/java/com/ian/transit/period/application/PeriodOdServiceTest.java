@@ -73,4 +73,19 @@ class PeriodOdServiceTest {
                 hour -> hour.stream().mapToDouble(RouteLoadCalculator.Leg::passengers).sum());
         assertThat(max).isEqualTo(30.0);                                     // 8 h: 40 x 0.75
     }
+
+    @Test
+    void routeRangeFindsTheNameOrItsOnlySuffixedForm() {
+        Map<String, List<java.time.LocalDate>> all = Map.of(
+                "1155", List.of(java.time.LocalDate.of(2023, 10, 1), java.time.LocalDate.of(2024, 12, 1)),
+                "5522A난곡", List.of(java.time.LocalDate.of(2023, 10, 1), java.time.LocalDate.of(2026, 9, 1)),
+                "8773출근", List.of(java.time.LocalDate.of(2024, 1, 1), java.time.LocalDate.of(2026, 9, 1)),
+                "8773퇴근", List.of(java.time.LocalDate.of(2024, 1, 1), java.time.LocalDate.of(2026, 9, 1)));
+
+        assertThat(PeriodOdService.routeRangeIn(all, "1155"))
+                .containsExactly(java.time.YearMonth.of(2023, 10), java.time.YearMonth.of(2024, 12));
+        assertThat(PeriodOdService.routeRangeIn(all, "5522A")).hasSize(2);
+        assertThat(PeriodOdService.routeRangeIn(all, "8773")).isEmpty();
+        assertThat(PeriodOdService.routeRangeIn(all, "9999")).isEmpty();
+    }
 }

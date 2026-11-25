@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -147,6 +148,29 @@ public class PeriodOdRepository {
                 LocalDate.parse(r.get("first_month").getStringValue()),
                 LocalDate.parse(r.get("last_month").getStringValue())));
         return rows.isEmpty() ? List.of() : rows.get(0);
+    }
+
+    /**
+     * First and last month of every route in the route OD, keyed by the OD's
+     * route name. One scan of two columns, kept for a day by the service: a
+     * withdrawn route (1155) has OD only up to its last month, so the page can
+     * move the period there instead of showing nothing.
+     */
+    public Map<String, List<LocalDate>> routeMonthRanges() {
+        String sql = """
+                SELECT route_name,
+                       DATE_TRUNC(MIN(service_date), MONTH) AS first_month,
+                       DATE_TRUNC(MAX(service_date), MONTH) AS last_month
+                FROM %s
+                WHERE route_name IS NOT NULL
+                GROUP BY route_name
+                """.formatted(props().table("fct_od_stop"));
+        Map<String, List<LocalDate>> out = new HashMap<>();
+        runner.query("route_month_ranges", sql, Map.of(), r -> Map.entry(r.get("route_name").getStringValue(), List.of(
+                        LocalDate.parse(r.get("first_month").getStringValue()),
+                        LocalDate.parse(r.get("last_month").getStringValue()))))
+                .forEach(e -> out.put(e.getKey(), e.getValue()));
+        return out;
     }
 
     public List<PeriodLeg> legsByRoutes(Period period, String dayType, Collection<String> routes) {

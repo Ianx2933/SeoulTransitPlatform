@@ -11,3 +11,4 @@ Each file is safe to run twice. Run with
 | `02_bus_route_path_variants.sql` | Adds `bus_route_path_route.od_route_nm` (one TOPIS route stored as several API routes) | local, Cloud SQL |
 | `03_bus_route_path_history.sql` | Adds `path_since`, `path_sig` and the `bus_route_path_version*` tables (earlier paths of changed routes) | Cloud SQL (local has no route paths) |
 | `04_bus_route_stop_snapshot.sql` | Adds `bus_route_stop_snapshot` (monthly route master: stop order and positions) | |
+| `05_bus_route_stop_snapshot_seen.sql` | Adds `bus_route_stop_snapshot_seen` (first and last snapshot of each route) | |

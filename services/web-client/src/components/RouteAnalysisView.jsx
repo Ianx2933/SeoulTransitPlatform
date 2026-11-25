@@ -17,6 +17,7 @@ import {
 import { findTurnaround } from "../utils/routeLoadChart.js";
 import { useRoadLoad } from "../hooks/useRoadLoad.js";
 import { useStoredNumber } from "../hooks/useStoredNumber.js";
+import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import useLatest from "../hooks/useLatest.js";
 import { useDistrictBoundaries } from "../hooks/useDistrictBoundaries.js";
 
@@ -94,6 +95,12 @@ export default function RouteAnalysisView({ busLines }) {
   // Side panels fold away to give the map the screen; remembered per browser.
   const [leftOpen, setLeftOpen] = useStoredNumber("routeLeftPanelOpen", 1);
   const [rightOpen, setRightOpen] = useStoredNumber("routeRightPanelOpen", 1);
+  // Phones: the map fills the screen, the map cards open from a button, and the
+  // analysis is a bottom sheet showing only the route search until pulled up.
+  const narrow = useMediaQuery("(max-width: 900px)");
+  const [cardsOpen, setCardsOpen] = useState(false);
+  const [sheetUp, setSheetUp] = useState(false);
+  const [touchY, setTouchY] = useState(null);
 
   // Demand colours: the route (plus added routes) by riders on board.
   const [roadOn, setRoadOn] = useState(false);
@@ -299,7 +306,8 @@ export default function RouteAnalysisView({ busLines }) {
       className={[
         "route-view",
         leftOpen ? "" : "route-view--left-closed",
-        rightOpen ? "" : "route-view--right-closed"
+        rightOpen ? "" : "route-view--right-closed",
+        cardsOpen ? "route-view--cards-open" : ""
       ].join(" ")}
     >
       <div className="route-view__map">
@@ -308,7 +316,7 @@ export default function RouteAnalysisView({ busLines }) {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
-          <FitRoute bounds={bounds} routeName={routeName} rightOpen={Boolean(rightOpen)} />
+          <FitRoute bounds={bounds} routeName={routeName} rightOpen={Boolean(rightOpen)} narrow={narrow} />
 
           {boundaryOn && boundaries && (
             <Pane name="district-outlines" style={{ zIndex: 340, pointerEvents: "none" }}>
@@ -423,6 +431,16 @@ export default function RouteAnalysisView({ busLines }) {
           )}
         </MapContainer>
         <p className="map-note" role="status">{note}</p>
+        {routeName && narrow && (
+          <button
+            type="button"
+            className="cards-toggle"
+            aria-expanded={cardsOpen}
+            onClick={() => setCardsOpen((open) => !open)}
+          >
+            {cardsOpen ? t("route.panels.cardsHide") : t("route.panels.cardsShow")}
+          </button>
+        )}
         {routeName && !leftOpen && (
           <button type="button" className="side-tab side-tab--left" onClick={() => setLeftOpen(1)}>
             {t("route.panels.showLeft")} ›
@@ -509,6 +527,26 @@ export default function RouteAnalysisView({ busLines }) {
           ‹ {routeName ? t("route.panels.showRightRoute", { route: routeName }) : t("route.panels.showRight")}
         </button>
       )}
+      <div className={sheetUp ? "route-sheet route-sheet--up" : "route-sheet"}>
+      {narrow && (
+        <button
+          type="button"
+          className="route-sheet__handle"
+          aria-expanded={sheetUp}
+          aria-label={sheetUp ? t("route.panels.sheetDown") : t("route.panels.sheetUp")}
+          onClick={() => setSheetUp((up) => !up)}
+          onTouchStart={(e) => setTouchY(e.touches[0].clientY)}
+          onTouchEnd={(e) => {
+            if (touchY === null) return;
+            const dy = e.changedTouches[0].clientY - touchY;
+            setTouchY(null);
+            if (dy < -30) setSheetUp(true);
+            else if (dy > 30) setSheetUp(false);
+          }}
+        >
+          <span className="route-sheet__grip" />
+        </button>
+      )}
       <RouteAnalysisPanel
         busLines={odRouteNames || busLines}
         stopSeq={stopSeq}
@@ -520,6 +558,7 @@ export default function RouteAnalysisView({ busLines }) {
         onQuery={setQuery}
         turnaroundFromBis={turnaroundFromBis}
       />
+      </div>
     </div>
   );
 }
@@ -599,7 +638,7 @@ function DongCard({ on, setOn, state, data, selected, setSelected, direction, se
  * Frames the route once per route. The right-hand panel, when open, covers
  * part of the map on wide screens, so the fit leaves room for it.
  */
-function FitRoute({ bounds, routeName, rightOpen }) {
+function FitRoute({ bounds, routeName, rightOpen, narrow }) {
   const map = useMap();
   const latestBounds = useLatest(bounds);
   const latestRightOpen = useLatest(rightOpen);
@@ -610,11 +649,12 @@ function FitRoute({ bounds, routeName, rightOpen }) {
     const wide = map.getContainer().clientWidth > 900;
     map.fitBounds(target, {
       paddingTopLeft: [40, 40],
-      paddingBottomRight: [wide && latestRightOpen.current ? 460 : 40, 40],
+      // On phones the bottom sheet covers about 150 px of the map.
+      paddingBottomRight: [wide && latestRightOpen.current ? 460 : 40, narrow ? 170 : 40],
       maxZoom: 15
     });
     // Fit when the route changes, not on every re-render of its stops or a
     // panel being folded (folding only uncovers more map).
-  }, [map, latestBounds, latestRightOpen, routeName, hasBounds]);
+  }, [map, latestBounds, latestRightOpen, routeName, hasBounds, narrow]);
   return null;
 }

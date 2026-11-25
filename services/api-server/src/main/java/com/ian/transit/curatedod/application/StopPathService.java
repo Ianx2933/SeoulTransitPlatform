@@ -90,6 +90,15 @@ public class StopPathService {
         });
     }
 
+    /** A stop's key for comparing stop lists: its padded ARS, or its name for a stop with no number. */
+    static String arsKey(RouteHistoryService.StopRef s) {
+        if (s.ars() == null || s.ars().isBlank()) {
+            return "name:" + s.name();
+        }
+        String a = s.ars().trim();
+        return a.matches("\\d{1,4}") ? "0".repeat(5 - a.length()) + a : a;
+    }
+
     /** The name as given and without a TOPIS suffix ("5522A난곡" → "5522A", "8773출근" → "8773"). */
     static List<String> routeNames(String route) {
         String r = route.trim();

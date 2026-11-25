@@ -127,6 +127,24 @@ export function addMonths(ym, n) {
   return `${Math.floor(total / 12)}-${pad2((total % 12) + 1)}`;
 }
 
+/**
+ * The period to move to for a route the chosen basis misses: a withdrawn or
+ * renumbered route (1155) has OD only up to its last month, outside the
+ * typical day's last twelve months. Returns the route's last months (up to
+ * MAX_MONTHS), or null when the basis already overlaps the route's months
+ * (then the failure is something else) or the route has no OD at all.
+ */
+export function periodForRoute(routeRange, range, basis, months = MAX_MONTHS) {
+  if (!routeRange?.first || !routeRange?.last || !range?.last) return null;
+  const shown = basis?.period && !basis.period.day
+    ? basis.period
+    : { from: addMonths(range.last, -(months - 1)), to: range.last };
+  const overlaps = shown.from <= routeRange.last && shown.to >= routeRange.first;
+  if (overlaps) return null;
+  const from = addMonths(routeRange.last, -(months - 1));
+  return { from: from < routeRange.first ? routeRange.first : from, to: routeRange.last };
+}
+
 /** The last three months of the data, as a first suggestion. */
 export function defaultPeriod(range, months = 3) {
   if (!range?.first || !range?.last) return null;

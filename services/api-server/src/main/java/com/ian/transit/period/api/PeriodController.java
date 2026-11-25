@@ -48,6 +48,20 @@ public class PeriodController {
                 : new RangeResponse(r.get(0), r.get(1), Period.MAX_MONTHS));
     }
 
+    public record RouteRangeResponse(String route, YearMonth first, YearMonth last) {
+    }
+
+    /** First and last month of a route's OD; first and last are null for a route the OD lacks. */
+    @GetMapping("/route-range")
+    public ResponseEntity<RouteRangeResponse> routeRange(@RequestParam("route") String route) {
+        if (route == null || route.isBlank() || route.length() > 30) {
+            throw new IllegalArgumentException("give a route name");
+        }
+        List<YearMonth> r = service.routeRange(route);
+        return ResponseEntity.ok(r.isEmpty() ? new RouteRangeResponse(route, null, null)
+                : new RouteRangeResponse(route, r.get(0), r.get(1)));
+    }
+
     @GetMapping("/days")
     public ResponseEntity<DaysResponse> days(
         @RequestParam("period") String period,

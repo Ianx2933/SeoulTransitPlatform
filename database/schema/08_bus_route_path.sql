@@ -114,3 +114,13 @@ CREATE TABLE IF NOT EXISTS bus_route_stop_snapshot (
 );
 CREATE INDEX IF NOT EXISTS idx_bus_route_stop_snapshot_ars ON bus_route_stop_snapshot (ars, stdr_de);
 CREATE INDEX IF NOT EXISTS idx_bus_route_stop_snapshot_route ON bus_route_stop_snapshot (route_nm, stdr_de);
+
+-- First and last snapshot each route appeared in (the snapshots above keep
+-- only changes, so they cannot say when a route stopped running).
+CREATE TABLE IF NOT EXISTS bus_route_stop_snapshot_seen (
+    route_id    text NOT NULL PRIMARY KEY,
+    route_nm    text NOT NULL,
+    first_seen  date NOT NULL,
+    last_seen   date NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bus_route_stop_snapshot_seen_nm ON bus_route_stop_snapshot_seen (route_nm);

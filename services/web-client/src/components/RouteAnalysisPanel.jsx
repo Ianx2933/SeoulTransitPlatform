@@ -9,8 +9,12 @@ import { useI18n } from "../i18n/I18nProvider.jsx";
 import { busRouteStyle, busRouteType } from "../utils/busRouteType.js";
 import { buildBarChart, findTurnaround, percent } from "../utils/routeLoadChart.js";
 import { csvFileName, routeStopsCsv } from "../utils/roadCsv.js";
-import { basisFileTag, basisKey, isPeriodUnavailable, isPlain, periodParam, TYPICAL } from "../utils/basis.js";
-import BasisControls, { PeriodUnavailable } from "./BasisControls.jsx";
+import { basisFileTag, basisKey, isPeriodUnavailable, isPlain, periodForRoute, periodParam, TYPICAL } from "../utils/basis.js";
+import { fetchPeriodRange, fetchRouteRange } from "../api/periodApi.js";
+import BasisControls, { PeriodUnavailable, usePeriodRange } from "./BasisControls.jsx";
+import { RouteCompare, RouteHistory } from "./RouteHistory.jsx";
+import { parseRouteLink, routeLinkHash } from "../utils/routeLink.js";
+import { comparePeriods } from "../utils/routeCompare.js";
 import CsvButton from "./CsvButton.jsx";
 import useLatest from "../hooks/useLatest.js";
 import { sortFlows } from "../utils/flowSort.js";
@@ -47,9 +51,16 @@ export default function RouteAnalysisPanel({
       ? "-"
       : Number(value).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });
 
-  const [route, setRoute] = useState("");
-  const [dayType, setDayType] = useState("weekday");
-  const [basis, setBasis] = useState(TYPICAL);
+  // A link such as "#/route?r=3411&p=2024-09..2024-11" opens that route, day type, months and hours.
+  const [link] = useState(() => (typeof window !== "undefined" ? parseRouteLink(window.location.hash) : null));
+  const [route, setRoute] = useState(link?.route || "");
+  const [dayType, setDayType] = useState(link?.dayType || "weekday");
+  const [basis, setBasis] = useState(link?.basis || TYPICAL);
+  // Before and after: the other months to compare with ({ period, uncertain }), or null.
+  const [compare, setCompare] = useState(null);
+  const [compareNote, setCompareNote] = useState("");
+  const [copied, setCopied] = useState(false);
+  const { range } = usePeriodRange();
   const [routeData, setRouteData] = useState(null);
   const setStopSeq = onStopSeqChange;
   const [stopDetail, setStopDetail] = useState(null);
@@ -59,6 +70,8 @@ export default function RouteAnalysisPanel({
   const [toSeq, setToSeq] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Set when a withdrawn route moved the period to its own months.
+  const [movedNote, setMovedNote] = useState("");
 
   const hours = basis.hours;
   const basisId = basisKey(basis);
@@ -141,6 +154,16 @@ export default function RouteAnalysisPanel({
     }
   };
 
+  // A route the chosen months miss (withdrawn, renumbered: 1155): the period it ran in, or null.
+  const movedPeriod = async (name) => {
+    try {
+      const [range, routeRange] = await Promise.all([fetchPeriodRange(), fetchRouteRange(name)]);
+      return periodForRoute(routeRange, range, basis);
+    } catch {
+      return null;
+    }
+  };
+
   const loadRoute = (name, keepStop) =>
     run(async () => {
       let data;
@@ -151,7 +174,12 @@ export default function RouteAnalysisPanel({
         setRouteData(null);
         setSegment(null);
         setStopDetail(null);
-        throw e;
+        const period = await movedPeriod(name);
+        if (!period) throw e;
+        const moved = { ...basis, period };
+        data = await fetchRouteStops({ route: name, dayType, basis: moved, messages: messagesFor(name) });
+        setBasis(moved);
+        setMovedNote(t("route.movedPeriod", { route: name, from: period.from, to: period.to }));
       }
       setRouteData(data);
       setSegment(null);
@@ -167,8 +195,40 @@ export default function RouteAnalysisPanel({
   // What the effects below need at the moment they run, without rerunning them.
   const current = useLatest({ run, loadRoute, messagesFor, routeData, dayType, basis });
 
+  // A history entry: show the months before the change here, the months after it in the comparison.
+  const onCompare = (entry) => {
+    const p = comparePeriods(entry, range);
+    if (!p) {
+      setCompareNote(t("route.compare.noMonths"));
+      return;
+    }
+    setCompareNote("");
+    setBasis({ ...basis, period: p.before });
+    setCompare({ period: p.after, uncertain: p.uncertain });
+  };
+
+  // The route on screen in the address, so the link opens the same view.
+  useEffect(() => {
+    if (!routeData || typeof window === "undefined" || !window.location.hash.startsWith("#/route")) return;
+    const hash = routeLinkHash({ route: routeData.노선명, dayType, basis });
+    if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
+  }, [routeData, dayType, basis]);
+
+  const copyLink = () => {
+    navigator.clipboard?.writeText(window.location.href).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => {}
+    );
+  };
+
   const onSubmit = (event) => {
     event.preventDefault();
+    setMovedNote("");
+    setCompare(null);
+    setCompareNote("");
     const name = route.trim();
     if (!name) {
       setError(t("route.enterRoute"));
@@ -176,6 +236,13 @@ export default function RouteAnalysisPanel({
     }
     loadRoute(name, false);
   };
+
+  // Opened from a link: analyse its route once.
+  useEffect(() => {
+    if (link?.route) current.current.loadRoute(link.route, false);
+    // Once, on opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Day type, months or hours changed: reload the route already on screen.
   const firstRun = useRef(true);
@@ -284,6 +351,8 @@ export default function RouteAnalysisPanel({
           <div className="error-box" role="alert">{error}</div>
         ))}
 
+      {movedNote && routeData && <p className="note">{movedNote}</p>}
+
       {!routeData && !error && <p className="note">{t("route.empty")}</p>}
 
       {routeData && (
@@ -313,6 +382,35 @@ export default function RouteAnalysisPanel({
               <span className="note"> · {t("route.unordered", { value: fmt(routeData.unorderedPassengers) })}</span>
             )}
           </p>
+
+          <div className="route-tools">
+            <button type="button" className="chip" onClick={copyLink}>
+              {copied ? t("route.link.copied") : t("route.link.copy")}
+            </button>
+            {!compare && range && (
+              <button
+                type="button"
+                className="chip"
+                onClick={() => setCompare({ period: { from: range.last, to: range.last }, uncertain: false })}
+              >
+                {t("route.compare.open")}
+              </button>
+            )}
+          </div>
+
+          <RouteHistory route={routeData.노선명} onCompare={onCompare} />
+          {compareNote && <p className="note">{compareNote}</p>}
+          {compare && (
+            <RouteCompare
+              route={routeData.노선명}
+              dayType={dayType}
+              basis={basis}
+              current={routeData}
+              compare={compare}
+              setCompare={setCompare}
+              range={range}
+            />
+          )}
 
           <div className="chart-block">
             <h2 className="section-title">{t("route.chart.title")}</h2>

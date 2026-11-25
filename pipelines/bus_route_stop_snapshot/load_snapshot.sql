@@ -9,11 +9,21 @@
 -- about 41,000 rows; kept whole, 30 months would be some 400 MB.
 --
 -- Run with: psql ... -v ON_ERROR_STOP=1 -1 -f pipelines/bus_route_stop_snapshot/load_snapshot.sql
+-- The clean file is UTF-8; psql on Korean Windows would read it as UHC (cp949).
 \encoding UTF8
 CREATE TEMP TABLE snapshot_in (LIKE bus_route_stop_snapshot) ON COMMIT DROP;
 \copy snapshot_in (stdr_de, route_id, route_nm, seq, node_id, ars, node_nm, lng, lat) FROM 'bus_route_stop_snapshot_clean.csv' WITH (FORMAT csv, HEADER true)
 DELETE FROM bus_route_stop_snapshot WHERE stdr_de IN (SELECT DISTINCT stdr_de FROM snapshot_in);
 INSERT INTO bus_route_stop_snapshot SELECT * FROM snapshot_in;
+
+-- First and last snapshot of each route, before the compaction below drops repeats.
+INSERT INTO bus_route_stop_snapshot_seen AS s (route_id, route_nm, first_seen, last_seen)
+SELECT route_id, (array_agg(route_nm ORDER BY stdr_de DESC))[1], min(stdr_de), max(stdr_de)
+FROM snapshot_in GROUP BY route_id
+ON CONFLICT (route_id) DO UPDATE SET
+    first_seen = LEAST(s.first_seen, EXCLUDED.first_seen),
+    last_seen  = GREATEST(s.last_seen, EXCLUDED.last_seen),
+    route_nm   = CASE WHEN EXCLUDED.last_seen >= s.last_seen THEN EXCLUDED.route_nm ELSE s.route_nm END;
 
 -- Drop route snapshots identical to the same route's previous one.
 WITH sig AS (

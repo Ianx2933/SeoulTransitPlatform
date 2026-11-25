@@ -227,11 +227,12 @@
   .shell--open .sidebar { transform: none; }
   .shell--open .scrim { display: block; position: fixed; inset: 0; z-index: 1050; background: rgba(31, 35, 40, 0.4); }
 
-  .route-view { height: auto; overflow: visible; }
-  .route-view__map { position: relative; height: 40vh; }
+  /* Phones: the map fills the screen under the top bar; the route analysis is
+     a bottom sheet (route search only until pulled up). */
+  .route-view { height: calc(100vh - 56px); height: calc(100dvh - 56px); overflow: hidden; }
   .route-panel {
-    position: relative; inset: auto; width: auto; margin-top: -16px;
-    border-radius: 12px 12px 0 0; border-width: 1px 0 0; padding: 16px;
+    position: static; inset: auto; width: auto; border: 0; border-radius: 0;
+    padding: 4px 16px 16px; overflow: visible; gap: 12px;
   }
   .map-note { display: none; }
   .hour-grid { grid-template-columns: repeat(8, 1fr); }
@@ -453,11 +454,39 @@
   .side-fold--right { right: 384px; }
   .route-cards { width: 290px; }
 }
+/* The bottom sheet wrapper is invisible on wide screens. */
+.route-sheet { display: contents; }
+.route-sheet__handle, .cards-toggle { display: none; }
 @media (max-width: 900px) {
-  .route-cards { position: relative; left: auto; top: auto; width: auto; max-height: none; margin: 8px; }
   .side-fold, .side-tab { display: none; }
-  .route-view--left-closed .route-cards { display: flex; }
   .route-view--right-closed .route-panel { display: flex; }
+  /* Map cards: folded behind a button; open over the top of the map. */
+  .route-cards, .route-view--left-closed .route-cards { display: none; }
+  .route-view--cards-open .route-cards {
+    display: flex; position: absolute; top: 52px; left: 8px; right: 8px; width: auto;
+    max-height: 55%; margin: 0; z-index: 650;
+  }
+  .cards-toggle {
+    display: block; position: absolute; top: 10px; right: 10px; z-index: 660;
+    padding: 8px 12px; font-size: 14px; font-weight: 600; background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--radius-control); box-shadow: 0 1px 4px rgba(31, 35, 40, 0.15);
+  }
+  .route-sheet {
+    display: block; position: absolute; left: 0; right: 0; bottom: 0; z-index: 700;
+    max-height: 150px; overflow: hidden; background: var(--surface);
+    border-top: 1px solid var(--rule); border-radius: 14px 14px 0 0;
+    box-shadow: 0 -2px 10px rgba(31, 35, 40, 0.15); transition: max-height 0.2s ease;
+  }
+  .route-sheet--up { max-height: 85%; overflow-y: auto; }
+  .route-sheet__handle {
+    display: flex; justify-content: center; align-items: center; width: 100%; height: 24px;
+    padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: none;
+    position: sticky; top: 0; z-index: 1; background: var(--surface);
+  }
+  .route-sheet__grip { width: 40px; height: 5px; border-radius: 3px; background: var(--rule); }
+}
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+  .route-sheet { transition: none; }
 }
 
 /* District OD "How far": one row per distance band with a bar. */
@@ -473,3 +502,21 @@
 .basis-hours { display: grid; gap: 6px; }
 .basis-note { margin: 0; }
 .error-box .chip { margin-top: 6px; }
+
+/* Route changes and before/after comparison in the route panel */
+.route-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.route-history summary { cursor: pointer; font-weight: 600; }
+.route-history__list { margin: 8px 0 4px; padding-left: 18px; display: grid; gap: 8px; font-size: 13px; }
+.route-history__list li { display: grid; gap: 3px; justify-items: start; }
+.route-history__stops { font-size: 12px; }
+.route-history__stops--added { color: #1f7a3a; }
+.route-history__stops--removed { color: #b3261e; }
+.route-compare { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius-control); }
+.route-compare__head { display: flex; justify-content: space-between; align-items: center; }
+.compare-summary, .compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-summary th, .compare-summary td, .compare-table th, .compare-table td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--rule); }
+.compare-summary th:first-child, .compare-table td:first-child, .compare-table th:first-child { text-align: left; }
+.compare-table-wrap { max-height: 320px; overflow-y: auto; }
+.compare-row--added td:first-child { color: #1f7a3a; }
+.compare-row--removed td:first-child { color: #b3261e; }
+.compare-tag { font-size: 11px; }

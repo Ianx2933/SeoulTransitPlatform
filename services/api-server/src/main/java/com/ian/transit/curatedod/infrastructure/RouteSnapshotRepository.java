@@ -48,7 +48,60 @@ public class RouteSnapshotRepository {
             ORDER BY ars, stdr_de DESC
             """;
 
+    /** Every kept snapshot of the routes: one per version (the first date it was seen that way). */
+    private static final String VERSIONS = """
+            SELECT stdr_de, route_id, seq, ars, node_nm
+            FROM bus_route_stop_snapshot
+            WHERE route_nm IN (:names)
+            ORDER BY stdr_de, route_id, seq
+            """;
+
+    private static final String SEEN = """
+            SELECT min(first_seen) AS first_seen, max(last_seen) AS last_seen,
+                   (SELECT max(last_seen) FROM bus_route_stop_snapshot_seen) AS latest
+            FROM bus_route_stop_snapshot_seen
+            WHERE route_nm IN (:names)
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
+
+    public record VersionRow(LocalDate date, String routeId, int seq, String ars, String name) {
+    }
+
+    /** first and last snapshot the route was in; latest is the newest snapshot loaded at all. */
+    public record Seen(LocalDate first, LocalDate last, LocalDate latest) {
+    }
+
+    public List<VersionRow> versions(Collection<String> names) {
+        if (names.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return jdbc.query(VERSIONS, new MapSqlParameterSource("names", List.copyOf(names)), (rs, i) -> new VersionRow(
+                    rs.getDate("stdr_de").toLocalDate(), rs.getString("route_id"), rs.getInt("seq"),
+                    rs.getString("ars"), rs.getString("node_nm")));
+        } catch (BadSqlGrammarException e) {
+            return List.of();
+        }
+    }
+
+    /** Null until migration 05 is applied or when the route is in no snapshot. */
+    public Seen seen(Collection<String> names) {
+        if (names.isEmpty()) {
+            return null;
+        }
+        try {
+            return jdbc.queryForObject(SEEN, new MapSqlParameterSource("names", List.copyOf(names)), (rs, i) -> {
+                Date first = rs.getDate("first_seen");
+                Date last = rs.getDate("last_seen");
+                Date latest = rs.getDate("latest");
+                return first == null ? null
+                        : new Seen(first.toLocalDate(), last.toLocalDate(), latest == null ? null : latest.toLocalDate());
+            });
+        } catch (BadSqlGrammarException e) {
+            return null;
+        }
+    }
 
     public record Row(String routeId, int seq, String ars, String name, double lat, double lng) {
     }

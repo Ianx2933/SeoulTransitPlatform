@@ -13,6 +13,7 @@ import {
   isPeriodUnavailable,
   isPlain,
   monthsList,
+  periodForRoute,
   setHoursEnd,
   shiftHours,
   TYPICAL
@@ -138,5 +139,27 @@ describe("one TOPIS day and moving months", () => {
     expect(shiftPeriod({ from: "2026-03", to: "2026-05" }, -1, range)).toEqual({ from: "2025-12", to: "2026-02" });
     expect(shiftPeriod({ from: "2026-09", to: "2026-09" }, 1, range)).toBeNull();
     expect(shiftPeriod({ from: "2026-09", to: "2026-09", day: "2026-09-15" }, -1, range)).toBeNull();
+  });
+});
+
+describe("periodForRoute", () => {
+  const range = { first: "2023-10", last: "2026-09" };
+
+  test("a route that stopped before the typical day's months moves to its last twelve", () => {
+    expect(periodForRoute({ first: "2023-10", last: "2024-12" }, range, TYPICAL)).toEqual({ from: "2024-01", to: "2024-12" });
+  });
+
+  test("a short-lived route keeps its own first month", () => {
+    expect(periodForRoute({ first: "2024-06", last: "2024-09" }, range, TYPICAL)).toEqual({ from: "2024-06", to: "2024-09" });
+  });
+
+  test("chosen months outside the route's are moved too", () => {
+    const basis = { ...TYPICAL, period: { from: "2026-01", to: "2026-03" } };
+    expect(periodForRoute({ first: "2023-10", last: "2024-12" }, range, basis)).toEqual({ from: "2024-01", to: "2024-12" });
+  });
+
+  test("no move when the months overlap or the route has no OD", () => {
+    expect(periodForRoute({ first: "2023-10", last: "2026-09" }, range, TYPICAL)).toBeNull();
+    expect(periodForRoute({ first: null, last: null }, range, TYPICAL)).toBeNull();
   });
 });

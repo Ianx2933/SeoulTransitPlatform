@@ -90,3 +90,8 @@ export function fetchStopPath({ stops, route = null, at = null }) {
     defaultMessage: "Failed to fetch the period's route line"
   });
 }
+
+/** When the route changed, from the Seoul route master snapshots: { entries: [{ kind, date, since, added, removed }] }. */
+export function fetchRouteHistory(route) {
+  return fetchJson(`${base(route)}/history`, { defaultMessage: "Route history unavailable" });
+}

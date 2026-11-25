@@ -25,6 +25,13 @@ export function fetchPeriodRange() {
   return rangePromise;
 }
 
+/** { route, first, last } months of one route's OD; first and last null when the OD lacks it. */
+export function fetchRouteRange(route) {
+  return fetchJson(`/api/period/route-range?route=${encodeURIComponent(route)}`, {
+    defaultMessage: "Route months unavailable"
+  });
+}
+
 const daysCache = new Map();
 
 /** { dayType, period, nDays, days: ["2026-03-11", ...] } for a period and day type. */

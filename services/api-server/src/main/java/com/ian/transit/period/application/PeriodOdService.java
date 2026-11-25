@@ -59,6 +59,31 @@ public class PeriodOdService {
         return r.isEmpty() ? List.of() : List.of(YearMonth.from(r.get(0)), YearMonth.from(r.get(1)));
     }
 
+    /**
+     * First and last month of one route's OD, or empty. The name as the OD
+     * writes it, or a name the OD only has with one suffix ("5522A" → "5522A난곡").
+     */
+    @SuppressWarnings("unchecked")
+    public List<YearMonth> routeRange(String route) {
+        Map<String, List<LocalDate>> all =
+                (Map<String, List<LocalDate>>) single.get("routeRanges", k -> repository.routeMonthRanges());
+        return routeRangeIn(all, route);
+    }
+
+    static List<YearMonth> routeRangeIn(Map<String, List<LocalDate>> all, String route) {
+        String name = route == null ? "" : route.trim();
+        List<LocalDate> r = all.get(name);
+        if (r == null && !name.isEmpty()) {
+            List<String> withSuffix = all.keySet().stream()
+                    .filter(k -> k.startsWith(name) && k.substring(name.length()).matches("[가-힣]+"))
+                    .toList();
+            if (withSuffix.size() == 1) {
+                r = all.get(withSuffix.get(0));
+            }
+        }
+        return r == null ? List.of() : List.of(YearMonth.from(r.get(0)), YearMonth.from(r.get(1)));
+    }
+
     /** Refuses a period outside the data, before any OD query. */
     public void requireInRange(Period period) {
         List<YearMonth> r = range();
