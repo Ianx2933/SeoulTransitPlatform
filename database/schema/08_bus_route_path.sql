@@ -95,3 +95,22 @@ CREATE TABLE IF NOT EXISTS bus_route_path_version_segment (
     PRIMARY KEY (version_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_bus_route_path_version_segment_pair ON bus_route_path_version_segment (from_ars, to_ars);
+
+-- Monthly snapshots of the Seoul route master (stops each route served, with
+-- positions), from the files of the Seoul route-stop dataset. Gives positions
+-- of stops outside Seoul and of stops on withdrawn routes (1155), which the
+-- stop tables lack. Loaded by pipelines/bus_route_stop_snapshot.
+CREATE TABLE IF NOT EXISTS bus_route_stop_snapshot (
+    stdr_de     date             NOT NULL,   -- snapshot date (STDR_DE)
+    route_id    text             NOT NULL,
+    route_nm    text             NOT NULL,
+    seq         integer          NOT NULL,   -- STTN_SN
+    node_id     text,
+    ars         text,                        -- STTN_NO padded to five digits; NULL for "0" (no number)
+    node_nm     text,
+    lng         double precision NOT NULL,
+    lat         double precision NOT NULL,
+    PRIMARY KEY (stdr_de, route_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_bus_route_stop_snapshot_ars ON bus_route_stop_snapshot (ars, stdr_de);
+CREATE INDEX IF NOT EXISTS idx_bus_route_stop_snapshot_route ON bus_route_stop_snapshot (route_nm, stdr_de);

@@ -249,6 +249,7 @@ export const koByEnglish = {
   "Typical day: the mean of the days of this type in the last twelve months.": "대표일: 최근 12개월 같은 요일 유형의 날 평균입니다.",
   "Mean of {period}.": "{period} 평균입니다.",
   "No days of this type in {period}.": "{period}에는 이 요일 유형의 날이 없습니다.",
+  "No usual days of this type in {period}; choose one day to see the published days.": "{period}에는 평균을 낼 이 요일 유형의 날이 없습니다. '하루 선택'으로 공개된 날을 볼 수 있습니다.",
   "Mean of {period}, {n} sample days: {days}": "{period} 평균, 표본 {n}일: {days}",
   "Only riders boarding {hours}, split by each boarding stop's hourly profile.": "{hours}시에 탄 이용객만, 승차 정류소의 시간대 비율로 나눈 추정값입니다.",
   "Months and hours could not be loaded right now.": "기간·시간대 자료를 지금 불러올 수 없습니다.",

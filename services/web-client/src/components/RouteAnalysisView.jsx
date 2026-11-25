@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 
 import { fetchOdRouteNames, fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints, fetchStopPath } from "../api/routeAnalysisApi.js";
-import { isPastRoute, pastPoints, pastSegments, stopMatch, stopPathQuery } from "../utils/pastRoute.js";
+import { isPastRoute, pastPoints, pastSegments, periodEndDay, stopMatch, stopPathQuery } from "../utils/pastRoute.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
@@ -165,7 +165,7 @@ export default function RouteAnalysisView({ busLines }) {
         if (!ignore) setRoadPath(data);
       })
       .catch(() => {
-        if (!ignore) setRoadPath({ path: [], turnaroundArs: null });
+        if (!ignore) setRoadPath({ path: [], turnaroundArs: null, missing: true });
       });
     return () => {
       ignore = true;
@@ -180,14 +180,17 @@ export default function RouteAnalysisView({ busLines }) {
 
   // A route that ran differently in this period: redraw it from the period's stop order.
   const match = useMemo(() => (routeData && roadPath ? stopMatch(routeData.stops, roadPath) : null), [routeData, roadPath]);
-  const past = isPastRoute(match);
+  // No stored path today (route withdrawn or renamed, 1155): draw it from the stops too.
+  const noCurrent = Boolean(roadPath?.missing) && (routeData?.stops?.length || 0) >= 2;
+  const past = isPastRoute(match) || noCurrent;
   const pastQuery = past ? stopPathQuery(routeData.stops) : null;
+  const pastAt = periodEndDay(query.basis?.period);
   const [pastPath, setPastPath] = useState(null);
   useEffect(() => {
     setPastPath(null);
     if (!pastQuery) return undefined;
     let ignore = false;
-    fetchStopPath({ stops: pastQuery })
+    fetchStopPath({ stops: pastQuery, route: routeName, at: pastAt })
       .then((data) => {
         if (!ignore) setPastPath(data);
       })
@@ -197,7 +200,7 @@ export default function RouteAnalysisView({ busLines }) {
     return () => {
       ignore = true;
     };
-  }, [pastQuery]);
+  }, [pastQuery, routeName, pastAt]);
   const pastLines = useMemo(
     () => (pastPath && routeData ? pastSegments(routeData.stops, pastPath) : []),
     [pastPath, routeData]
@@ -283,7 +286,9 @@ export default function RouteAnalysisView({ busLines }) {
         ? t("route.map.none")
         : t("route.map.placed", { placed: placed.length, all: routeData.stops.length });
     if (showPast) {
-      note += " " + t("route.map.past", { value: Math.round(match.ratio * 100) });
+      note += " " + (noCurrent || !match ? t("route.map.noCurrent") : t("route.map.past", { value: Math.round(match.ratio * 100) }));
+      if (pastPath?.snapshotDate) note += " " + t("route.map.pastMaster", { date: pastPath.snapshotDate });
+      if (pastPath?.missingStops > 0) note += " " + t("route.map.pastUnplaced", { value: pastPath.missingStops });
       if (pastLines.some((s) => s.straight)) note += " " + t("route.map.pastStraight");
       if (roadOn) note += " " + t("route.map.pastRoad");
     } else if (roadPath) note += " " + (hasRoad ? t("route.map.road") : t("route.map.straight"));
@@ -344,13 +349,12 @@ export default function RouteAnalysisView({ busLines }) {
             <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
           {/* The period's route, redrawn from its stops; the current path faint underneath. */}
-          {!roadOn && showPast && hasRoad && (
+          {showPast && hasRoad && (
             <Polyline positions={roadPath.path} pathOptions={{ color: "#8a929c", weight: 3, opacity: 0.55, dashArray: "2 8" }}>
               <Tooltip sticky>{t("route.map.currentPath")}</Tooltip>
             </Polyline>
           )}
-          {!roadOn &&
-            showPast &&
+          {showPast &&
             pastLines.map((s) => (
               <Polyline
                 key={s.key}
@@ -377,7 +381,7 @@ export default function RouteAnalysisView({ busLines }) {
           {!roadOn && !showPast && !hasRoad && lines.down.length > 1 && (
             <Polyline positions={lines.down} pathOptions={{ color: COLORS.down, weight: ROUTE_WEIGHT, opacity: 0.95 }} />
           )}
-          {roadOn && roadStyled && (
+          {roadOn && !showPast && roadStyled && (
             <RouteLoadLayer
               result={exploreLoad.result || roadLoad.result}
               segments={roadStyled.segments}

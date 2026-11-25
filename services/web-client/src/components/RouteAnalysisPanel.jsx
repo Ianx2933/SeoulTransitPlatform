@@ -295,7 +295,13 @@ export default function RouteAnalysisPanel({
                   stops: routeData.stops.length,
                   hour: t("route.hour.range", { from: pad2(hours.from), to: pad2(hours.to + 1) })
                 })
-              : basis.period
+              : basis.period?.day
+                ? t("route.summaryDay", {
+                    total: fmt(routeData.totalPassengers),
+                    stops: routeData.stops.length,
+                    period: basis.period.day
+                  })
+                : basis.period
                 ? t("route.summaryPeriod", {
                     total: fmt(routeData.totalPassengers),
                     stops: routeData.stops.length,

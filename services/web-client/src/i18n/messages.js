@@ -77,9 +77,10 @@ export const messages = {
       notFoundSplit: "{route} 노선은 대표일 OD에서 {list}(으)로 나뉩니다. 이 중 하나를 고르세요.",
       notFoundHour: "{route}번 노선의 이 시간대 OD가 없습니다.",
       notFoundBasis: "{route}번 노선의 이 기간·시간대 OD가 없습니다.",
-      summary: "하루 {total}명 · 정류소 {stops}곳 · 대표일 {days}일 평균",
+      summary: "하루 {total}명 · 정류소 {stops}곳 · 대표일 평균",
+      summaryDay: "하루 {total}명 · 정류소 {stops}곳 · {period} 하루",
       summaryHour: "{hour} 승차 {total}명 · 정류소 {stops}곳",
-      summaryPeriod: "하루 {total}명 · 정류소 {stops}곳 · {period} 표본 {days}일 평균",
+      summaryPeriod: "하루 {total}명 · 정류소 {stops}곳 · {period} 평균",
       unordered: "노선 위에 놓을 수 없는 승객 {value}명",
       empty: "노선 번호를 입력하면 정류소마다 버스 안에 몇 명이 타고 있는지 보여 줍니다.",
       dong: {
@@ -108,9 +109,12 @@ export const messages = {
         straight: "실제 경로를 받지 못해 정류소를 직선으로 이었습니다.",
         past: "이 기간의 정류소가 지금 노선과 {value}%만 겹칩니다. 노선이 바뀐 것으로 보고 이 기간 정류소 순서로 노선을 다시 그렸습니다. 색은 구간별 재차인원이고, 회색 점선은 지금 노선입니다.",
         pastStraight: "저장된 도로 경로가 없는 구간은 정류소를 점선 직선으로 이었습니다.",
-        pastRoad: "도로 구간 보기는 지금 노선 경로에 놓으므로, 지금 노선에 없는 정류소의 승객은 빠집니다.",
+        pastRoad: "도로 구간 보기는 지금 노선 경로에만 놓을 수 있어, 이 기간에는 대신 과거 노선을 보여 줍니다.",
         pastSegment: "이 구간 재차 {value}명",
-        currentPath: "지금 노선 경로"
+        currentPath: "지금 노선 경로",
+        noCurrent: "지금 저장된 이 노선의 경로가 없어(폐선·노선 번호 변경 등) 이 기간 정류소 순서로 노선을 그렸습니다. 색은 구간별 재차인원입니다.",
+        pastUnplaced: "위치를 모르는 정류소 {value}곳은 건너뛰고 앞뒤 정류소를 이었습니다.",
+        pastMaster: "정류소 순서와 위치는 서울시 노선 정보({date} 기준)입니다."
       },
       hour: {
         label: "시간대",
@@ -208,7 +212,7 @@ export const messages = {
         "지도 수요는 고른 수단, 노선, 요일 유형, 시간대의 승차 수요를 합한 값입니다.",
         "행정동 필터는 지도에 보이는 지점이 고른 행정동 경계 안에 있는지로 계산합니다.",
         "노선 분석은 대표일 OD를 씁니다. 요일 유형(평일, 토요일, 일요일·공휴일)마다 최근 12개월 보정 TOPIS 노선 OD에서 승차·하차 정류소 쌍의 하루 평균을 냅니다. 특수일은 뺍니다. 하루씩 빼고 나머지로 맞혀 보면 평일 기준 정류소 단위 약 6%, 노선 단위 약 3% 안에 들고, 정류소 쌍 하나는 더 흔들립니다(약 26%).",
-        "기간을 고르면 그 달들에 공개된 같은 요일 유형의 날을 평균합니다(BigQuery). TOPIS 노선 OD는 요일 유형마다 한 달에 하루 안팎이라, 짧은 기간은 표본 날이 적습니다. 화면에 표본 날짜를 함께 보여 줍니다.",
+        "기간을 고르면 그 달들에 공개된 같은 요일 유형의 날을 평균합니다(BigQuery). TOPIS 노선 OD는 요일 유형마다 한 달에 하루 안팎이라, 짧은 기간은 표본 날이 적습니다.",
         "시간대를 고르면 승차 정류소의 시간대 비율(34개월 승하차 시간대 자료)로 하루 OD를 나눈 추정값을 씁니다. 그 시간에 탄 사람만 세며, 평일·토요일·일요일·공휴일 모두 됩니다. 범례 고정을 켜면 도로 위 색은 하루 중 가장 붐빈 한 시간을 기준으로 고정됩니다.",
         "시간대 배분은 한 정류소에서 탄 사람이 행선지와 상관없이 같은 시간대 모양을 따른다고 가정합니다. 이 가정으로 하차 시간대를 다시 만들어(정류소당 1.5분 이동) 실제 시간대 하차와 비교하면 오차(WAPE)가 노선×시간 7.6%, 정류소×시간 21.7%입니다. 같은 방식으로 본 승차 쪽은 6.9%, 17.3%라, 가정 때문에 더해지는 오차는 노선 단위 약 1%p, 정류소 단위 약 4%p입니다(2025-10~2026-09, 버스 658개 노선).",
         "재차 인원은 하루 동안 그 정류소를 지나간 사람의 합이지 버스 한 대의 혼잡도가 아닙니다. 혼잡도는 배차와 차량 정원을 함께 봐야 하며 앞으로 붙일 계획입니다."
@@ -283,9 +287,10 @@ export const messages = {
       notFoundSplit: "The representative OD splits route {route} into {list}. Please choose one.",
       notFoundHour: "No OD for route {route} in this hour.",
       notFoundBasis: "No OD for route {route} in these months or hours.",
-      summary: "{total} riders a day · {stops} stops · mean of {days} sample days",
+      summary: "{total} riders a day · {stops} stops · typical day",
+      summaryDay: "{total} riders a day · {stops} stops · {period} only",
       summaryHour: "{total} riders boarding {hour} · {stops} stops",
-      summaryPeriod: "{total} riders a day · {stops} stops · mean of {days} sample days in {period}",
+      summaryPeriod: "{total} riders a day · {stops} stops · mean of {period}",
       unordered: "{value} riders could not be placed on the route",
       empty: "Enter a route number to see how many riders are on board as the bus leaves each stop.",
       dong: {
@@ -314,9 +319,12 @@ export const messages = {
         straight: "No road path was available, so stops are joined by straight lines.",
         past: "Only {value}% of this period's stops are on today's route, so the route is taken to have changed and is redrawn from this period's stop order. Colours show riders on board; the grey dotted line is today's route.",
         pastStraight: "Sections with no stored road path are joined by dotted straight lines.",
-        pastRoad: "The road view places riders on today's route path, so riders at stops it no longer serves are left out.",
+        pastRoad: "The road view can only place riders on today's route path, so this period shows the earlier route instead.",
         pastSegment: "{value} on board here",
-        currentPath: "Today's route path"
+        currentPath: "Today's route path",
+        noCurrent: "No path is stored for this route today (withdrawn or renumbered), so it is drawn from this period's stop order. Colours show riders on board.",
+        pastUnplaced: "{value} stops with no known location are skipped; the stops either side are joined.",
+        pastMaster: "Stop order and positions from the Seoul route master as of {date}."
       },
       hour: {
         label: "Time of day",
@@ -414,7 +422,7 @@ export const messages = {
         "The demand map sums boarding demand for the chosen mode, routes, day type and hours.",
         "The district filter checks whether each visible point falls inside the chosen district boundaries.",
         "Route analysis uses typical-day OD: for each day type (weekday, Saturday, Sunday and public holiday), the mean daily passengers of every boarding-to-alighting stop pair over the last twelve months of corrected TOPIS route OD, special days left out. Predicting each day from the others, it is within about 6% by stop and 3% by route on weekdays; single stop pairs are noisier (about 26%).",
-        "With months chosen, the mean is taken over the published days of this type in those months (BigQuery). TOPIS route OD has about one day of each type a month, so a short period rests on few days; the sample days are shown with it.",
+        "With months chosen, the mean is taken over the published days of this type in those months (BigQuery). TOPIS route OD has about one day of each type a month, so a short period rests on few days.",
         "With hours chosen, the daily OD is split by the boarding stop's hourly profile (34 months of hourly boarding counts). Only riders who boarded in those hours are counted, on any day type. With the fixed scale on, the road colours are fixed to the busiest hour of the day.",
         "The hourly split assumes riders boarding at a stop share one time profile whatever their destination. Rebuilding hourly alightings from it (1.5 minutes a stop) and comparing them with counted hourly alightings gives a WAPE of 7.6% by route and hour and 21.7% by stop and hour; boardings checked the same way give 6.9% and 17.3%, so the assumption adds about 1 point by route and 4 points by stop (2025-10 to 2026-09, 658 bus routes).",
         "On-board figures are daily totals passing each stop, not the load of one bus. Crowding needs service frequency and vehicle capacity as well and is planned for later."

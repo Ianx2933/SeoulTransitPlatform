@@ -75,9 +75,18 @@ export function fetchRoutePath({ route }) {
   });
 }
 
-/** A line through the given stops in order ("01001,01002,..."), for a route as it ran in a past period. */
-export function fetchStopPath({ stops }) {
-  return fetchJson(`/api/curated-od/stop-path?stops=${encodeURIComponent(stops)}`, {
+/**
+ * A line through the given stops in order ("01001,01002,..."), for a route as
+ * it ran in a past period. With route and at (a day), the server draws the
+ * route master snapshot of that day when it has one.
+ */
+export function fetchStopPath({ stops, route = null, at = null }) {
+  const params = new URLSearchParams({ stops });
+  if (route && at) {
+    params.set("route", route);
+    params.set("at", at);
+  }
+  return fetchJson(`/api/curated-od/stop-path?${params.toString()}`, {
     defaultMessage: "Failed to fetch the period's route line"
   });
 }

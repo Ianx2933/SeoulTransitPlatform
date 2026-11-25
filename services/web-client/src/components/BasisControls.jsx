@@ -347,20 +347,11 @@ export function BasisNote({ basis, dayType, withHours = true }) {
   } else if (!days) {
     text = tx("Mean of {period}.", { period: label });
   } else {
-    const list = (days.days || []).map((d) => String(d).slice(5));
-    const shown = list.length > 12 ? `${list.slice(0, 12).join(" · ")} …` : list.join(" · ");
-    // TOPIS days of this type that the mean leaves out (Seollal, Chuseok, strikes), and why.
-    const reasonText = { major_holiday: tx("Seollal or Chuseok break"), special: tx("special day such as a strike") };
-    const left = (days.excluded || [])
-      .map((e) => `${String(e.date).slice(5)} ${reasonText[e.reason] || tx("special day")}`)
-      .join(" · ");
+    // Days left out of means (strikes, Seollal, Chuseok) are not listed; they stay choosable as one day.
     text =
       days.nDays === 0
-        ? left
-          ? tx("No days of this type in {period}: the published ones are left out ({days}).", { period: label, days: left })
-          : tx("No days of this type in {period}.", { period: label })
-        : tx("Mean of {period}, {n} sample days: {days}", { period: label, n: days.nDays ?? "-", days: shown }) +
-          (left ? ` ${tx("Left out: {days}.", { days: left })}` : "");
+        ? tx("No usual days of this type in {period}; choose one day to see the published days.", { period: label })
+        : tx("Mean of {period}.", { period: label });
   }
   const hours = withHours && basis?.hours ? basis.hours : null;
   return (

@@ -3,6 +3,7 @@ package com.ian.transit.scenario.infrastructure;
 import com.ian.transit.dongod.infrastructure.RouteLoadQueryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.BadSqlGrammarException;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -48,7 +49,51 @@ public class ScenarioQueryRepository {
             ORDER BY s.from_ars, s.to_ars, s.length_m
             """;
 
+    /**
+     * Stop positions as the Seoul bus route API gives them on stored paths,
+     * current and earlier. Covers stops outside Seoul that a Seoul route serves
+     * (Gyeonggi stops the stop tables lack).
+     */
+    private static final String STATION_POINTS = """
+            SELECT DISTINCT ON (ars) ars, station_nm, lat, lng
+            FROM (
+                SELECT ars, station_nm, lat, lng, 0 AS age FROM bus_route_path_station
+                WHERE ars IN (:ars) AND lat IS NOT NULL AND lng IS NOT NULL
+                UNION ALL
+                SELECT ars, station_nm, lat, lng, 1 AS age FROM bus_route_path_version_station
+                WHERE ars IN (:ars) AND lat IS NOT NULL AND lng IS NOT NULL
+            ) s
+            ORDER BY ars, age
+            """;
+
+    private static final String STATION_POINTS_CURRENT = """
+            SELECT DISTINCT ON (ars) ars, station_nm, lat, lng FROM bus_route_path_station
+            WHERE ars IN (:ars) AND lat IS NOT NULL AND lng IS NOT NULL
+            ORDER BY ars
+            """;
+
+    public record StationPoint(String ars, String name, double lat, double lng) {
+    }
+
     private final NamedParameterJdbcTemplate jdbc;
+
+    /** Key: padded ARS. Current paths only while migration 03 is not applied. */
+    public Map<String, StationPoint> stationPoints(Collection<String> paddedArs) {
+        Map<String, StationPoint> out = new HashMap<>();
+        if (paddedArs.isEmpty()) {
+            return out;
+        }
+        var params = new MapSqlParameterSource("ars", List.copyOf(paddedArs));
+        RowCallbackHandler put = rs -> out.put(rs.getString("ars"),
+                new StationPoint(rs.getString("ars"), rs.getString("station_nm"), rs.getDouble("lat"), rs.getDouble("lng")));
+        try {
+            jdbc.query(STATION_POINTS, params, put);
+        } catch (BadSqlGrammarException e) {
+            out.clear();
+            jdbc.query(STATION_POINTS_CURRENT, params, put);
+        }
+        return out;
+    }
 
     /** A stored station: TOPIS route name, stored variant, BIS sequence, ARS. */
     public record StationAt(String odRoute, String variant, int seq, String ars) {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { isPastRoute, pastPoints, pastSegments, stopMatch, stopPathQuery } from "../pastRoute.js";
+import { isPastRoute, pastPoints, pastSegments, periodEndDay, stopMatch, stopPathQuery } from "../pastRoute.js";
 
 const stops = [
   { seq: 2, ars: "1002", name: "나", onBoardAfter: 30 },
@@ -21,9 +21,36 @@ describe("stopMatch", () => {
     expect(isPastRoute(null)).toBe(false);
   });
 
+  test("a partly rerouted route is past, one or two odd stops are not", () => {
+    expect(isPastRoute({ matched: 50, total: 55, ratio: 50 / 55 })).toBe(true);
+    expect(isPastRoute({ matched: 53, total: 55, ratio: 53 / 55 })).toBe(false);
+  });
+
   test("a matching route is not past", () => {
     const m = stopMatch(stops, { stops: [{ ars: "1001" }, { ars: "1002" }, { ars: "1003" }] });
     expect(isPastRoute(m)).toBe(false);
+  });
+});
+
+describe("periodEndDay", () => {
+  test("the chosen day, the last day of the last month, or none", () => {
+    expect(periodEndDay({ day: "2026-01-13" })).toBe("2026-01-13");
+    expect(periodEndDay({ from: "2024-09", to: "2024-11" })).toBe("2024-11-30");
+    expect(periodEndDay({ from: "2024-02", to: "2024-02" })).toBe("2024-02-29");
+    expect(periodEndDay(null)).toBeNull();
+  });
+});
+
+describe("pastSegments with master stops", () => {
+  test("a stop the OD does not list keeps the riders before it", () => {
+    const path = {
+      segments: [
+        { fromArs: "01001", toArs: "01009", path: [[37.5, 127], [37.505, 127]] },
+        { fromArs: "01009", toArs: "01002", path: [[37.505, 127], [37.51, 127]] }
+      ]
+    };
+    const out = pastSegments([{ seq: 1, ars: "01001", onBoardAfter: 12 }, { seq: 2, ars: "01002", onBoardAfter: 0 }], path);
+    expect(out.map((s) => s.load)).toEqual([12, 12]);
   });
 });
 

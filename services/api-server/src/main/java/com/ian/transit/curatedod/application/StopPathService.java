@@ -2,6 +2,8 @@ package com.ian.transit.curatedod.application;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.ian.transit.curatedod.infrastructure.RouteSnapshotRepository;
+import com.ian.transit.curatedod.infrastructure.RouteSnapshotRepository.Snapshot;
 import com.ian.transit.map.month.BusMonthDemandRepository;
 import com.ian.transit.map.month.BusMonthDemandRepository.StopPoint;
 import com.ian.transit.scenario.infrastructure.ScenarioQueryRepository;
@@ -9,7 +11,11 @@ import com.ian.transit.scenario.infrastructure.ScenarioQueryRepository.PairSegme
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +27,11 @@ import java.util.Map;
  * OD stop order instead: the stored road segment between two stops where any
  * current route, or an earlier stored path of a changed route, runs it; a
  * straight line otherwise.
+ *
+ * Given the route and a day, the stop order comes from the Seoul route master
+ * snapshot in force that day (bus_route_stop_snapshot) when there is one: it
+ * has every stop the route served, with positions, also outside Seoul and for
+ * withdrawn routes (1155). The OD stop order is the fallback.
  */
 @Service
 public class StopPathService {
@@ -28,17 +39,22 @@ public class StopPathService {
     public static final int MAX_STOPS = 240;
     /** A stored segment longer than this many times the straight distance is a detour of another route. */
     static final double MAX_DETOUR = 3.0;
+    /** Share of the OD stops a master snapshot must have to be taken as the route of that period. */
+    static final double MIN_SNAPSHOT_SHARE = 0.9;
 
     private final BusMonthDemandRepository stops;
     private final ScenarioQueryRepository segments;
+    private final RouteSnapshotRepository snapshots;
     private final Cache<String, StopPath> cache = Caffeine.newBuilder()
             .maximumSize(500)
             .expireAfterWrite(Duration.ofHours(12))
             .build();
 
-    public StopPathService(BusMonthDemandRepository stops, ScenarioQueryRepository segments) {
+    public StopPathService(BusMonthDemandRepository stops, ScenarioQueryRepository segments,
+                           RouteSnapshotRepository snapshots) {
         this.stops = stops;
         this.segments = segments;
+        this.snapshots = snapshots;
     }
 
     public record Stop(String ars, String name, double lat, double lng) {
@@ -47,12 +63,84 @@ public class StopPathService {
     public record Segment(String fromArs, String toArs, List<double[]> path, boolean straight, double lengthM) {
     }
 
-    public record StopPath(List<Stop> stops, List<Segment> segments, int missingStops) {
+    /** snapshotDate: the route master snapshot the stop order came from, null for the OD order. */
+    public record StopPath(List<Stop> stops, List<Segment> segments, int missingStops, LocalDate snapshotDate) {
+        StopPath withSnapshot(LocalDate date) {
+            return new StopPath(stops, segments, missingStops, date);
+        }
     }
 
     public StopPath path(String stopList) {
+        return path(stopList, null, null);
+    }
+
+    /** route and at (a day of the period) are optional; with both, the master snapshot of that day is tried first. */
+    public StopPath path(String stopList, String route, LocalDate at) {
         List<String> ars = parse(stopList);
-        return cache.get(String.join(",", ars), k -> build(ars));
+        String key = String.join(",", ars) + "|" + (route == null ? "" : route) + "|" + (at == null ? "" : at);
+        return cache.get(key, k -> {
+            if (route != null && !route.isBlank() && at != null) {
+                Snapshot snap = snapshots.routeAt(routeNames(route), at);
+                List<RouteSnapshotRepository.Row> order = snap == null ? List.of() : snapshotOrder(snap, ars);
+                if (order.size() >= 2 && covers(order, ars)) {
+                    return fromSnapshot(order).withSnapshot(snap.date());
+                }
+            }
+            return build(ars);
+        });
+    }
+
+    /** The name as given and without a TOPIS suffix ("5522A난곡" → "5522A", "8773출근" → "8773"). */
+    static List<String> routeNames(String route) {
+        String r = route.trim();
+        String bare = r.replaceAll("[가-힣]+$", "");
+        return bare.isEmpty() || bare.equals(r) ? List.of(r) : List.of(r, bare);
+    }
+
+    /**
+     * The snapshot route (of the variants with this name) sharing the most stops
+     * with the OD stops, in order, numbered stops only, a stop repeated back to back once.
+     */
+    static List<RouteSnapshotRepository.Row> snapshotOrder(Snapshot snap, List<String> odStops) {
+        var od = new HashSet<>(odStops);
+        List<RouteSnapshotRepository.Row> best = List.of();
+        long bestShared = -1;
+        for (var rows : snap.byRouteId().values()) {
+            long shared = rows.stream().map(RouteSnapshotRepository.Row::ars).filter(od::contains).distinct().count();
+            if (shared > bestShared) {
+                bestShared = shared;
+                best = rows;
+            }
+        }
+        List<RouteSnapshotRepository.Row> out = new ArrayList<>();
+        for (var r : best.stream().sorted(Comparator.comparingInt(RouteSnapshotRepository.Row::seq)).toList()) {
+            if (r.ars() == null || r.ars().isBlank()) {
+                continue;
+            }
+            if (!out.isEmpty() && out.get(out.size() - 1).ars().equals(r.ars())) {
+                continue;
+            }
+            out.add(r);
+        }
+        return out.size() > MAX_STOPS ? out.subList(0, MAX_STOPS) : out;
+    }
+
+    /** The snapshot is the route the OD saw: most OD stops are on it (else the nearest snapshot is another version). */
+    static boolean covers(List<RouteSnapshotRepository.Row> order, List<String> odStops) {
+        var on = new HashSet<String>();
+        order.forEach(r -> on.add(r.ars()));
+        var od = new LinkedHashSet<>(odStops);
+        long shared = od.stream().filter(on::contains).count();
+        return shared >= MIN_SNAPSHOT_SHARE * od.size();
+    }
+
+    private StopPath fromSnapshot(List<RouteSnapshotRepository.Row> order) {
+        List<String> ars = order.stream().map(RouteSnapshotRepository.Row::ars).toList();
+        Map<String, StopPoint> points = new HashMap<>();
+        for (var r : order) {
+            points.putIfAbsent(r.ars(), new StopPoint(r.ars(), r.name(), r.lat(), r.lng()));
+        }
+        return assemble(ars, points, segments.pairSegmentsWithHistory(new LinkedHashSet<>(ars)));
     }
 
     /** Padded five-digit ARS numbers in the given order; repeats kept (a loop route passes a stop twice). */
@@ -82,7 +170,18 @@ public class StopPathService {
 
     private StopPath build(List<String> ars) {
         var unique = new LinkedHashSet<>(ars);
-        return assemble(ars, stops.stopPoints(unique), segments.pairSegmentsWithHistory(unique));
+        Map<String, StopPoint> points = new HashMap<>(stops.stopPoints(unique));
+        var unplaced = unique.stream().filter(a -> !points.containsKey(a)).toList();
+        if (!unplaced.isEmpty()) {
+            // Stops outside Seoul are missing from the stop tables; take them from stored route paths.
+            segments.stationPoints(unplaced).forEach((a, p) -> points.put(a, new StopPoint(a, p.name(), p.lat(), p.lng())));
+            var still = unplaced.stream().filter(a -> !points.containsKey(a)).toList();
+            if (!still.isEmpty()) {
+                // Stops of withdrawn routes: the route master snapshots know them.
+                snapshots.points(still).forEach((a, p) -> points.put(a, new StopPoint(a, p.name(), p.lat(), p.lng())));
+            }
+        }
+        return assemble(ars, points, segments.pairSegmentsWithHistory(unique));
     }
 
     /** Pure: joins the stop points and stored pair segments into a line. */
@@ -117,7 +216,7 @@ public class StopPathService {
             }
             previous = p;
         }
-        return new StopPath(outStops, out, missing);
+        return new StopPath(outStops, out, missing, null);
     }
 
     static double metres(StopPoint a, StopPoint b) {
