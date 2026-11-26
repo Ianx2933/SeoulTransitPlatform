@@ -14,6 +14,7 @@ import { fetchPeriodRange, fetchRouteRange } from "../api/periodApi.js";
 import BasisControls, { PeriodUnavailable, usePeriodRange } from "./BasisControls.jsx";
 import { RouteCompare, RouteHistory } from "./RouteHistory.jsx";
 import SegmentDayCompare from "./SegmentDayCompare.jsx";
+import FleetInputs from "./FleetInputs.jsx";
 import { parseRouteLink, routeLinkHash } from "../utils/routeLink.js";
 import { comparePeriods } from "../utils/routeCompare.js";
 import CsvButton from "./CsvButton.jsx";
@@ -61,6 +62,8 @@ export default function RouteAnalysisPanel({
   const [compare, setCompare] = useState(null);
   const [compareNote, setCompareNote] = useState("");
   const [copied, setCopied] = useState(false);
+  // Vehicles and trips typed in by hand (no fleet data loaded); kept per route in the link.
+  const [fleet, setFleet] = useState(() => link?.fleet || { vehicles: null, trips: null });
   const { range } = usePeriodRange();
   const [routeData, setRouteData] = useState(null);
   const setStopSeq = onStopSeqChange;
@@ -211,9 +214,9 @@ export default function RouteAnalysisPanel({
   // The route on screen in the address, so the link opens the same view.
   useEffect(() => {
     if (!routeData || typeof window === "undefined" || !window.location.hash.startsWith("#/route")) return;
-    const hash = routeLinkHash({ route: routeData.노선명, dayType, basis });
+    const hash = routeLinkHash({ route: routeData.노선명, dayType, basis, fleet });
     if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
-  }, [routeData, dayType, basis]);
+  }, [routeData, dayType, basis, fleet]);
 
   const copyLink = () => {
     navigator.clipboard?.writeText(window.location.href).then(
@@ -230,6 +233,7 @@ export default function RouteAnalysisPanel({
     setMovedNote("");
     setCompare(null);
     setCompareNote("");
+    if (route.trim() !== routeData?.노선명) setFleet({ vehicles: null, trips: null });
     const name = route.trim();
     if (!name) {
       setError(t("route.enterRoute"));
@@ -398,6 +402,8 @@ export default function RouteAnalysisPanel({
               </button>
             )}
           </div>
+
+          <FleetInputs routeData={routeData} hours={basis.hours} fleet={fleet} setFleet={setFleet} fmt={fmt} />
 
           <RouteHistory route={routeData.노선명} onCompare={onCompare} />
           {compareNote && <p className="note">{compareNote}</p>}

@@ -87,6 +87,18 @@ export const messages = {
       summaryPeriod: "하루 {total}명 · 정류소 {stops}곳 · {period} 평균",
       movedPeriod: "{route}번은 최근 12개월 자료가 없어(폐선·번호 변경 등) 마지막으로 다닌 {from}–{to}로 기간을 맞췄습니다.",
       link: { copy: "링크 복사", copied: "복사됨" },
+      fleet: {
+        vehicles: "운행 대수",
+        vehicleUnit: "대",
+        tripsDay: "하루 운행횟수",
+        tripsHours: "이 시간대 운행횟수",
+        tripUnit: "회",
+        perTrip: "1회 평균 승객 {value}명",
+        maxPerTrip: "가장 붐비는 구간 1회 평균 재차 {value}명",
+        perVehicle: "1대당 승객 {value}명",
+        tripsPerVehicle: "1대당 운행 {value}회",
+        note: "대수와 운행횟수는 직접 넣는 값입니다(서울시 자료를 아직 넣지 않음). 링크에 함께 담깁니다. 운행횟수는 기점에서 출발한 횟수로 넣으세요."
+      },
       history: {
         title: "노선 변경 이력",
         first: "{date} 자료부터: 정류소 {stops}곳",
@@ -348,6 +360,18 @@ export const messages = {
       summaryPeriod: "{total} riders a day · {stops} stops · mean of {period}",
       movedPeriod: "Route {route} has no data in the last twelve months (withdrawn or renumbered), so the period is moved to its last months, {from}–{to}.",
       link: { copy: "Copy link", copied: "Copied" },
+      fleet: {
+        vehicles: "Vehicles",
+        vehicleUnit: "",
+        tripsDay: "Trips a day",
+        tripsHours: "Trips in these hours",
+        tripUnit: "",
+        perTrip: "{value} riders per trip",
+        maxPerTrip: "{value} on board per trip on the busiest section",
+        perVehicle: "{value} riders per vehicle",
+        tripsPerVehicle: "{value} trips per vehicle",
+        note: "Vehicles and trips are typed in (no Seoul fleet data is loaded yet) and kept in the link. Count trips as departures from the first stop."
+      },
       history: {
         title: "Route changes",
         first: "From the {date} data: {stops} stops",
