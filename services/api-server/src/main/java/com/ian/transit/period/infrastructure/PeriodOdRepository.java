@@ -41,15 +41,22 @@ public class PeriodOdRepository {
     }
 
     /** Only these three filters exist; the SQL is never built from request text. */
+    /**
+     * Each filter reads the copy of fct_od_stop clustered on its own column
+     * (dbt od_stop_by_*): fct_od_stop's small day partitions prune nothing,
+     * so a route query read whole days (about 550 MB) there.
+     */
     private enum Filter {
-        ROUTES("f.route_name IN UNNEST(@keys)"),
-        BOARDING("f.board_stop_key IN UNNEST(@keys)"),
-        ALIGHTING("f.alight_stop_key IN UNNEST(@keys)");
+        ROUTES("f.route_name IN UNNEST(@keys)", "od_stop_by_route"),
+        BOARDING("f.board_stop_key IN UNNEST(@keys)", "od_stop_by_board"),
+        ALIGHTING("f.alight_stop_key IN UNNEST(@keys)", "od_stop_by_alight");
 
         final String sql;
+        final String table;
 
-        Filter(String sql) {
+        Filter(String sql, String table) {
             this.sql = sql;
+            this.table = table;
         }
     }
 
@@ -152,19 +159,16 @@ public class PeriodOdRepository {
 
     /**
      * First and last month of every route in the route OD, keyed by the OD's
-     * route name. One scan of two columns, kept for a day by the service: a
+     * route name, from the small dbt table od_route_month_range (rebuilt
+     * weekly), kept for a day by the service: a
      * withdrawn route (1155) has OD only up to its last month, so the page can
      * move the period there instead of showing nothing.
      */
     public Map<String, List<LocalDate>> routeMonthRanges() {
         String sql = """
-                SELECT route_name,
-                       DATE_TRUNC(MIN(service_date), MONTH) AS first_month,
-                       DATE_TRUNC(MAX(service_date), MONTH) AS last_month
+                SELECT route_name, first_month, last_month
                 FROM %s
-                WHERE route_name IS NOT NULL
-                GROUP BY route_name
-                """.formatted(props().table("fct_od_stop"));
+                """.formatted(props().table("od_route_month_range"));
         Map<String, List<LocalDate>> out = new HashMap<>();
         runner.query("route_month_ranges", sql, Map.of(), r -> Map.entry(r.get("route_name").getStringValue(), List.of(
                         LocalDate.parse(r.get("first_month").getStringValue()),
@@ -188,6 +192,10 @@ public class PeriodOdRepository {
     }
 
     static String legsSql(BigQueryProperties props, String filter, boolean oneDay) {
+        return legsSql(props, filter, oneDay, "fct_od_stop");
+    }
+
+    static String legsSql(BigQueryProperties props, String filter, boolean oneDay, String table) {
         return """
                 WITH days AS (
                   %1$s
@@ -216,7 +224,7 @@ public class PeriodOdRepository {
                 FROM od_rows r
                 JOIN n USING (mode)
                 GROUP BY 1, 2, 3
-                """.formatted(daysSql(props, oneDay), props.table("fct_od_stop"), filter);
+                """.formatted(daysSql(props, oneDay), props.table(table), filter);
     }
 
     private List<PeriodLeg> legs(String what, Filter filter, Period period, String dayType, Collection<String> keys) {
@@ -225,7 +233,7 @@ public class PeriodOdRepository {
         }
         Map<String, QueryParameterValue> p = periodParams(period, dayType);
         p.put("keys", BigQueryRunner.strings(keys));
-        return runner.query(what, legsSql(props(), filter.sql, period.oneDay()), p, PeriodOdRepository::leg);
+        return runner.query(what, legsSql(props(), filter.sql, period.oneDay(), filter.table), p, PeriodOdRepository::leg);
     }
 
     private static PeriodLeg leg(FieldValueList r) {

@@ -213,6 +213,15 @@ export const messages = {
         leavingTo: "구간에서 나간 사람이 내린 곳",
         enteringFrom: "구간으로 들어온 사람이 탄 곳"
       },
+      segmentDays: {
+        title: "요일별 비교",
+        loading: "평일·토요일·일요일 값을 불러오는 중…",
+        total: "구간 이용 합계",
+        routeTotal: "노선 하루 승객",
+        share: "(평일의 {value}%)",
+        mismatch: "{days}에는 같은 순번의 정류소가 달라 비교에서 뺐습니다.",
+        note: "같은 기간·시간대의 요일 유형별 하루 평균입니다. 구간 이용 합계는 이 구간을 조금이라도 탄 승객 수입니다."
+      },
       flow: {
         sortLabel: "정렬",
         riders: "많은 순",
@@ -464,6 +473,15 @@ export const messages = {
         share: "{value} of the route",
         leavingTo: "Riders leaving the section got off at",
         enteringFrom: "Riders entering the section got on at"
+      },
+      segmentDays: {
+        title: "By day type",
+        loading: "Loading weekday, Saturday and Sunday…",
+        total: "Riders on the section",
+        routeTotal: "Route riders a day",
+        share: "({value}% of weekday)",
+        mismatch: "Left out for {days}: the stops at these positions differ.",
+        note: "Means per day of each day type over the same months and hours. Riders on the section counts everyone who rides any part of it."
       },
       flow: {
         sortLabel: "Sort",

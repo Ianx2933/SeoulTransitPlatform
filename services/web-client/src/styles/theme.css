@@ -520,3 +520,5 @@
 .compare-row--added td:first-child { color: #1f7a3a; }
 .compare-row--removed td:first-child { color: #b3261e; }
 .compare-tag { font-size: 11px; }
+.segment-days { display: grid; gap: 6px; margin-top: 12px; }
+.segment-days__total th, .segment-days__total td { font-weight: 700; }

@@ -13,6 +13,7 @@ import { basisFileTag, basisKey, isPeriodUnavailable, isPlain, periodForRoute, p
 import { fetchPeriodRange, fetchRouteRange } from "../api/periodApi.js";
 import BasisControls, { PeriodUnavailable, usePeriodRange } from "./BasisControls.jsx";
 import { RouteCompare, RouteHistory } from "./RouteHistory.jsx";
+import SegmentDayCompare from "./SegmentDayCompare.jsx";
 import { parseRouteLink, routeLinkHash } from "../utils/routeLink.js";
 import { comparePeriods } from "../utils/routeCompare.js";
 import CsvButton from "./CsvButton.jsx";
@@ -541,6 +542,9 @@ export default function RouteAnalysisPanel({
               </button>
             </div>
             {segment && <SegmentView segment={segment} fmt={fmt} />}
+            {segment && (
+              <SegmentDayCompare route={routeData.노선명} dayType={dayType} basis={basis} segment={segment} fmt={fmt} />
+            )}
           </div>
 
           <details className="card">
