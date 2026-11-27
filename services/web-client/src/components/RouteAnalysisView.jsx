@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { CircleMarker, GeoJSON, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { groupByPlace, modifiers, nextPick, NO_PICK, singleSeq } from "../utils/stopPick.js";
+import { CircleMarker, GeoJSON, MapContainer, Pane, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
 
 import { fetchOdRouteNames, fetchRouteDongOd, fetchRoutePath, fetchRouteStopPoints, fetchStopPath } from "../api/routeAnalysisApi.js";
 import { isPastRoute, pastPoints, pastSegments, periodEndDay, stopMatch, stopPathQuery } from "../utils/pastRoute.js";
@@ -57,7 +58,10 @@ export default function RouteAnalysisView({ busLines }) {
   const translate = useLatest(t);
   const [routeData, setRouteData] = useState(null);
   const [turnaround, setTurnaround] = useState(null);
-  const [stopSeq, setStopSeq] = useState(null);
+  // Picked stops: a click picks one, Ctrl adds or removes one, Shift a range (stopPick.js).
+  const [pick, setPick] = useState(NO_PICK);
+  const stopSeq = singleSeq(pick);
+  const setStopSeq = useCallback((seq) => setPick(seq == null ? NO_PICK : { anchor: seq, seqs: [seq] }), []);
   const [reachSeq, setReachSeq] = useState(null);
   const [segment, setSegment] = useState(null);
   const [points, setPoints] = useState([]);
@@ -179,6 +183,9 @@ export default function RouteAnalysisView({ busLines }) {
     };
   }, [routeName]);
 
+  const allSeqs = useMemo(() => (routeData?.stops || []).map((s) => s.seq).sort((a, b) => a - b), [routeData]);
+  const pickStop = useCallback((seq, mods) => setPick((p) => nextPick(p, seq, mods, allSeqs)), [allSeqs]);
+  const pickedSet = useMemo(() => new Set(pick.seqs), [pick]);
   const turnaroundFromBis = useMemo(() => {
     if (!roadPath?.turnaroundArs || !routeData) return null;
     return seqOfArs(routeData.stops, roadPath.turnaroundArs, findTurnaround(routeData.stops));
@@ -267,7 +274,8 @@ export default function RouteAnalysisView({ busLines }) {
   const variantPaths = (roadPath?.variants || []).filter((v) => Array.isArray(v.path) && v.path.length > 1);
   // Demand-layer positions first; the stored route path fills the rest (piers, new stops).
   const placed = useMemo(
-    () => placeStops(routeData?.stops || [], [...points, ...pastPoints(pastPath), ...pathStopPoints(roadPath)]),
+    // The route's own positions first: an ARS shared by a Gyeonggi and a Seoul stop must not pull the line to the wrong one.
+    () => placeStops(routeData?.stops || [], [...pathStopPoints(roadPath), ...pastPoints(pastPath), ...points]),
     [routeData, points, roadPath, pastPath]
   );
   const effectiveTurnaround = turnaroundFromBis ?? turnaround;
@@ -354,7 +362,7 @@ export default function RouteAnalysisView({ busLines }) {
           </Pane>
 
           {segmentPath.length > 1 && (
-            <Polyline positions={segmentPath} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
+            <Polyline positions={segmentPath} interactive={false} pathOptions={{ color: COLORS.segment, weight: 14, opacity: 0.9 }} />
           )}
           {/* The period's route, redrawn from its stops; the current path faint underneath. */}
           {showPast && hasRoad && (
@@ -398,26 +406,71 @@ export default function RouteAnalysisView({ busLines }) {
           )}
           {roadOn && exploreLoad.result && <RoadPointsLayer result={exploreLoad.result} />}
           {reachPath.length > 1 && (
-            <Polyline positions={reachPath} pathOptions={{ color: COLORS.selected, weight: ROUTE_WEIGHT + 4, opacity: 0.95 }} />
+            <Polyline
+              positions={reachPath}
+              interactive={false}
+              pathOptions={{ color: COLORS.selected, weight: ROUTE_WEIGHT + 4, opacity: 0.95 }}
+            />
           )}
 
-          {placed.map((p) => {
-            const down = effectiveTurnaround != null && p.seq > effectiveTurnaround;
+          {/* Stops in their own pane above every line: a line drawn later (the reach of a
+              stop, a section) would otherwise cover them and take their clicks. */}
+          <Pane name="route-stops" style={{ zIndex: 450 }}>
+          {groupByPlace(placed).map((group) => {
+            const p = group[0];
+            const isDown = (q) => effectiveTurnaround != null && q.seq > effectiveTurnaround;
+            const picked = group.some((q) => pickedSet.has(q.seq)) && pick.seqs.length > 1;
+            if (group.length === 1) {
+              return (
+                <CircleMarker
+                  key={p.seq}
+                  center={[p.lat, p.lng]}
+                  radius={picked ? 6 : 4}
+                  pathOptions={{
+                    color: picked ? COLORS.ink : isDown(p) ? COLORS.down : COLORS.up,
+                    weight: 2,
+                    fillColor: picked ? COLORS.selected : "#ffffff",
+                    fillOpacity: 1
+                  }}
+                  eventHandlers={{ click: (e) => pickStop(p.seq, modifiers(e)) }}
+                >
+                  <Tooltip direction="top" offset={[0, -4]}>
+                    {p.seq} {p.name}
+                  </Tooltip>
+                </CircleMarker>
+              );
+            }
+            // One place, two or more stops (a terminus at both ends): choose which.
             return (
               <CircleMarker
-                key={p.seq}
+                key={group.map((q) => q.seq).join("-")}
                 center={[p.lat, p.lng]}
-                radius={4}
-                pathOptions={{ color: down ? COLORS.down : COLORS.up, weight: 2, fillColor: "#ffffff", fillOpacity: 1 }}
-                eventHandlers={{ click: () => setStopSeq(p.seq) }}
+                radius={picked ? 7 : 6}
+                pathOptions={{ color: COLORS.ink, weight: 2, fillColor: picked ? COLORS.selected : "#ffffff", fillOpacity: 1 }}
               >
-                <Tooltip direction="top" offset={[0, -4]}>
-                  {p.seq} {p.name}
+                <Tooltip direction="top" offset={[0, -6]}>
+                  {group.map((q) => `${q.seq} ${q.name}`).join(" · ")}
                 </Tooltip>
+                <Popup>
+                  <div className="stop-choice">
+                    {group.map((q) => (
+                      <button
+                        key={q.seq}
+                        type="button"
+                        className="chip"
+                        onClick={(e) => pickStop(q.seq, modifiers(e))}
+                      >
+                        {q.seq} {q.name} · {isDown(q) ? t("route.pick.down") : t("route.pick.up")}
+                      </button>
+                    ))}
+                  </div>
+                </Popup>
               </CircleMarker>
             );
           })}
+          </Pane>
 
+          <Pane name="route-stop-selected" style={{ zIndex: 460 }}>
           {selected && (
             <CircleMarker
               center={[selected.lat, selected.lng]}
@@ -429,6 +482,7 @@ export default function RouteAnalysisView({ busLines }) {
               </Tooltip>
             </CircleMarker>
           )}
+          </Pane>
         </MapContainer>
         <p className="map-note" role="status">{note}</p>
         {routeName && narrow && (
@@ -476,7 +530,8 @@ export default function RouteAnalysisView({ busLines }) {
             basis={query.basis}
             onStopLookup={(direction) => {
               const stop = routeData?.stops?.find((s) => s.seq === stopSeq);
-              if (stop?.ars) setExplore({ kind: "stop", ars: String(stop.ars), direction });
+              // The route goes along: its stop's number can also name a Seoul stop elsewhere.
+              if (stop?.ars) setExplore({ kind: "stop", ars: String(stop.ars), direction, route: routeName });
             }}
           />
           {roadOn && (
@@ -551,6 +606,8 @@ export default function RouteAnalysisView({ busLines }) {
         busLines={odRouteNames || busLines}
         stopSeq={stopSeq}
         onStopSeqChange={setStopSeq}
+        pickedSeqs={pick.seqs}
+        onPick={pickStop}
         onRouteData={setRouteData}
         onTurnaround={setTurnaround}
         onReach={setReachSeq}
@@ -651,7 +708,10 @@ function FitRoute({ bounds, routeName, rightOpen, narrow }) {
       paddingTopLeft: [40, 40],
       // On phones the bottom sheet covers about 150 px of the map.
       paddingBottomRight: [wide && latestRightOpen.current ? 460 : 40, narrow ? 170 : 40],
-      maxZoom: 15
+      maxZoom: 15,
+      // No zoom animation: a layer swapped during one (route colours ↔ demand
+      // colours) left Leaflet drawing stale lines and the map stuck.
+      animate: false
     });
     // Fit when the route changes, not on every re-render of its stops or a
     // panel being folded (folding only uncovers more map).

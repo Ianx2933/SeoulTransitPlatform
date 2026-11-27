@@ -48,12 +48,18 @@ public class DongRouteLoadService {
             return repository.legs(basis.label(), level, code, dir);
         }
         List<String> keys = repository.areaStopKeys(level, code);
+        // Route stops whose number is an area stop's but which lie elsewhere are not the area's.
+        java.util.Set<String> awayOut = repository.awayOutside(level, code);
         Map<String, RouteLoadCalculator.Leg> byPair = new LinkedHashMap<>();
         if (!dir.equals("do")) {
-            periodService.legsByStops(basis, keys, false).forEach(l -> byPair.putIfAbsent(pairKey(l), roadLeg(l)));
+            periodService.legsByStops(basis, keys, false).stream()
+                    .filter(l -> !awayOut.contains(l.route() + "|" + RouteLoadCalculator.pad(l.boardArs())))
+                    .forEach(l -> byPair.putIfAbsent(pairKey(l), roadLeg(l)));
         }
         if (!dir.equals("od")) {
-            periodService.legsByStops(basis, keys, true).forEach(l -> byPair.putIfAbsent(pairKey(l), roadLeg(l)));
+            periodService.legsByStops(basis, keys, true).stream()
+                    .filter(l -> !awayOut.contains(l.route() + "|" + RouteLoadCalculator.pad(l.alightArs())))
+                    .forEach(l -> byPair.putIfAbsent(pairKey(l), roadLeg(l)));
         }
         return new ArrayList<>(byPair.values());
     }

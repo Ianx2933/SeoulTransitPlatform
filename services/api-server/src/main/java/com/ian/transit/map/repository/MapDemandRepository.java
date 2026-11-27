@@ -177,15 +177,20 @@ public class MapDemandRepository {
                         d.mode,
                         d.service_id,
                         d.node_id,
-                        b."정류장명" AS node_name,
-                        b."위도" AS lat,
-                        b."경도" AS lng,
+                        COALESCE(w.node_nm, b."정류장명") AS node_name,
+                        COALESCE(w.lat, b."위도") AS lat,
+                        COALESCE(w.lng, b."경도") AS lng,
                         CAST(d.boarding AS BIGINT) AS boarding,
                         CAST(d.alighting AS BIGINT) AS alighting
                     FROM integrated_hourly_transit_demand_light d
                     JOIN bus_stop_location b
                       ON LPAD(d.node_id::text, 5, '0')
                        = LPAD(b."정류장번호"::text, 5, '0')
+                    -- A route's stop away from the Seoul stop of its number (13_stop_ars_route_away):
+                    -- 안양·성남 stops of Seoul routes share 50 numbers with Seoul stops.
+                    LEFT JOIN stop_ars_route_away w
+                      ON w.route_nm = d.service_id
+                     AND w.ars = LPAD(d.node_id::text, 5, '0')
                     WHERE d.mode = ?
                 """);
 

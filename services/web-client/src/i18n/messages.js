@@ -87,6 +87,17 @@ export const messages = {
       summaryPeriod: "하루 {total}명 · 정류소 {stops}곳 · {period} 평균",
       movedPeriod: "{route}번은 최근 12개월 자료가 없어(폐선·번호 변경 등) 마지막으로 다닌 {from}–{to}로 기간을 맞췄습니다.",
       link: { copy: "링크 복사", copied: "복사됨" },
+      pick: {
+        heading: "정류소 {value}곳 함께 보기",
+        range: "{from} ~ {to}",
+        inside: "고른 정류소끼리 오간 사람",
+        destinations: "여기서 탄 사람이 내린 곳",
+        origins: "여기서 내린 사람이 탄 곳",
+        note: "Shift를 누르고 누르면 그 사이 정류소를 모두, Ctrl(맥은 ⌘)을 누르고 누르면 하나씩 더하거나 뺍니다. 고른 정류소끼리 오간 사람은 탄 사람과 내린 사람 양쪽에 들어갑니다.",
+        failed: "고른 정류소를 불러오지 못했습니다",
+        up: "상행",
+        down: "하행"
+      },
       fleet: {
         vehicles: "운행 대수",
         vehicleUnit: "대",
@@ -181,7 +192,7 @@ export const messages = {
       chart: {
         title: "정류소를 떠날 때 버스 안에 있는 사람",
         aria: "정류소별 재차 인원 막대그래프",
-        hint: "막대를 누르면 그 정류소를 자세히 봅니다.",
+        hint: "막대를 누르면 그 정류소를 자세히 봅니다. Shift는 범위, Ctrl은 하나씩 여러 정류소를 함께 고릅니다.",
         up: "상행",
         down: "하행",
         turnaround: "{seq}번에서 돌아옴(추정)",
@@ -360,6 +371,17 @@ export const messages = {
       summaryPeriod: "{total} riders a day · {stops} stops · mean of {period}",
       movedPeriod: "Route {route} has no data in the last twelve months (withdrawn or renumbered), so the period is moved to its last months, {from}–{to}.",
       link: { copy: "Copy link", copied: "Copied" },
+      pick: {
+        heading: "{value} stops together",
+        range: "{from} to {to}",
+        inside: "Riders between the picked stops",
+        destinations: "Riders boarding here got off at",
+        origins: "Riders getting off here got on at",
+        note: "Shift-click picks every stop in between; Ctrl-click (⌘ on a Mac) adds or removes one. Riders between two picked stops count both as boarding and as alighting.",
+        failed: "Could not load the picked stops",
+        up: "outbound",
+        down: "inbound"
+      },
       fleet: {
         vehicles: "Vehicles",
         vehicleUnit: "",
@@ -454,7 +476,7 @@ export const messages = {
       chart: {
         title: "Riders on board as the bus leaves each stop",
         aria: "Bar chart of riders on board after each stop",
-        hint: "Click a bar to look at that stop.",
+        hint: "Click a bar to look at that stop. Shift-click for a range, Ctrl-click to add stops one by one.",
         up: "Upbound",
         down: "Downbound",
         turnaround: "Turns at stop {seq} (estimated)",

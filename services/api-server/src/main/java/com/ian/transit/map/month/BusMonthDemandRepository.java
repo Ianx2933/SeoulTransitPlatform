@@ -57,6 +57,27 @@ public class BusMonthDemandRepository {
             ORDER BY ars, pri
             """;
 
+    /**
+     * Route stops away from the Seoul stop of their number
+     * (13_stop_ars_route_away), "route|padded ARS" → own position. Empty
+     * until the view exists.
+     */
+    public Map<String, StopPoint> awayPoints() {
+        Map<String, StopPoint> out = new HashMap<>();
+        if (jdbc == null) {
+            return out;
+        }
+        try {
+            jdbc.query("SELECT route_nm, ars, node_nm, lat, lng FROM stop_ars_route_away", rs -> {
+                out.put(rs.getString("route_nm") + "|" + rs.getString("ars"), new StopPoint(rs.getString("ars"),
+                        rs.getString("node_nm"), rs.getDouble("lat"), rs.getDouble("lng")));
+            });
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            out.clear();
+        }
+        return out;
+    }
+
     private final BigQueryRunner runner;
     private final NamedParameterJdbcTemplate jdbc;
 

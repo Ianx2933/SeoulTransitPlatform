@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchRouteSegment,
   fetchRouteStop,
+  fetchRouteStopsCombined,
   fetchRouteStops
 } from "../api/routeAnalysisApi.js";
 import { useI18n } from "../i18n/I18nProvider.jsx";
@@ -15,6 +16,7 @@ import BasisControls, { PeriodUnavailable, usePeriodRange } from "./BasisControl
 import { RouteCompare, RouteHistory } from "./RouteHistory.jsx";
 import SegmentDayCompare from "./SegmentDayCompare.jsx";
 import FleetInputs from "./FleetInputs.jsx";
+import { modifiers } from "../utils/stopPick.js";
 import { parseRouteLink, routeLinkHash } from "../utils/routeLink.js";
 import { comparePeriods } from "../utils/routeCompare.js";
 import CsvButton from "./CsvButton.jsx";
@@ -45,7 +47,9 @@ export default function RouteAnalysisPanel({
   onTurnaround,
   onSegment,
   onQuery,
-  turnaroundFromBis = null
+  turnaroundFromBis = null,
+  pickedSeqs = [],
+  onPick = null
 }) {
   const { t, lang } = useI18n();
   const fmt = (value) =>
@@ -474,7 +478,7 @@ export default function RouteAnalysisPanel({
               {chart.bars.map((b, index) => {
                 const down = turnaround != null && b.seq > turnaround;
                 const fill =
-                  b.seq === stopSeq
+                  b.seq === stopSeq || (pickedSeqs.length > 1 && pickedSeqs.includes(b.seq))
                     ? "var(--selected)"
                     : segmentSeqs.has(b.seq)
                       ? "var(--selected-light)"
@@ -484,7 +488,11 @@ export default function RouteAnalysisPanel({
                 const showLabel =
                   index % chart.labelEvery === 0 || index === chart.bars.length - 1 || b.seq === turnaround;
                 return (
-                  <g key={b.seq} onClick={() => setStopSeq(b.seq)} className="bar">
+                  <g
+                    key={b.seq}
+                    onClick={(e) => (onPick ? onPick(b.seq, modifiers(e)) : setStopSeq(b.seq))}
+                    className="bar"
+                  >
                     <rect x={b.x} y={b.y} width={b.w} height={Math.max(b.h, 0.5)} fill={fill} rx={1}>
                       <title>
                         {t("route.chart.bar", {
@@ -520,6 +528,17 @@ export default function RouteAnalysisPanel({
             </svg>
             <p className="note">{t("route.chart.hint")}</p>
           </div>
+
+          {pickedSeqs.length > 1 && (
+            <CombinedStopCard
+              route={routeData.노선명}
+              dayType={dayType}
+              basis={basis}
+              seqs={pickedSeqs}
+              stops={routeData.stops}
+              fmt={fmt}
+            />
+          )}
 
           {stopSeq !== null && (
             <StopCard
@@ -576,7 +595,7 @@ export default function RouteAnalysisPanel({
                   {routeData.stops.map((s) => (
                     <tr
                       key={s.seq}
-                      onClick={() => setStopSeq(s.seq)}
+                      onClick={(e) => (onPick ? onPick(s.seq, modifiers(e)) : setStopSeq(s.seq))}
                       className={s.seq === stopSeq ? "is-selected" : undefined}
                     >
                       <td className="num">{s.seq}</td>
@@ -664,6 +683,73 @@ function StopCard({ detail, seq, reachText, setReachText, reachValid, fmt }) {
           <FlowList title={t("route.stop.origins")} flows={detail.origins} fmt={fmt} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Several picked stops taken together (Shift for a range, Ctrl one by one):
+ * riders boarding at any of them and where they go, riders alighting at any
+ * of them and where they came from. Riders between two picked stops count on
+ * both sides.
+ */
+function CombinedStopCard({ route, dayType, basis, seqs, stops, fmt }) {
+  const { t } = useI18n();
+  const key = `${route}|${dayType}|${basisKey(basis)}|${seqs.join(",")}`;
+  const [state, setState] = useState({ key: null, data: null, error: "" });
+  useEffect(() => {
+    let ignore = false;
+    const timer = setTimeout(() => {
+      fetchRouteStopsCombined({
+        route,
+        dayType,
+        basis,
+        seqs,
+        messages: { defaultMessage: t("route.pick.failed"), notFoundMessage: t("route.pick.failed") }
+      })
+        .then((data) => {
+          if (!ignore) setState({ key, data, error: "" });
+        })
+        .catch((e) => {
+          if (!ignore) setState({ key, data: null, error: e.message });
+        });
+    }, 250);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
+    // key stands for route, day type, basis and the picked stops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const data = state.key === key ? state.data : null;
+  const name = (seq) => stops.find((s) => s.seq === seq)?.name || "";
+  const first = seqs[0];
+  const last = seqs[seqs.length - 1];
+  const contiguous = last - first + 1 === seqs.length;
+  return (
+    <div className="card card--stop">
+      <span className="note">{t("route.pick.heading", { value: seqs.length })}</span>
+      <h2 className="stop-name">
+        {contiguous
+          ? t("route.pick.range", { from: `${first} ${name(first)}`, to: `${last} ${name(last)}` })
+          : seqs.slice(0, 6).map((s) => `${s} ${name(s)}`).join(", ") + (seqs.length > 6 ? " …" : "")}
+      </h2>
+      {state.key === key && state.error && <div className="error-box" role="alert">{state.error}</div>}
+      {!data && !state.error && <p className="note">…</p>}
+      {data && (
+        <>
+          <dl className="figures">
+            <div><dt>{t("route.stop.alight")}</dt><dd className="num">{fmt(data.alightings)}</dd></div>
+            <div className="figures__main"><dt>{t("route.pick.inside")}</dt><dd className="num">{fmt(data.inside)}</dd></div>
+            <div><dt>{t("route.stop.board")}</dt><dd className="num">{fmt(data.boardings)}</dd></div>
+          </dl>
+          <div className="two-col">
+            <FlowList title={t("route.pick.destinations")} flows={data.destinations} fmt={fmt} />
+            <FlowList title={t("route.pick.origins")} flows={data.origins} fmt={fmt} />
+          </div>
+        </>
+      )}
+      <p className="note">{t("route.pick.note")}</p>
     </div>
   );
 }

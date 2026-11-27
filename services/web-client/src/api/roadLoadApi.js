@@ -16,6 +16,7 @@ export function fetchRoadLoad(request) {
   } else if (request.kind === "stop") {
     params.set("ars", request.ars);
     params.set("direction", request.direction || "board");
+    if (request.route) params.set("route", request.route);
     path = "stop";
   } else {
     params.set("from", request.from);
@@ -36,6 +37,7 @@ export function roadLoadKey(request) {
   const b = basisKey(request.basis);
   const tail = b ? `|${b}` : "";
   if (request.kind === "routes") return `routes|${day}|${request.routes.join(",")}${tail}`;
-  if (request.kind === "stop") return `stop|${day}|${request.ars}|${request.direction || "board"}${tail}`;
+  if (request.kind === "stop")
+    return `stop|${day}|${request.ars}|${request.direction || "board"}${request.route ? `|r${request.route}` : ""}${tail}`;
   return `segment|${day}|${request.from}|${request.to}${tail}`;
 }

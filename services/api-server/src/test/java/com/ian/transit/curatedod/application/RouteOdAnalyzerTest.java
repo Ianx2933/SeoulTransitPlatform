@@ -87,4 +87,33 @@ class RouteOdAnalyzerTest {
                 RouteOdAnalyzer.pairKey("ars2", "ars5"), 0.0));
         assertThat(hour).containsExactly(leg(1, 4, 3.0));
     }
+
+    @Test
+    void aStopServedTwiceTakesTheShortestForwardSequence() {
+        // T is served at 1 and 6 (a terminus at both ends); S at 3 and 5 (both directions).
+        List<RouteOdAnalyzer.Leg> legs = List.of(
+                new RouteOdAnalyzer.Leg(1, "T", "T", 2, "B", "B", 10),   // already right
+                new RouteOdAnalyzer.Leg(6, "T", "T", 4, "D", "D", 5),    // boarded at the start, put at the end
+                new RouteOdAnalyzer.Leg(2, "B", "B", 1, "T", "T", 3),    // alighted at the end, put at the start
+                new RouteOdAnalyzer.Leg(3, "S", "S", 6, "T", "T", 4),    // boarded at S on the way back
+                new RouteOdAnalyzer.Leg(3, "S", "S", 4, "D", "D", 2),    // S on the way out, right
+                new RouteOdAnalyzer.Leg(5, "S", "S", 4, "D", "D", 1));   // wrong pass of S
+        List<RouteOdAnalyzer.Leg> placed = RouteOdAnalyzer.placeOnRoute(legs);
+        assertThat(placed).extracting(RouteOdAnalyzer.Leg::boardSeq).containsExactly(1, 1, 2, 5, 3, 3);
+        assertThat(placed).extracting(RouteOdAnalyzer.Leg::alightSeq).containsExactly(2, 4, 6, 6, 4, 4);
+        assertThat(new RouteOdAnalyzer("typical_weekday", "100", 250, legs).stops().unorderedPassengers())
+                .isEqualTo(0.0);
+    }
+
+    @Test
+    void severalStopsTakenTogether() {
+        var c = analyzer.stops(List.of(2, 1));
+        assertThat(c.seqs()).containsExactly(1, 2);
+        assertThat(c.boardings()).isEqualTo(85.0);
+        assertThat(c.alightings()).isEqualTo(10.0);
+        assertThat(c.inside()).isEqualTo(10.0);
+        assertThat(c.destinations()).extracting("seq").containsExactly(5, 4, 2, 3);
+        assertThat(c.origins()).extracting("seq").containsExactly(1);
+        assertThatThrownBy(() -> analyzer.stops(List.of(9))).isInstanceOf(IllegalArgumentException.class);
+    }
 }

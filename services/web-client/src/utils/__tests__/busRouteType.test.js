@@ -8,6 +8,8 @@ describe("busRouteType", () => {
     ["741", "trunk"],
     ["1711", "branch"],
     ["7212", "branch"],
+    ["0017", "branch"],
+    ["0411", "branch"],
     ["9404", "express"],
     ["9403-1", "express"],
     ["02", "circular"],

@@ -3,7 +3,7 @@
  * bus colour system. Kept free of React so it can be unit-tested.
  *
  *   3 digits                      trunk (간선)       #0068B7
- *   4 digits starting 1-7         branch (지선)      #53B332
+ *   4 digits starting 0-7         branch (지선)      #53B332  (0017, 0411)
  *   4 digits starting 9           express (광역)     #E60012
  *   2 digits                      circular (순환)    #F2B70A
  *   district name + number        village (마을)     #53B332
@@ -42,7 +42,7 @@ export function busRouteType(name, mode = "bus") {
   if (digits.length === 3) return "trunk";
   if (digits.length === 2) return "circular";
   if (digits.length === 4) {
-    if (/^[1-7]/.test(digits)) return "branch";
+    if (/^[0-7]/.test(digits)) return "branch";
     if (digits.startsWith("9")) return "express";
   }
   return "other";

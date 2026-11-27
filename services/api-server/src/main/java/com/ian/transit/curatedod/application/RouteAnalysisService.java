@@ -54,6 +54,11 @@ public class RouteAnalysisService {
         return analyzer(basis, 노선명).stop(seq, reach);
     }
 
+    public com.ian.transit.curatedod.dto.RouteStopsCombinedResponse stopsCombined(OdBasis basis, String 노선명,
+                                                                                 List<Integer> seqs) {
+        return analyzer(basis, 노선명).stops(seqs);
+    }
+
     /**
      * The route's OD by administrative district: stop pairs summed into
      * boarding-to-alighting district pairs, with each district's boundary.

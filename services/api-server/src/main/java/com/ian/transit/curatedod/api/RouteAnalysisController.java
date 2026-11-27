@@ -61,6 +61,19 @@ public class RouteAnalysisController {
         return ResponseEntity.ok(service.stops(OdBasis.of(기준일자, period, hours, hour), names.resolve(노선명)));
     }
 
+    /** Several stops taken together: seqs=3,4,5 (at most 200). */
+    @GetMapping("/stops-combined")
+    public ResponseEntity<com.ian.transit.curatedod.dto.RouteStopsCombinedResponse> stopsCombined(
+        @PathVariable("routeName") String 노선명,
+        @RequestParam("seqs") List<Integer> seqs,
+        @RequestParam(value = "date", required = false) String 기준일자,
+        @RequestParam(value = "hour", required = false) Integer hour,
+        @RequestParam(value = "hours", required = false) String hours,
+        @RequestParam(value = "period", required = false) String period
+    ) {
+        return ResponseEntity.ok(service.stopsCombined(OdBasis.of(기준일자, period, hours, hour), names.resolve(노선명), seqs));
+    }
+
     @GetMapping("/stops/{seq}")
     public ResponseEntity<RouteStopDetailResponse> stop(
         @PathVariable("routeName") String 노선명,

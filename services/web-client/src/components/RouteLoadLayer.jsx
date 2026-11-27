@@ -17,7 +17,11 @@ export default function RouteLoadLayer({ result, segments, onSegmentClick }) {
 
   useEffect(() => {
     const bounds = loadBounds(result?.segments);
-    if (bounds) map.fitBounds(bounds, { padding: [24, 24] });
+    // No zoom animation: layers are added and removed in the same render (see FitRoute).
+    if (bounds) {
+      map.stop();
+      map.fitBounds(bounds, { padding: [24, 24], animate: false });
+    }
   }, [result, map]);
 
   const fmt = (v) => Number(v || 0).toLocaleString(lang === "ko" ? "ko-KR" : "en-US", { maximumFractionDigits: 1 });

@@ -60,7 +60,10 @@ SET client_encoding = 'UTF8';
 \echo '=== 12 performance indexes (last: runs ANALYZE) ==='
 \ir 12_performance_indexes.sql
 
+\echo '=== 13 route stops sharing another stop''s ARS (materialized view; needs 08, 11) ==='
+\ir 13_stop_ars_route_away.sql
+
 \echo '=== schema creation complete ==='
-\echo 'Expect 29 tables (28 project tables + PostGIS spatial_ref_sys) and 3 materialized views.'
+\echo 'Expect 29 tables (28 project tables + PostGIS spatial_ref_sys) and 4 materialized views.'
 \echo 'The materialized views are empty until data is loaded: after loading stops,'
-\echo 'boundaries and stop_location_fix, run the REFRESH lines in 11_stop_area_lookup.sql.'
+\echo 'boundaries and stop_location_fix, run the REFRESH lines in 11_stop_area_lookup.sql, then 13 after loading the route master.'

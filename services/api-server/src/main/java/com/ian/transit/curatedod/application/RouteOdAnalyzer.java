@@ -2,6 +2,7 @@ package com.ian.transit.curatedod.application;
 
 import com.ian.transit.curatedod.dto.RouteSegmentResponse;
 import com.ian.transit.curatedod.dto.RouteStopDetailResponse;
+import com.ian.transit.curatedod.dto.RouteStopsCombinedResponse;
 import com.ian.transit.curatedod.dto.RouteStopsResponse;
 import com.ian.transit.curatedod.dto.StopFlow;
 import com.ian.transit.curatedod.dto.StopLoad;
@@ -23,7 +24,12 @@ import java.util.TreeMap;
  * identified by their sequence on the route: a stop the route serves twice (a
  * loop, a depot) has two sequences and is two stops here.
  *
- * Rows whose alighting sequence is not after the boarding sequence cannot be
+ * A stop served twice carries one ARS number at both sequences, and the source
+ * does not always put a ride at the right one (100's 한성여객종점 at both ends,
+ * a stop 541 serves in both directions): {@link #placeOnRoute} moves such a
+ * leg to the shortest forward pair of its stops' sequences.
+ *
+ * Rows whose alighting sequence is still not after the boarding sequence cannot be
  * placed on the route. They count in the route total and are reported as
  * unordered passengers, but not in any load or segment figure.
  */
@@ -58,7 +64,7 @@ public final class RouteOdAnalyzer {
         this.label = label;
         this.route = route;
         this.nDays = nDays;
-        for (Leg leg : legs) {
+        for (Leg leg : placeOnRoute(legs)) {
             total += leg.passengers();
             stops.putIfAbsent(leg.boardSeq(), new Stop(leg.boardSeq(), leg.boardArs(), leg.boardName()));
             stops.putIfAbsent(leg.alightSeq(), new Stop(leg.alightSeq(), leg.alightArs(), leg.alightName()));
@@ -206,6 +212,47 @@ public final class RouteOdAnalyzer {
                 alightings, onBoard, top(destinations), top(origins), reach);
     }
 
+    /** At most this many stops are taken together. */
+    public static final int MAX_COMBINED_STOPS = 200;
+
+    /**
+     * Several stops taken together: riders boarding at any of them and where
+     * they alight, riders alighting at any of them and where they boarded.
+     * A stop served twice (a terminus at both ends) is two stops by sequence.
+     */
+    public RouteStopsCombinedResponse stops(java.util.Collection<Integer> seqs) {
+        java.util.TreeSet<Integer> picked = new java.util.TreeSet<>(seqs);
+        if (picked.isEmpty()) {
+            throw new IllegalArgumentException("give at least one stop");
+        }
+        if (picked.size() > MAX_COMBINED_STOPS) {
+            throw new IllegalArgumentException("at most " + MAX_COMBINED_STOPS + " stops");
+        }
+        picked.forEach(this::requireStop);
+        Map<Integer, Double> destinations = new HashMap<>();
+        Map<Integer, Double> origins = new HashMap<>();
+        double boardings = 0, alightings = 0, inside = 0;
+        for (Leg leg : ordered) {
+            double p = leg.passengers();
+            boolean from = picked.contains(leg.boardSeq());
+            boolean to = picked.contains(leg.alightSeq());
+            if (from) {
+                boardings += p;
+                destinations.merge(leg.alightSeq(), p, Double::sum);
+            }
+            if (to) {
+                alightings += p;
+                origins.merge(leg.boardSeq(), p, Double::sum);
+            }
+            if (from && to) {
+                inside += p;
+            }
+        }
+        List<String> names = picked.stream().map(s -> stops.get(s).name()).toList();
+        return new RouteStopsCombinedResponse(label, route, List.copyOf(picked), names, boardings, alightings, inside,
+                top(destinations), top(origins));
+    }
+
     /**
      * Validated reach levels: the defaults when none are given, otherwise the
      * given levels sorted, without duplicates, at most {@link #MAX_REACH_LEVELS}.
@@ -223,6 +270,51 @@ public final class RouteOdAnalyzer {
             }
         }
         return levels.stream().distinct().sorted().toList();
+    }
+
+    /**
+     * Legs whose boarding or alighting ARS the route serves at more than one
+     * sequence, moved to the pair of those sequences that is the shortest
+     * forward ride (nobody rides past their own stop and round again). A leg
+     * keeps its sequences when they already are that pair, when its stops are
+     * served once, or when no pair runs forward. Sequences of an ARS are the
+     * ones the legs themselves use, boarding or alighting.
+     */
+    public static List<Leg> placeOnRoute(List<Leg> legs) {
+        Map<String, java.util.TreeSet<Integer>> seqsOf = new HashMap<>();
+        for (Leg leg : legs) {
+            if (leg.boardArs() != null) {
+                seqsOf.computeIfAbsent(leg.boardArs(), k -> new java.util.TreeSet<>()).add(leg.boardSeq());
+            }
+            if (leg.alightArs() != null) {
+                seqsOf.computeIfAbsent(leg.alightArs(), k -> new java.util.TreeSet<>()).add(leg.alightSeq());
+            }
+        }
+        List<Leg> out = new ArrayList<>(legs.size());
+        for (Leg leg : legs) {
+            java.util.Set<Integer> boards = seqsOf.getOrDefault(leg.boardArs(), new java.util.TreeSet<>(List.of(leg.boardSeq())));
+            java.util.Set<Integer> alights = seqsOf.getOrDefault(leg.alightArs(), new java.util.TreeSet<>(List.of(leg.alightSeq())));
+            if (boards.size() < 2 && alights.size() < 2) {
+                out.add(leg);
+                continue;
+            }
+            int bestBoard = leg.boardSeq();
+            int bestAlight = leg.alightSeq();
+            int bestGap = bestAlight > bestBoard ? bestAlight - bestBoard : Integer.MAX_VALUE;
+            for (int b : boards) {
+                for (int a : alights) {
+                    if (a > b && a - b < bestGap) {
+                        bestBoard = b;
+                        bestAlight = a;
+                        bestGap = a - b;
+                    }
+                }
+            }
+            out.add(bestBoard == leg.boardSeq() && bestAlight == leg.alightSeq() ? leg
+                    : new Leg(bestBoard, leg.boardArs(), leg.boardName(),
+                            bestAlight, leg.alightArs(), leg.alightName(), leg.passengers()));
+        }
+        return out;
     }
 
     /** Key of an OD pair by its boarding and alighting ARS. */

@@ -87,9 +87,11 @@ public class BusMonthDemandService {
         int divisor = DemandSqlSupport.getDayAggregationDivisor(days, aggregation);
         Map<String, BusMonthDemandRepository.StopPoint> points = repository.stopPoints(
                 rows.stream().map(BusMonthDemandRepository.StopMonthDemand::ars).distinct().toList());
+        // A route's own stop wins over the Seoul stop of the same number (안양, 성남 share 50 numbers).
+        Map<String, BusMonthDemandRepository.StopPoint> away = repository.awayPoints();
         List<MapDemandResponse> out = new ArrayList<>();
         for (BusMonthDemandRepository.StopMonthDemand r : rows) {
-            BusMonthDemandRepository.StopPoint p = points.get(r.ars());
+            BusMonthDemandRepository.StopPoint p = away.getOrDefault(r.route() + "|" + r.ars(), points.get(r.ars()));
             if (p == null) {
                 continue;
             }

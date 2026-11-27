@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -41,33 +42,50 @@ public class RouteLoadQueryRepository {
      * stop_area_any (database/schema/11_stop_area_lookup.sql: every stop point
      * of bus_stop_location and integrated_bus_stop_location, stop_location_fix
      * replacing both for its ARS, placed in its 행정동 once instead of per
-     * request). %s is the area filter on adm_cd. Shared with
+     * request). %1$s is the area filter on adm_cd. Shared with
      * DongOdQueryRepository (bus routes tab, bus reach outside Seoul).
+     *
+     * away_out: route stops whose number is an area stop's but which lie
+     * elsewhere (stop_ars_route_away, database/schema/13: a 안양 or 성남 stop
+     * of a Seoul route carrying a Seoul stop's ARS). Riders there are not the
+     * area's; queries drop legs whose area end is one, by route and number.
      */
     static final String AREA_STOPS = """
             WITH stops AS MATERIALIZED (
-                SELECT DISTINCT ars FROM stop_area_any WHERE %s
+                SELECT DISTINCT ars FROM stop_area_any WHERE %1$s
             ),
             stop_keys AS MATERIALIZED (
                 SELECT ars FROM stops WHERE ars <> '00000'
                 UNION
                 SELECT LTRIM(ars, '0') FROM stops WHERE ars <> '00000'
+            ),
+            area_cd AS MATERIALIZED (
+                SELECT adm_cd FROM public.admin_dong_boundary WHERE %1$s
+            ),
+            away_out AS MATERIALIZED (
+                SELECT w.route_nm, w.ars FROM stop_ars_route_away w
+                WHERE w.ars IN (SELECT ars FROM stops)
+                  AND (w.adm_cd IS NULL OR w.adm_cd NOT IN (SELECT adm_cd FROM area_cd))
             )
             """;
 
     private static final String BOARD = """
             SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
                    승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
-            FROM od_typical_route_stop
+            FROM od_typical_route_stop o
             WHERE 기준일자 = :label AND 승차_정류장ars IN (SELECT ars FROM stop_keys)
+              AND NOT EXISTS (SELECT 1 FROM away_out x
+                              WHERE x.route_nm = o.노선명 AND x.ars = LPAD(o.승차_정류장ars, 5, '0'))
             GROUP BY 1, 2, 3, 4, 5
             """;
 
     private static final String ALIGHT = """
             SELECT 노선명 AS route, 승차_정류장ars AS b, 하차_정류장ars AS a,
                    승차_정류장순번 AS bq, 하차_정류장순번 AS aq, SUM(승객수) AS p
-            FROM od_typical_route_stop
+            FROM od_typical_route_stop o
             WHERE 기준일자 = :label AND 하차_정류장ars IN (SELECT ars FROM stop_keys)
+              AND NOT EXISTS (SELECT 1 FROM away_out x
+                              WHERE x.route_nm = o.노선명 AND x.ars = LPAD(o.하차_정류장ars, 5, '0'))
             GROUP BY 1, 2, 3, 4, 5
             """;
 
@@ -142,6 +160,32 @@ public class RouteLoadQueryRepository {
         }
         String sql = AREA_STOPS.formatted(level.filterSql("adm_cd")) + " SELECT ars FROM stop_keys ORDER BY ars";
         return jdbc.queryForList(sql, new MapSqlParameterSource().addValues(level.params(code)), String.class);
+    }
+
+    /**
+     * "route|padded ARS" of the area's away stops (AREA_STOPS away_out): legs
+     * of a period query whose area end is one of these are not the area's.
+     */
+    public Set<String> awayOutside(DongArea level, String code) {
+        if (level == DongArea.CITY) {
+            throw new IllegalArgumentException("route load is for a dong or a gu, not all of Seoul");
+        }
+        String sql = AREA_STOPS.formatted(level.filterSql("adm_cd"))
+                + " SELECT route_nm || '|' || ars AS k FROM away_out";
+        return new HashSet<>(jdbc.queryForList(sql, new MapSqlParameterSource().addValues(level.params(code)), String.class));
+    }
+
+    /**
+     * Every route stop away from the Seoul stop of its number
+     * (stop_ars_route_away), "route|padded ARS" → its own adm_cd ("" outside
+     * every boundary). Small (one row per route and shared number).
+     */
+    public Map<String, String> awayAll() {
+        Map<String, String> out = new HashMap<>();
+        jdbc.query("SELECT route_nm, ars, COALESCE(adm_cd, '') AS adm_cd FROM stop_ars_route_away", rs -> {
+            out.put(rs.getString("route_nm") + "|" + rs.getString("ars"), rs.getString("adm_cd"));
+        });
+        return out;
     }
 
     /** Stored stations of the OD routes (all their variants), cached per OD route. */

@@ -23,7 +23,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -166,26 +165,46 @@ public class DongOdService {
     private List<BusOutside.Row> periodBusOutside(OdBasis basis, DongArea level, String code, boolean from) {
         List<String> keys = legRepository.areaStopKeys(level, code);
         Set<String> keySet = new HashSet<>(keys);
+        // A route's stop whose number is an area stop's but which lies elsewhere
+        // (stop_ars_route_away) is not in the area: by route and number.
+        Set<String> awayOut = legRepository.awayOutside(level, code);
+        Map<String, DongOdQueryRepository.StopDong> away = repository.awayDongs();
+        // "here|there|there's district from the route's own stop, or empty"
         Map<String, Double> byPair = new LinkedHashMap<>();
         for (PeriodLeg l : periodService.legsByStops(basis, keys, !from)) {
-            String here = from ? l.boardArs() : l.alightArs();
-            String there = from ? l.alightArs() : l.boardArs();
-            if (keySet.contains(there)) {
+            String here = lpad5(from ? l.boardArs() : l.alightArs());
+            String there = lpad5(from ? l.alightArs() : l.boardArs());
+            if (awayOut.contains(l.route() + "|" + here)) {
                 continue;
             }
-            byPair.merge(lpad5(here) + "|" + lpad5(there), l.passengers(), Double::sum);
+            if (keySet.contains(there) && !awayOut.contains(l.route() + "|" + there)) {
+                continue;
+            }
+            DongOdQueryRepository.StopDong own = away.get(l.route() + "|" + there);
+            String ownKey = own == null ? "" : (own.code() == null ? "-" : own.code()) + "~" + (own.name() == null ? "" : own.name());
+            byPair.merge(here + "|" + there + "|" + ownKey, l.passengers(), Double::sum);
         }
         Set<String> stops = new HashSet<>();
-        byPair.keySet().forEach(k -> stops.addAll(List.of(k.split("\\|", -1))));
+        byPair.keySet().forEach(k -> {
+            String[] e = k.split("\\|", -1);
+            stops.add(e[0]);
+            stops.add(e[1]);
+        });
         Map<String, DongOdQueryRepository.StopDong> dongs = repository.stopDongs(stops);
-        Set<String> codes = dongs.values().stream().map(DongOdQueryRepository.StopDong::code).collect(Collectors.toSet());
+        Set<String> codes = new HashSet<>(dongs.values().stream().map(DongOdQueryRepository.StopDong::code).toList());
+        byPair.keySet().forEach(k -> {
+            DongOdQueryRepository.StopDong own = ownKeyDong(k);
+            if (own != null) {
+                codes.add(own.code());
+            }
+        });
         Map<String, double[]> points = repository.dongPoints(codes);
         double[] areaPoint = repository.areaPoint(level, code);
         Map<String, BusOutside.Row> out = new LinkedHashMap<>();
         byPair.forEach((k, p) -> {
             String[] ends = k.split("\\|", -1);
             DongOdQueryRepository.StopDong h = dongs.get(ends[0]);
-            DongOdQueryRepository.StopDong t = dongs.get(ends[1]);
+            DongOdQueryRepository.StopDong t = ends[2].isEmpty() ? dongs.get(ends[1]) : ownDong(ends[2]);
             if (t != null && t.code().startsWith(DongArea.SEOUL)) {
                 return;
             }
@@ -197,6 +216,19 @@ public class DongOdService {
                     (a, b) -> new BusOutside.Row(a.admCd(), a.admNm(), a.km(), a.passengers() + b.passengers()));
         });
         return List.copyOf(out.values());
+    }
+
+    private static DongOdQueryRepository.StopDong ownKeyDong(String key) {
+        String[] e = key.split("\\|", -1);
+        return e[2].isEmpty() ? null : ownDong(e[2]);
+    }
+
+    /** The district packed into a byPair key ("code~name", "-~" when outside every boundary). */
+    static DongOdQueryRepository.StopDong ownDong(String packed) {
+        int i = packed.indexOf('~');
+        String code = packed.substring(0, i);
+        String name = packed.substring(i + 1);
+        return "-".equals(code) ? null : new DongOdQueryRepository.StopDong(code, name.isEmpty() ? null : name);
     }
 
     /** LPAD(x, 5, '0') as BUS_OUTSIDE_SQL keys the legs. */
@@ -231,7 +263,15 @@ public class DongOdService {
                         .map(l -> new RouteLoadCalculator.Leg(l.route(), l.boardArs(), l.alightArs(), l.passengers(),
                                 l.boardSeq(), l.alightSeq()))
                         .toList();
+        if (!basis.typical()) {
+            // The typical-day legs come filtered from SQL (AREA_STOPS away_out); the period's here.
+            Set<String> awayOut = legRepository.awayOutside(level, code);
+            legs = legs.stream()
+                    .filter(l -> !awayOut.contains(l.route() + "|" + RouteLoadCalculator.pad(l.boardArs())))
+                    .toList();
+        }
         legs = RoadLoadService.split(periodService, basis, legs);
+        Map<String, DongOdQueryRepository.StopDong> away = repository.awayDongs();
         Set<String> alight = new TreeSet<>();
         legs.forEach(l -> {
             String a = RouteLoadCalculator.pad(l.alightArs());
@@ -244,7 +284,12 @@ public class DongOdService {
         Map<String, DongRouteFlows.Row> keyRow = new LinkedHashMap<>();
         for (RouteLoadCalculator.Leg l : legs) {
             String a = RouteLoadCalculator.pad(l.alightArs());
-            DongOdQueryRepository.StopDong d = a == null ? null : dongs.get(a);
+            String awayKey = l.route() + "|" + a;
+            DongOdQueryRepository.StopDong d = a == null ? null
+                    : away.containsKey(awayKey) ? away.get(awayKey) : dongs.get(a);
+            if (d != null && d.code() == null) {
+                d = null;
+            }
             String destCode = d == null ? null : d.code();
             String key = l.route() + "|" + destCode;
             sums.computeIfAbsent(key, k -> new double[1])[0] += l.passengers();

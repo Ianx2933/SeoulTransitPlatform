@@ -143,18 +143,48 @@ public class RoadLoadService {
     }
 
     public RoadLoadResponse stop(OdBasis basis, String ars, String direction) {
+        return stop(basis, ars, direction, null);
+    }
+
+    /**
+     * Riders at one stop. An ARS number can name a Seoul stop and, on some
+     * routes, a 안양 or 성남 stop (stop_ars_route_away): only the legs of the
+     * same place are kept, the place of route's stop when a route is given,
+     * else the Seoul stop.
+     */
+    public RoadLoadResponse stop(OdBasis basis, String ars, String direction, String route) {
         String stop = requireArs(ars, "ars");
         boolean alighting = "alight".equalsIgnoreCase(direction);
         if (direction != null && !direction.isBlank() && !alighting && !"board".equalsIgnoreCase(direction)) {
             throw new IllegalArgumentException("direction must be board or alight, got " + direction);
         }
-        List<RouteLoadCalculator.Leg> legs = legsByStop(basis, stop, alighting);
+        List<RouteLoadCalculator.Leg> legs = samePlace(legsByStop(basis, stop, alighting), stop, alighting,
+                route, paths.awayAll());
         if (legs.isEmpty()) {
             throw new NotFoundException("No bus riders " + (alighting ? "alighting" : "boarding") + " at " + stop);
         }
-        RoadLoadQueryRepository.StopPoint point = repository.stopPoints(List.of(stop)).get(stop);
+        String padded = RouteLoadCalculator.pad(stop);
+        boolean away = route != null && paths.awayAll().containsKey(route.trim() + "|" + padded);
+        RoadLoadQueryRepository.StopPoint point = away ? null : repository.stopPoints(List.of(stop)).get(stop);
         String title = point != null ? point.name() + " (" + stop + ")" : stop;
         return build("stop", title, basis, legs, null, true);
+    }
+
+    /**
+     * Legs whose stop at this number is the same place as the asked one: the
+     * route's own stop when it is away from the Seoul stop of the number, else
+     * the Seoul stop. away: "route|padded ARS" → own district ("" outside).
+     */
+    static List<RouteLoadCalculator.Leg> samePlace(List<RouteLoadCalculator.Leg> legs, String stop, boolean alighting,
+                                                   String route, Map<String, String> away) {
+        if (away.isEmpty()) {
+            return legs;
+        }
+        String padded = RouteLoadCalculator.pad(stop);
+        String side = route == null || route.isBlank() ? null : away.get(route.trim() + "|" + padded);
+        return legs.stream()
+                .filter(l -> java.util.Objects.equals(away.get(l.route() + "|" + padded), side))
+                .toList();
     }
 
     public RoadLoadResponse segment(OdBasis basis, String from, String to) {

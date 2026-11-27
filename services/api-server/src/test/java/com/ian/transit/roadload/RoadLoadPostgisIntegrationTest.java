@@ -138,6 +138,9 @@ class RoadLoadPostgisIntegrationTest {
         // Stop and district lookups, built from the rows above as production builds them.
         Path lookups = Path.of("..", "..", "database", "schema", "11_stop_area_lookup.sql").toAbsolutePath().normalize();
         jdbc.execute(Files.readString(lookups, StandardCharsets.UTF_8));
+        // Route stops whose ARS is another stop's (needs 08's route master and 11's stop_area_primary).
+        Path away = Path.of("..", "..", "database", "schema", "13_stop_ars_route_away.sql").toAbsolutePath().normalize();
+        jdbc.execute(Files.readString(away, StandardCharsets.UTF_8));
     }
 
     /** What an operator runs after changing a stop table or stop_location_fix (11_stop_area_lookup.sql). */
@@ -145,6 +148,7 @@ class RoadLoadPostgisIntegrationTest {
         jdbc.execute("REFRESH MATERIALIZED VIEW stop_area_any");
         jdbc.execute("REFRESH MATERIALIZED VIEW stop_area_primary");
         jdbc.execute("REFRESH MATERIALIZED VIEW dong_point");
+        jdbc.execute("REFRESH MATERIALIZED VIEW stop_ars_route_away");
     }
 
     private void saturday(String board, String alight, double riders) {

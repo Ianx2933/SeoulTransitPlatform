@@ -42,6 +42,11 @@ export function fetchRouteStop({ route, dayType, basis, seq, reach, messages }) 
   return fetchJson(`${base(route)}/stops/${seq}?${routeQuery({ dayType, basis, reach })}`, messages);
 }
 
+/** Several stops taken together (seqs: stop numbers): riders boarding or alighting at any of them. */
+export function fetchRouteStopsCombined({ route, dayType, basis, seqs, messages }) {
+  return fetchJson(`${base(route)}/stops-combined?${routeQuery({ dayType, basis })}&seqs=${seqs.join(",")}`, messages);
+}
+
 export function fetchRouteSegment({ route, dayType, basis, from, to, messages }) {
   return fetchJson(`${base(route)}/segment?${routeQuery({ dayType, basis, from, to })}`, messages);
 }
@@ -82,10 +87,8 @@ export function fetchRoutePath({ route }) {
  */
 export function fetchStopPath({ stops, route = null, at = null }) {
   const params = new URLSearchParams({ stops });
-  if (route && at) {
-    params.set("route", route);
-    params.set("at", at);
-  }
+  if (route) params.set("route", route);
+  if (route && at) params.set("at", at);
   return fetchJson(`/api/curated-od/stop-path?${params.toString()}`, {
     defaultMessage: "Failed to fetch the period's route line"
   });

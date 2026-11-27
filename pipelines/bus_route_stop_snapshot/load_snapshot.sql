@@ -38,5 +38,13 @@ WITH sig AS (
 DELETE FROM bus_route_stop_snapshot b USING dup
 WHERE b.stdr_de = dup.stdr_de AND b.route_id = dup.route_id;
 
+-- Route stops sharing another stop's ARS (migration 06), once it exists.
+DO $$
+BEGIN
+    IF to_regclass('stop_ars_route_away') IS NOT NULL THEN
+        REFRESH MATERIALIZED VIEW stop_ars_route_away;
+    END IF;
+END $$;
+
 SELECT stdr_de, count(*) AS rows, count(DISTINCT route_nm) AS routes_changed_or_new
 FROM bus_route_stop_snapshot GROUP BY stdr_de ORDER BY stdr_de;

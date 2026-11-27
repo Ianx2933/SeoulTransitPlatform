@@ -41,11 +41,17 @@ public class DongOdQueryRepository {
                 FROM od_typical_route_stop o
                 WHERE o.기준일자 = :label
                   AND o.승차_정류장ars IN (SELECT ars FROM stop_keys)
+                  AND NOT EXISTS (SELECT 1 FROM away_out x
+                                  WHERE x.route_nm = o.노선명 AND x.ars = LPAD(o.승차_정류장ars, 5, '0'))
             )
-            SELECT l.route, sp.adm_cd, sp.adm_nm, SUM(l.passengers) AS passengers
+            SELECT l.route,
+                   CASE WHEN w.ars IS NULL THEN sp.adm_cd ELSE w.adm_cd END AS adm_cd,
+                   CASE WHEN w.ars IS NULL THEN sp.adm_nm ELSE w.adm_nm END AS adm_nm,
+                   SUM(l.passengers) AS passengers
             FROM legs l
+            LEFT JOIN stop_ars_route_away w ON w.route_nm = l.route AND w.ars = LPAD(l.alight_ars, 5, '0')
             LEFT JOIN stop_area_primary sp ON sp.ars = LPAD(l.alight_ars, 5, '0')
-            GROUP BY l.route, sp.adm_cd, sp.adm_nm
+            GROUP BY 1, 2, 3
             """;
 
     /**
@@ -70,13 +76,17 @@ public class DongOdQueryRepository {
                 GROUP BY adm_cd
             ),
             legs AS MATERIALIZED (
-                SELECT LPAD(o.%2$s, 5, '0') AS here_ars, LPAD(o.%3$s, 5, '0') AS there_ars,
+                SELECT o.노선명 AS route, LPAD(o.%2$s, 5, '0') AS here_ars, LPAD(o.%3$s, 5, '0') AS there_ars,
                        SUM(o.승객수) AS passengers
                 FROM od_typical_route_stop o
                 WHERE o.기준일자 = :label
                   AND o.%2$s IN (SELECT ars FROM stop_keys)
-                  AND o.%3$s NOT IN (SELECT ars FROM stop_keys)
-                GROUP BY 1, 2
+                  AND NOT EXISTS (SELECT 1 FROM away_out x
+                                  WHERE x.route_nm = o.노선명 AND x.ars = LPAD(o.%2$s, 5, '0'))
+                  AND (o.%3$s NOT IN (SELECT ars FROM stop_keys)
+                       OR EXISTS (SELECT 1 FROM away_out x
+                                  WHERE x.route_nm = o.노선명 AND x.ars = LPAD(o.%3$s, 5, '0')))
+                GROUP BY 1, 2, 3
             ),
             here_dong AS (
                 SELECT DISTINCT ON (p.ars) p.ars, a.c
@@ -90,21 +100,30 @@ public class DongOdQueryRepository {
                 FROM stop_area_primary p
                 WHERE p.ars IN (SELECT there_ars FROM legs)
             ),
+            -- The other end's district by route and number: a route's own stop
+            -- away from the Seoul stop of the same number has its own district.
+            leg_there AS (
+                SELECT l.here_ars, l.passengers,
+                       CASE WHEN w.ars IS NULL THEN td.adm_cd ELSE w.adm_cd END AS adm_cd,
+                       CASE WHEN w.ars IS NULL THEN td.adm_nm ELSE w.adm_nm END AS adm_nm
+                FROM legs l
+                LEFT JOIN stop_ars_route_away w ON w.route_nm = l.route AND w.ars = l.there_ars
+                LEFT JOIN there_dong td ON td.ars = l.there_ars
+            ),
             there_pts AS (
                 SELECT adm_cd, p AS c
                 FROM dong_point
-                WHERE adm_cd IN (SELECT adm_cd FROM there_dong WHERE adm_cd NOT LIKE '11%%')
+                WHERE adm_cd IN (SELECT adm_cd FROM leg_there WHERE adm_cd NOT LIKE '11%%')
             )
-            SELECT td.adm_cd, td.adm_nm,
+            SELECT lt.adm_cd, lt.adm_nm,
                    CASE WHEN tp.c IS NULL THEN NULL
                         ELSE ST_DistanceSphere(COALESCE(hd.c, ST_PointOnSurface(dong.g)), tp.c) / 1000.0 END AS km,
-                   SUM(l.passengers) AS passengers
-            FROM legs l
+                   SUM(lt.passengers) AS passengers
+            FROM leg_there lt
             CROSS JOIN dong
-            LEFT JOIN here_dong hd ON hd.ars = l.here_ars
-            LEFT JOIN there_dong td ON td.ars = l.there_ars
-            LEFT JOIN there_pts tp ON tp.adm_cd = td.adm_cd
-            WHERE td.adm_cd IS NULL OR td.adm_cd NOT LIKE '11%%'
+            LEFT JOIN here_dong hd ON hd.ars = lt.here_ars
+            LEFT JOIN there_pts tp ON tp.adm_cd = lt.adm_cd
+            WHERE lt.adm_cd IS NULL OR lt.adm_cd NOT LIKE '11%%'
             GROUP BY 1, 2, 3
             """;
 
@@ -273,6 +292,16 @@ public class DongOdQueryRepository {
         List<double[]> r = jdbc.query(sql, params(null, level, code),
                 (rs, i) -> new double[] {rs.getDouble("lat"), rs.getDouble("lng")});
         return r.isEmpty() ? null : r.get(0);
+    }
+
+    /** Every route stop away from the Seoul stop of its number, "route|padded ARS" → its own district. */
+    public Map<String, StopDong> awayDongs() {
+        Map<String, StopDong> out = new HashMap<>();
+        jdbc.query("SELECT route_nm, ars, adm_cd, adm_nm FROM stop_ars_route_away", rs -> {
+            out.put(rs.getString("route_nm") + "|" + rs.getString("ars"),
+                    new StopDong(rs.getString("adm_cd"), rs.getString("adm_nm")));
+        });
+        return out;
     }
 
     public Map<String, StopDong> stopDongs(Collection<String> paddedArs) {

@@ -43,9 +43,10 @@ public class RoadLoadController {
         @RequestParam(value = "direction", required = false) String direction,
         @RequestParam(value = "date", required = false) String date,
         @RequestParam(value = "period", required = false) String period,
-        @RequestParam(value = "hours", required = false) String hours
+        @RequestParam(value = "hours", required = false) String hours,
+        @RequestParam(value = "route", required = false) String route
     ) {
-        return ResponseEntity.ok(service.stop(OdBasis.of(date, period, hours, null), ars, direction));
+        return ResponseEntity.ok(service.stop(OdBasis.of(date, period, hours, null), ars, direction, route));
     }
 
     @GetMapping("/segment")
