@@ -238,7 +238,11 @@ export default function RouteAnalysisPanel({
     setCompare(null);
     setCompareNote("");
     if (route.trim() !== routeData?.노선명) setFleet({ vehicles: null, trips: null });
-    const name = route.trim();
+    const typed = route.trim();
+    // n75 is N75: take the listed name that matches ignoring case, if exactly one.
+    const sameCase = busLines.filter((line) => String(line).toLowerCase() === typed.toLowerCase());
+    const name = busLines.includes(typed) || sameCase.length !== 1 ? typed : sameCase[0];
+    if (name !== typed) setRoute(name);
     if (!name) {
       setError(t("route.enterRoute"));
       return;
@@ -537,6 +541,7 @@ export default function RouteAnalysisPanel({
               seqs={pickedSeqs}
               stops={routeData.stops}
               fmt={fmt}
+              onClear={() => setStopSeq(null)}
             />
           )}
 
@@ -548,6 +553,7 @@ export default function RouteAnalysisPanel({
               setReachText={setReachText}
               reachValid={reachValid}
               fmt={fmt}
+              onClear={() => setStopSeq(null)}
             />
           )}
 
@@ -629,12 +635,15 @@ function RouteSign({ name }) {
   );
 }
 
-function StopCard({ detail, seq, reachText, setReachText, reachValid, fmt }) {
+function StopCard({ detail, seq, reachText, setReachText, reachValid, fmt, onClear }) {
   const { t } = useI18n();
   const reach = detail?.reach?.[0];
   return (
     <div className="card card--stop">
-      <span className="note">{t("route.stop.heading", { seq })}</span>
+      <div className="card-head">
+        <span className="note">{t("route.stop.heading", { seq })}</span>
+        <ClearButton onClear={onClear} />
+      </div>
       <h2 className="stop-name">{detail ? detail.name : "…"}</h2>
       {detail && (
         <dl className="figures">
@@ -693,7 +702,18 @@ function StopCard({ detail, seq, reachText, setReachText, reachValid, fmt }) {
  * of them and where they came from. Riders between two picked stops count on
  * both sides.
  */
-function CombinedStopCard({ route, dayType, basis, seqs, stops, fmt }) {
+/** × that clears the picked stops (and the lines they draw on the map); Esc does the same. */
+function ClearButton({ onClear }) {
+  const { t } = useI18n();
+  if (!onClear) return null;
+  return (
+    <button type="button" className="card-close" onClick={onClear} aria-label={t("route.stop.clear")} title={t("route.stop.clear")}>
+      ×
+    </button>
+  );
+}
+
+function CombinedStopCard({ route, dayType, basis, seqs, stops, fmt, onClear }) {
   const { t } = useI18n();
   const key = `${route}|${dayType}|${basisKey(basis)}|${seqs.join(",")}`;
   const [state, setState] = useState({ key: null, data: null, error: "" });
@@ -728,7 +748,10 @@ function CombinedStopCard({ route, dayType, basis, seqs, stops, fmt }) {
   const contiguous = last - first + 1 === seqs.length;
   return (
     <div className="card card--stop">
-      <span className="note">{t("route.pick.heading", { value: seqs.length })}</span>
+      <div className="card-head">
+        <span className="note">{t("route.pick.heading", { value: seqs.length })}</span>
+        <ClearButton onClear={onClear} />
+      </div>
       <h2 className="stop-name">
         {contiguous
           ? t("route.pick.range", { from: `${first} ${name(first)}`, to: `${last} ${name(last)}` })

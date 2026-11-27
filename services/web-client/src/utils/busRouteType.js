@@ -10,6 +10,11 @@
  *   N prefix                      night (심야)       #FFC600 on #3D5BAB
  *   Han River bus                 ferry (한강버스)   #0080FF
  *
+ *   서울01, 서울03, 서울06 (출근/퇴근 runs too)  express colour (red)
+ *   other 서울NN (서울02, 04, 05, 07-10)      trunk
+ *   새벽A148 and other 새벽A routes            trunk
+ *   district + A + number (동대문A01, 동작A01) trunk (autonomous buses)
+ *
  * An A prefix (autonomous bus) is ignored and the rest of the number decides,
  * except A21, which runs as a trunk route. A suffix after the digits
  * ("9403-1") does not change the type. Anything else is "other".
@@ -29,6 +34,8 @@ export const BUS_ROUTE_STYLES = {
 };
 
 const EXCEPTIONS = { A21: "trunk" };
+/** 서울NN routes in the red (express) colour; the other 서울NN run as trunk routes. */
+const SEOUL_RED = new Set(["01", "03", "06"]);
 
 export function busRouteType(name, mode = "bus") {
   const text = String(name ?? "").trim().toUpperCase();
@@ -36,6 +43,9 @@ export function busRouteType(name, mode = "bus") {
   if (!text) return "other";
   if (EXCEPTIONS[text]) return EXCEPTIONS[text];
   if (text.startsWith("N")) return "night";
+  const seoul = text.match(/^서울(\d{2})/);
+  if (seoul) return SEOUL_RED.has(seoul[1]) ? "express" : "trunk";
+  if (/^[가-힣]+A\d/.test(text)) return "trunk";
   const rest = text.startsWith("A") ? text.slice(1) : text;
   if (/^[가-힣]+\d/.test(rest)) return "village";
   const digits = (rest.match(/^\d+/) || [""])[0];

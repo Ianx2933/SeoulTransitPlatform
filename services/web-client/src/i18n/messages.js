@@ -65,6 +65,7 @@ export const messages = {
       failed: "불러오지 못했습니다",
       enterRoute: "버스 노선 번호를 입력하세요. 예: 302, 452",
       showBoundaries: "행정동 경계 보이기",
+      showStops: "정류소 점 보이기",
       panels: {
         hide: "접기",
         hideLeft: "왼쪽 창 접기",
@@ -205,6 +206,7 @@ export const messages = {
       },
       stop: {
         heading: "{seq}번 정류소",
+        clear: "선택 지우기",
         alight: "내린 사람",
         onBoard: "떠날 때 타고 있는 사람",
         board: "탄 사람",
@@ -349,6 +351,7 @@ export const messages = {
       failed: "Could not load",
       enterRoute: "Enter a bus route number, for example 302 or 452.",
       showBoundaries: "Show district boundaries",
+      showStops: "Show stop markers",
       panels: {
         hide: "Hide",
         hideLeft: "Hide the left panel",
@@ -489,6 +492,7 @@ export const messages = {
       },
       stop: {
         heading: "Stop {seq}",
+        clear: "Clear selection",
         alight: "Got off",
         onBoard: "On board leaving",
         board: "Got on",

@@ -73,6 +73,8 @@ export default function RouteAnalysisView({ busLines }) {
   const [roadPath, setRoadPath] = useState(null);
   const [dongOn, setDongOn] = useState(false);
   const [boundaryOn, setBoundaryOn] = useState(false);
+  // Stop markers can be hidden: zoomed out they cover the route line.
+  const [stopsOn, setStopsOn] = useState(true);
   const boundaries = useDistrictBoundaries(boundaryOn);
   const [dongData, setDongData] = useState(null);
   const [dongState, setDongState] = useState("idle");
@@ -184,6 +186,17 @@ export default function RouteAnalysisView({ busLines }) {
   }, [routeName]);
 
   const allSeqs = useMemo(() => (routeData?.stops || []).map((s) => s.seq).sort((a, b) => a - b), [routeData]);
+  // Esc clears the picked stops and the reach line they draw.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      setPick(NO_PICK);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const pickStop = useCallback((seq, mods) => setPick((p) => nextPick(p, seq, mods, allSeqs)), [allSeqs]);
   const pickedSet = useMemo(() => new Set(pick.seqs), [pick]);
   const turnaroundFromBis = useMemo(() => {
@@ -426,7 +439,7 @@ export default function RouteAnalysisView({ busLines }) {
           {/* Stops in their own pane above every line: a line drawn later (the reach of a
               stop, a section) would otherwise cover them and take their clicks. */}
           <Pane name="route-stops" style={{ zIndex: 450 }}>
-          {groupByPlace(placed).map((group) => {
+          {stopsOn && groupByPlace(placed).map((group) => {
             const p = group[0];
             const isDown = (q) => effectiveTurnaround != null && q.seq > effectiveTurnaround;
             const picked = group.some((q) => pickedSet.has(q.seq)) && pick.seqs.length > 1;
@@ -455,8 +468,8 @@ export default function RouteAnalysisView({ busLines }) {
               <CircleMarker
                 key={group.map((q) => q.seq).join("-")}
                 center={[p.lat, p.lng]}
-                radius={picked ? 7 : 6}
-                pathOptions={{ color: COLORS.ink, weight: 2, fillColor: picked ? COLORS.selected : "#ffffff", fillOpacity: 1 }}
+                radius={picked ? 7 : 5}
+                pathOptions={{ color: COLORS.ink, weight: 1.5, fillColor: picked ? COLORS.selected : "#ffffff", fillOpacity: 1 }}
               >
                 <Tooltip direction="top" offset={[0, -6]}>
                   {group.map((q) => `${q.seq} ${q.name}`).join(" · ")}
@@ -562,6 +575,10 @@ export default function RouteAnalysisView({ busLines }) {
           <label className="check side-card">
             <input type="checkbox" checked={boundaryOn} onChange={(e) => setBoundaryOn(e.target.checked)} />
             {t("route.showBoundaries")}
+          </label>
+          <label className="check side-card">
+            <input type="checkbox" checked={stopsOn} onChange={(e) => setStopsOn(e.target.checked)} />
+            {t("route.showStops")}
           </label>
           <DongCard
             on={dongOn}

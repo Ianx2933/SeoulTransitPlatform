@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 /** Names from the 2026-11-24 comparison of the boarding data with the representative OD. */
 class RouteNameResolverTest {
 
-    private static final List<String> OD = List.of(
+    private static final List<String> OD = List.of("N75", "N16", "새벽A148", 
             "110A고려대", "110B국민대", "143", "5522A난곡", "5522B호암", "8333",
             "8773출근", "8773퇴근", "서대문02대", "서대문02소", "한강버스01");
 
@@ -57,5 +57,12 @@ class RouteNameResolverTest {
     @Test
     void anUnknownNameIsReturnedForTheCallersNotFound() {
         assertThat(RouteNameResolver.resolve("서울01", OD)).isEqualTo("서울01");
+    }
+
+    @Test
+    void latinLettersMatchInEitherCase() {
+        assertThat(RouteNameResolver.resolve("n75", OD)).isEqualTo("N75");
+        assertThat(RouteNameResolver.resolve("새벽a148", OD)).isEqualTo("새벽A148");
+        assertThat(RouteNameResolver.resolve("5522a", OD)).isEqualTo("5522A난곡");
     }
 }

@@ -146,6 +146,12 @@
 .card { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--rule); }
 .card > summary { cursor: pointer; font-size: 14px; font-weight: 600; min-height: 32px; }
 .card--stop { border-top: 0; padding: 0 0 0 14px; border-left: 4px solid var(--selected); }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-close {
+  border: 1px solid var(--line, #d0d5dc); background: #fff; color: inherit; border-radius: 999px;
+  width: 28px; height: 28px; line-height: 24px; font-size: 18px; padding: 0; cursor: pointer; flex: none;
+}
+.card-close:hover { background: #f2f4f7; }
 .stop-name { margin: 0; font-size: 18px; font-weight: 700; }
 .figures, .rows { margin: 0; display: grid; }
 .figures > div, .rows > div {

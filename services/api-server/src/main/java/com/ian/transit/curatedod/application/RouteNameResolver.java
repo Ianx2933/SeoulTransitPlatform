@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * A name typed or linked in the boarding form is matched to the OD name when
  * that gives exactly one route: an exact name first, then the one OD name that
  * is the input followed by Hangul, then the input without a trailing Latin
- * letter. When the input matches several OD names the 404 lists them. The
+ * letter. Latin letters match in either case (n75 is N75). When the input matches several OD names the 404 lists them. The
  * route analysis page offers the OD names themselves (GET /api/curated-od/routes),
  * so most visitors never need this.
  */
@@ -70,9 +70,22 @@ public class RouteNameResolver {
         if (name.isEmpty() || names.contains(name)) {
             return name;
         }
+        String sameIgnoringCase = null;
+        for (String n : names) {
+            if (n.equalsIgnoreCase(name)) {
+                if (sameIgnoringCase != null) {
+                    sameIgnoringCase = null;
+                    break;
+                }
+                sameIgnoringCase = n;
+            }
+        }
+        if (sameIgnoringCase != null) {
+            return sameIgnoringCase;
+        }
         List<String> withSuffix = new ArrayList<>();
         for (String n : names) {
-            if (n.length() > name.length() && n.startsWith(name) && isHangul(n.charAt(name.length()))) {
+            if (n.length() > name.length() && n.regionMatches(true, 0, name, 0, name.length()) && isHangul(n.charAt(name.length()))) {
                 withSuffix.add(n);
             }
         }
