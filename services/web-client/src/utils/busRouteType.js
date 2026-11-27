@@ -3,7 +3,7 @@
  * bus colour system. Kept free of React so it can be unit-tested.
  *
  *   3 digits                      trunk (간선)       #0068B7
- *   4 digits starting 0-7         branch (지선)      #53B332  (0017, 0411)
+ *   4 digits starting 0-8         branch (지선)      #53B332  (0017, 0411, 8331 맞춤버스)
  *   4 digits starting 9           express (광역)     #E60012
  *   2 digits                      circular (순환)    #F2B70A
  *   district name + number        village (마을)     #53B332
@@ -33,7 +33,8 @@ export const BUS_ROUTE_STYLES = {
   other: { bg: "#5B6470", fg: "#FFFFFF" }
 };
 
-const EXCEPTIONS = { A21: "trunk" };
+/** Routes whose colour does not follow the number rule (8xxx 맞춤버스 that run as another type go here). */
+const EXCEPTIONS = { A21: "trunk", 8146: "trunk" };
 /** 서울NN routes in the red (express) colour; the other 서울NN run as trunk routes. */
 const SEOUL_RED = new Set(["01", "03", "06"]);
 
@@ -52,7 +53,7 @@ export function busRouteType(name, mode = "bus") {
   if (digits.length === 3) return "trunk";
   if (digits.length === 2) return "circular";
   if (digits.length === 4) {
-    if (/^[0-7]/.test(digits)) return "branch";
+    if (/^[0-8]/.test(digits)) return "branch";
     if (digits.startsWith("9")) return "express";
   }
   return "other";

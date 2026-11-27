@@ -32,7 +32,8 @@ describe("busRouteType", () => {
     ["A01", "circular"],
     ["A741", "trunk"],
     ["한강버스", "ferry"],
-    ["8146", "other"],
+    ["8146", "trunk"],
+    ["8331", "branch"],
     ["", "other"]
   ])("%s is %s", (name, type) => {
     expect(busRouteType(name)).toBe(type);
