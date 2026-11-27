@@ -9,7 +9,7 @@ import { shade, shadeValues, topRows } from "../utils/dongFlows.js";
 import { busRouteStyle } from "../utils/busRouteType.js";
 import {
   boundsOf,
-  pathBetween,
+  roadBetween,
   pathStopPoints,
   placeStops,
   seqOfArs,
@@ -280,10 +280,20 @@ export default function RouteAnalysisView({ busLines }) {
   );
   const effectiveTurnaround = turnaroundFromBis ?? turnaround;
   const lines = useMemo(() => splitAtTurnaround(placed, effectiveTurnaround), [placed, effectiveTurnaround]);
-  const reachPath = useMemo(() => pathBetween(placed, stopSeq, reachSeq), [placed, stopSeq, reachSeq]);
+  // Reach and segment lines follow the road the route takes (each stored run of a
+  // route kept as several), not straight lines between stops.
+  const roadPaths = useMemo(() => {
+    if (!hasRoad || showPast) return [];
+    return variantPaths.length > 0 ? variantPaths.map((v) => v.path) : [roadPath.path];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRoad, showPast, roadPath]);
+  const reachPath = useMemo(
+    () => roadBetween(placed, roadPaths, stopSeq, reachSeq),
+    [placed, roadPaths, stopSeq, reachSeq]
+  );
   const segmentPath = useMemo(
-    () => (segment ? pathBetween(placed, segment[0], segment[1]) : []),
-    [placed, segment]
+    () => (segment ? roadBetween(placed, roadPaths, segment[0], segment[1]) : []),
+    [placed, roadPaths, segment]
   );
   const bounds = useMemo(() => {
     if (showPast) return boundsOf(pastLines.flatMap((s) => s.path.map(([lat, lng]) => ({ lat, lng }))));

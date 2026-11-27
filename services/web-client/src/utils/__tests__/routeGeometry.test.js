@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { boundsOf, pathBetween, placeStops, splitAtTurnaround } from "../routeGeometry.js";
+import { alignStopsToPath, boundsOf, pathBetween, placeStops, roadBetween, splitAtTurnaround } from "../routeGeometry.js";
 
 const stops = [
   { seq: 1, ars: "01001", name: "기점" },
@@ -27,6 +27,20 @@ describe("placeStops", () => {
 
   test("ignores points without coordinates", () => {
     expect(placeStops(stops, [{ nodeId: "1001", lat: null, lng: 1 }])).toEqual([]);
+  });
+
+  test("an ARS shared with a far stop of another name is not taken", () => {
+    const route = [
+      { seq: 1, ars: "07830", name: "판교역" },
+      { seq: 2, ars: "07832", name: "판교, 해링턴" }
+    ];
+    const pts = [
+      { nodeId: "07830", nodeName: "판교역", lat: 37.395, lng: 127.111 },
+      { nodeId: "07832", nodeName: "중랑구청", lat: 37.606, lng: 127.093 }
+    ];
+    expect(placeStops(route, pts).map((p) => p.seq)).toEqual([1]);
+    const withOwn = [{ nodeId: "07832", nodeName: "판교,해링턴", lat: 37.39, lng: 127.1 }, ...pts];
+    expect(placeStops(route, withOwn)[1]).toMatchObject({ lat: 37.39 });
   });
 });
 
@@ -79,25 +93,62 @@ describe("seqOfArs", () => {
 import { pathStopPoints } from "../routeGeometry.js";
 
 describe("pathStopPoints", () => {
-  test("stored route stops place what the demand layer lacks; demand points win", () => {
+  test("stored route stops place what the demand layer lacks, and win over it", () => {
     const roadPath = {
       stops: [
         { ars: "90001", name: "마곡 선착장", lat: 37.57, lng: 126.83 },
-        { ars: "01001", name: "stored", lat: 1, lng: 1 }
+        { ars: "01001", name: "시청", lat: 37.565, lng: 126.977 }
       ]
     };
-    const demand = [{ nodeId: "01001", nodeName: "demand", lat: 37.5, lng: 127.0 }];
+    const demand = [{ nodeId: "01001", nodeName: "시청", lat: 37.5, lng: 127.0 }];
     const placed = placeStops(
       [
         { seq: 1, ars: "90001", name: "마곡 선착장" },
-        { seq: 2, ars: "01001", name: "x" }
+        { seq: 2, ars: "01001", name: "시청" }
       ],
-      [...demand, ...pathStopPoints(roadPath)]
+      [...pathStopPoints(roadPath), ...demand]
     );
     expect(placed.map((p) => [p.ars, p.lat])).toEqual([
       ["90001", 37.57],
-      ["01001", 37.5]
+      ["01001", 37.565]
     ]);
-    expect(pathStopPoints(null)).toEqual([]);
+  });
+});
+
+describe("reach and segment lines along the road", () => {
+  // Out along lat 37.500 with a bend to 37.502 between stops 2 and 3, back the same street.
+  const path = [
+    [37.5, 127.0], [37.5, 127.001], [37.502, 127.0015], [37.5, 127.002], [37.5, 127.003],
+    [37.5, 127.002], [37.5, 127.001], [37.5, 127.0]
+  ];
+  const placed = [
+    { seq: 1, lat: 37.5, lng: 127.0 },
+    { seq: 2, lat: 37.5, lng: 127.001 },
+    { seq: 3, lat: 37.5, lng: 127.002 },
+    { seq: 4, lat: 37.5, lng: 127.003 },
+    { seq: 5, lat: 37.5, lng: 127.001 }
+  ];
+
+  test("stops keep their order along the path, the way back included", () => {
+    const align = alignStopsToPath(placed, path);
+    expect([...align.entries()]).toEqual([[5, 6], [4, 4], [3, 3], [2, 1], [1, 0]]);
+  });
+
+  test("the line between two stops takes the road's bend", () => {
+    expect(roadBetween(placed, [path], 2, 3)).toEqual([
+      [37.5, 127.001], [37.5, 127.001], [37.502, 127.0015], [37.5, 127.002], [37.5, 127.002]
+    ]);
+  });
+
+  test("of several runs, the one the stops lie on", () => {
+    const other = [[37.6, 127.1], [37.601, 127.1]];
+    expect(roadBetween(placed, [other, path], 4, 5)).toEqual([
+      [37.5, 127.003], [37.5, 127.003], [37.5, 127.002], [37.5, 127.001], [37.5, 127.001]
+    ]);
+  });
+
+  test("straight lines when there is no path or it does not fit", () => {
+    expect(roadBetween(placed, [], 2, 3)).toEqual([[37.5, 127.001], [37.5, 127.002]]);
+    expect(alignStopsToPath(placed, [[37.6, 127.1], [37.61, 127.1]])).toBeNull();
   });
 });
